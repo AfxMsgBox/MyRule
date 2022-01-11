@@ -3,7 +3,9 @@ payload:
   - '+.roonlabs.+'
   - '+.ip138.com'
   - '+.googleapis.cn'
-
+  - '+.openwrt.org'
+  - '+.jsdelivr.net'
+  
 #domain
 #  - '.blogger.com'
 #  - '*.*.microsoft.com'
