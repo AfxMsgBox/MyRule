@@ -4,6 +4,7 @@ payload:
   - '+.ip138.com'
   - '+.googleapis.cn'
 
+#domain
 #  - '.blogger.com'
 #  - '*.*.microsoft.com'
 #  - 'books.itunes.apple.com'
