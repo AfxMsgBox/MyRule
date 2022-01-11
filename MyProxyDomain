@@ -1,7 +1,9 @@
 payload:
   - 'clerksystems.com' #D&D 8C
   - '+.roonlabs.com'
-  
+  - '+.ip138.com'
+
+
 #  - '.blogger.com'
 #  - '*.*.microsoft.com'
 #  - 'books.itunes.apple.com'
