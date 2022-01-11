@@ -2,7 +2,7 @@ payload:
   - 'clerksystems.com' #D&D 8C
   - '+.roonlabs.com'
   - '+.ip138.com'
-
+  - '+.googleapis.cn'
 
 #  - '.blogger.com'
 #  - '*.*.microsoft.com'
