@@ -5,6 +5,7 @@ payload:
   - '+.googleapis.cn'
   - '+.openwrt.org'
   - '+.jsdelivr.net'
+  - '+.cloudso.club'
   
 #domain
 #  - '.blogger.com'
