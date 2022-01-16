@@ -1,6 +1,7 @@
 payload:
   - '+.clerksystems.com' #D&D 8C
   - '+.roonlabs.com'
+  - '*.roonlabs.net'
   - '+.ip138.com'
   - '+.googleapis.cn'
   - '+.openwrt.org'
