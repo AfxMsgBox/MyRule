@@ -7,9 +7,6 @@ payload:
   - '+.openwrt.org'
   - '+.jsdelivr.net'
   - '+.cloudso.club'
-  - '+.xbox.com'
-  - '+.xboxlive.com'
-  - '+.live.com'
   
 #domain
 #  - '.blogger.com'
