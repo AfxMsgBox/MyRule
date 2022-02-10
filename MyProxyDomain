@@ -7,7 +7,7 @@ payload:
   - '+.openwrt.org'
   - '+.jsdelivr.net'
   - '+.cloudso.club'
-  
+  - DOMAIN-KEYWORD,google
 #domain
 #  - '.blogger.com'
 #  - '*.*.microsoft.com'
