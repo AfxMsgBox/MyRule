@@ -1,14 +1,14 @@
 payload:
-  - '*.clerksystems.com' #D&D 8C
-  - '*.roonlabs.com'
-  - '*.roonlabs.net'
-  - '*.ip138.com'
-  - '*.googleapis.cn'
-  - '*.openwrt.org'
-  - '*.jsdelivr.net'
-  - '*.cloudso.club'
-  - '*.zyxel.com'
-#  - '*.tidal.com'
+  #D&D 8C
+  - DOMAIN-SUFFIX,clerksystems.com 
+  - DOMAIN-SUFFIX,roonlabs.com
+  - DOMAIN-SUFFIX,roonlabs.net
+  - DOMAIN-SUFFIX,ip138.com
+  - DOMAIN-SUFFIX,openwrt.org
+  - DOMAIN-SUFFIX,jsdelivr.net
+  - DOMAIN-SUFFIX,cloudso.club
+  - DOMAIN-SUFFIX,zyxel.com
+#  - DOMAIN-SUFFIX,tidal.com
   - DOMAIN-KEYWORD,google
 #domain
 #  - '.blogger.com'
