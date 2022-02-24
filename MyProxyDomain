@@ -8,6 +8,7 @@ payload:
   - '+.jsdelivr.net'
   - '+.cloudso.club'
   - '+.zyxel.com'
+  - '+.myzyxel.com'
 #  - '+.tidal.com'
   - DOMAIN-KEYWORD,google'
 #domain
