@@ -1,6 +1,8 @@
 payload:
   #adblock里禁止了，导致无法正常访问字节系产品
   - '+.snssdk.com'
+  - '+.taobao.com'
+  - '+.qq.com'
 #domain
 #  - '.blogger.com'
 #  - '*.*.microsoft.com'
