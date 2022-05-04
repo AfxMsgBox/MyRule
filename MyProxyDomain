@@ -10,7 +10,6 @@ payload:
   - '+.zyxel.com'
   - '+.myzyxel.com'
 #  - '+.tidal.com'
-  - DOMAIN-KEYWORD,google'
 #domain
 #  - '.blogger.com'
 #  - '*.*.microsoft.com'
