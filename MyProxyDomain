@@ -8,6 +8,7 @@ payload:
   - '+.jsdelivr.net'
   - '+.cloudso.club'
   - '+.zyxel.com'
+  - '+.mobile01.com'
   - '+.myzyxel.com'
 #  - '+.tidal.com'
 #domain
