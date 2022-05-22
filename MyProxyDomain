@@ -10,6 +10,7 @@ payload:
   - '+.zyxel.com'
   - '+.mobile01.com'
   - '+.myzyxel.com'
+  - '+.mikrotik.com'
 #  - '+.tidal.com'
 #domain
 #  - '.blogger.com'
