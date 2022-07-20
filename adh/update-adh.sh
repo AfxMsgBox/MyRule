@@ -39,7 +39,7 @@ curl https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/adh/adh_add.conf -o
 
     filesize=`ls -l ./gfwlist.txt.tmp | awk '{print $5}'`
     if [ $filesize -gt 40960 ]; then
-      rm "$gfwlist_txt"
+      if [ -f "$gfwlist_txt" ]; then rm "$gfwlist_txt"; fi
       mv ./gfwlist.txt.tmp "$gfwlist_txt"
     else
       rm ./gfwlist.txt.tmp
@@ -47,13 +47,12 @@ curl https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/adh/adh_add.conf -o
 
     filesize=`ls -l ./adh_add.conf.tmp | awk '{print $5}'`
     if [ $filesize -gt 200 ]; then
-      rm "$adh_add"
+      if [ -f "$adh_add" ]; then rm "$adh_add"; fi
       mv ./adh_add.conf.tmp "$adh_add"
     else
       rm ./adh_ad.conf.tmp
     fi
-
-
+    
     if [ -f "$local_dns" ]; then
       cat "$local_dns" >> "$adh_conf"
     else
