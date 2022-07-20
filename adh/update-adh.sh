@@ -23,7 +23,7 @@ s@^\d+\.\d+\.\d+\.\d+(?::\d+)?$@@;
 s@^\s*+$@@'
 } | sort | uniq -i > ./gfwlist.txt.tmp
 
-curl https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/adh_add.conf -o ./adh_add.conf.tmp
+curl https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/adh/adh_add.conf -o ./adh_add.conf.tmp
 
 # generated file type
     echo "# Generated at $(date '+%F %T')" > ./adguardhome.conf
