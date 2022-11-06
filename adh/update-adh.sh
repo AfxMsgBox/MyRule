@@ -21,38 +21,38 @@ s@^\*?\.|^.*\.\*?$@@;
 s@(?=[^0-9a-zA-Z.-]).*+$@@;
 s@^\d+\.\d+\.\d+\.\d+(?::\d+)?$@@;
 s@^\s*+$@@'
-} | sort | uniq -i > ./gfwlist.txt.tmp
+} | sort | uniq -i > /root/adguardhome/gfwlist.txt.tmp
 
-curl https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/adh/adh_add.conf -o ./adh_add.conf.tmp
+curl https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/adh/adh_add.conf -o /root/adguardhome/adh_add.conf.tmp
 
 # generated file type
-    echo "# Generated at $(date '+%F %T')" > ./adguardhome.conf
+    echo "# Generated at $(date '+%F %T')" > /root/adguardhome/adguardhome.conf
 
 #    echo "202.96.134.133" >> ./adguardhome.conf
 #    echo "202.96.128.166" >> ./adguardhome.conf
 
 
-    local_dns="./local.dns.conf"
-    adh_conf="./adguardhome.conf"
-    adh_add="./adh_add.conf"
-    gfwlist_txt="./gfwlist.txt"
+    local_dns="/root/adguardhome/local.dns.conf"
+    adh_conf="/root/adguardhome/adguardhome.conf"
+    adh_add="/root/adguardhome/adh_add.conf"
+    gfwlist_txt="/root/adguardhome/gfwlist.txt"
 
-    filesize=`ls -l ./gfwlist.txt.tmp | awk '{print $5}'`
+    filesize=`ls -l /root/adguardhome/gfwlist.txt.tmp | awk '{print $5}'`
     if [ $filesize -gt 40960 ]; then
       if [ -f "$gfwlist_txt" ]; then rm "$gfwlist_txt"; fi
-      mv ./gfwlist.txt.tmp "$gfwlist_txt"
+      mv /root/adguardhome/gfwlist.txt.tmp "$gfwlist_txt"
     else
-      rm ./gfwlist.txt.tmp
+      rm /root/adguardhome/gfwlist.txt.tmp
     fi
 
-    filesize=`ls -l ./adh_add.conf.tmp | awk '{print $5}'`
+    filesize=`ls -l /root/adguardhome/adh_add.conf.tmp | awk '{print $5}'`
     if [ $filesize -gt 200 ]; then
       if [ -f "$adh_add" ]; then rm "$adh_add"; fi
-      mv ./adh_add.conf.tmp "$adh_add"
+      mv /root/adguardhome/adh_add.conf.tmp "$adh_add"
     else
-      rm ./adh_ad.conf.tmp
+      rm /root/adguardhome/adh_ad.conf.tmp
     fi
-    
+
     if [ -f "$local_dns" ]; then
       cat "$local_dns" >> "$adh_conf"
     else
