@@ -50,7 +50,7 @@ echo "# Generated at $(date '+%F %T')" > "$adh_dns"
 if [ -f "$local_dns" ]; then
   cat "$local_dns" >> "$adh_dns"
 else
-  echo "192.168.1.1" >> "$adh_dns"
+  echo "114.114.114.114" >> "$adh_dns"
 fi
 
 if [ -f "$custom_dns" ]; then
