@@ -1,5 +1,10 @@
 #!/bin/bash
 
+adh_dns="/root/adguardhome/dns.conf"
+local_dns="/root/adguardhome/local.dns.conf"
+custom_dns="/root/adguardhome/custom.dns.conf"
+gfwlist_dns="/root/adguardhome/gfwlist.dns.conf"
+
 # check dependency
 command -v curl &>/dev/null || { echo "curl is not installed in this system" 1>&2; exit 1; }
 command -v perl &>/dev/null || { echo "perl is not installed in this system" 1>&2; exit 1; }
@@ -21,42 +26,35 @@ s@^\*?\.|^.*\.\*?$@@;
 s@(?=[^0-9a-zA-Z.-]).*+$@@;
 s@^\d+\.\d+\.\d+\.\d+(?::\d+)?$@@;
 s@^\s*+$@@'
-} | sort | uniq -i > /root/adguardhome/gfwlist.txt.tmp
+} | sort | uniq -i > $gfwlist_dns".tmp"
 
-curl https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/adh/custom.dns.conf -o /root/adguardhome/custom.dns.conf.tmp
+curl https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/adh/custom.dns.conf -o $custom_dns".tmp"
 
-# generated file type
-    echo "# Generated at $(date '+%F %T')" > /root/adguardhome/adguardhome.conf
 
-    adh_dns="/root/adguardhome/dns.conf"
-    local_dns="/root/adguardhome/local.dns.conf"
-    custom_dns="/root/adguardhome/custom.dns.conf"
-    gfwlist_txt="/root/adguardhome/gfwlist.txt"
+filesize=`ls -l $gfwlist_dns".tmp" | awk '{print $5}'`
+if [ $filesize -gt 40960 ]; then
+  mv -f $gfwlist_dns".tmp" "$gfwlist_dns"
+else
+  rm $gfwlist_dns".tmp"
+fi
 
-    filesize=`ls -l /root/adguardhome/gfwlist.txt.tmp | awk '{print $5}'`
-    if [ $filesize -gt 40960 ]; then
-      if [ -f "$gfwlist_txt" ]; then rm "$gfwlist_txt"; fi
-      mv /root/adguardhome/gfwlist.txt.tmp "$gfwlist_txt"
-    else
-      rm /root/adguardhome/gfwlist.txt.tmp
-    fi
+filesize=`ls -l $custom_dns".tmp" | awk '{print $5}'`
+if [ $filesize -gt 200 ]; then
+  mv -f $custom_dns".tmp" "$custom_dns"
+else
+  rm $custom_dns".tmp"
+fi
 
-    filesize=`ls -l /root/adguardhome/custom.dns.conf.tmp | awk '{print $5}'`
-    if [ $filesize -gt 200 ]; then
-      if [ -f "$custom_dns" ]; then rm "$custom_dns"; fi
-      mv /root/adguardhome/custom.dns.conf.tmp "$custom_dns"
-    else
-      rm /root/adguardhome/custom.dns.conf.tmp
-    fi
+echo "# Generated at $(date '+%F %T')" > "$adh_dns"
 
-    if [ -f "$local_dns" ]; then
-      cat "$local_dns" >> "$adh_dns"
-    else
-      echo "192.168.1.1" >> "$adh_dns"
-    fi
+if [ -f "$local_dns" ]; then
+  cat "$local_dns" >> "$adh_dns"
+else
+  echo "192.168.1.1" >> "$adh_dns"
+fi
 
-    if [ -f "$custom_dns" ]; then
-      cat "$custom_dns" >> "$adh_dns"
-    fi
+if [ -f "$custom_dns" ]; then
+  cat "$custom_dns" >> "$adh_dns"
+fi
 
-    perl -pe "s@^.*+\$@[/$&/]127.0.0.1:253@" "$gfwlist_txt" >> "$adh_dns"
+perl -pe "s@^.*+\$@[/$&/]127.0.0.1:253@" "$gfwlist_dns" >> "$adh_dns"
