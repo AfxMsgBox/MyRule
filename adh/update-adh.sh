@@ -60,5 +60,3 @@ curl https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/adh/custom.dns.conf
     fi
 
     perl -pe "s@^.*+\$@[/$&/]127.0.0.1:253@" "$gfwlist_txt" >> "$adh_dns"
-
-    /etc/init.d/adguardhome restart
