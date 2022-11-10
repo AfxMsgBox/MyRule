@@ -23,18 +23,14 @@ s@^\d+\.\d+\.\d+\.\d+(?::\d+)?$@@;
 s@^\s*+$@@'
 } | sort | uniq -i > /root/adguardhome/gfwlist.txt.tmp
 
-curl https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/adh/adh_add.conf -o /root/adguardhome/adh_add.conf.tmp
+curl https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/adh/custom.dns.conf -o /root/adguardhome/custom.dns.conf.tmp
 
 # generated file type
     echo "# Generated at $(date '+%F %T')" > /root/adguardhome/adguardhome.conf
 
-#    echo "202.96.134.133" >> ./adguardhome.conf
-#    echo "202.96.128.166" >> ./adguardhome.conf
-
-
+    adh_dns="/root/adguardhome/dns.conf"
     local_dns="/root/adguardhome/local.dns.conf"
-    adh_conf="/root/adguardhome/adguardhome.conf"
-    adh_add="/root/adguardhome/adh_add.conf"
+    custom_dns="/root/adguardhome/custom.dns.conf"
     gfwlist_txt="/root/adguardhome/gfwlist.txt"
 
     filesize=`ls -l /root/adguardhome/gfwlist.txt.tmp | awk '{print $5}'`
@@ -45,24 +41,24 @@ curl https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/adh/adh_add.conf -o
       rm /root/adguardhome/gfwlist.txt.tmp
     fi
 
-    filesize=`ls -l /root/adguardhome/adh_add.conf.tmp | awk '{print $5}'`
+    filesize=`ls -l /root/adguardhome/custom.dns.conf.tmp | awk '{print $5}'`
     if [ $filesize -gt 200 ]; then
-      if [ -f "$adh_add" ]; then rm "$adh_add"; fi
-      mv /root/adguardhome/adh_add.conf.tmp "$adh_add"
+      if [ -f "$custom_dns" ]; then rm "$custom_dns"; fi
+      mv /root/adguardhome/custom.dns.conf.tmp "$custom_dns"
     else
-      rm /root/adguardhome/adh_ad.conf.tmp
+      rm /root/adguardhome/custom.dns.conf.tmp
     fi
 
     if [ -f "$local_dns" ]; then
-      cat "$local_dns" >> "$adh_conf"
+      cat "$local_dns" >> "$adh_dns"
     else
-      echo "192.168.1.1" >> "$adh_conf"
+      echo "192.168.1.1" >> "$adh_dns"
     fi
 
-    if [ -f "$adh_add" ]; then
-      cat "$adh_add" >> "$adh_conf"
+    if [ -f "$custom_dns" ]; then
+      cat "$custom_dns" >> "$adh_dns"
     fi
 
-    perl -pe "s@^.*+\$@[/$&/]127.0.0.1:253@" "$gfwlist_txt" >> "$adh_conf"
+    perl -pe "s@^.*+\$@[/$&/]127.0.0.1:253@" "$gfwlist_txt" >> "$adh_dns"
 
     /etc/init.d/adguardhome restart
