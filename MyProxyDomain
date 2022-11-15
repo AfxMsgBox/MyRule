@@ -6,11 +6,11 @@ payload:
   - '+.ip138.com'
   - '+.openwrt.org'
   - '+.jsdelivr.net'
-  - '+.cloudso.club'
   - '+.zyxel.com'
   - '+.mobile01.com'
   - '+.myzyxel.com'
   - '+.mikrotik.com'
+  - '+.socloud.fun'
 #  - '+.tidal.com'
 #domain
 #  - '.blogger.com'
