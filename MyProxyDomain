@@ -7,10 +7,10 @@ payload:
   - '+.openwrt.org'
   - '+.jsdelivr.net'
   - '+.zyxel.com'
-  - '+.mobile01.com'
   - '+.myzyxel.com'
   - '+.mikrotik.com'
   - '+.socloud.me'
+  - '+.cpubenchmark.net'
 #  - '+.tidal.com'
 #domain
 #  - '.blogger.com'
