@@ -53,8 +53,8 @@ else
   echo "114.114.114.114" >> "$adh_dns"
 fi
 
+perl -pe "s@^.*+\$@[/$&/]127.0.0.1:253@" "$gfwlist_dns" >> "$adh_dns"
+
 if [ -f "$custom_dns" ]; then
   cat "$custom_dns" >> "$adh_dns"
 fi
-
-perl -pe "s@^.*+\$@[/$&/]127.0.0.1:253@" "$gfwlist_dns" >> "$adh_dns"
