@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 if [ -f "/root/adguardhome/dns.conf" ]; then mv /root/adguardhome/dns.conf /root/adguardhome/dns.conf.bak; fi
 
