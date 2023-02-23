@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 adh_dns="/root/adguardhome/dns.conf"
 local_dns="/root/adguardhome/local.dns.conf"
