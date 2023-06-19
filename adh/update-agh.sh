@@ -1,9 +1,11 @@
 #!/bin/sh
 
-adh_dns="/root/adguardhome/dns.conf"
-local_dns="/root/adguardhome/local.dns.conf"
-custom_dns="/root/adguardhome/custom.dns.conf"
-gfwlist_dns="/root/adguardhome/gfwlist.dns.conf"
+#agh_dir=$(cd $(dirname ${BASH_SOURCE[0]}); pwd)"/"
+agh_dir=$(cd $(dirname $0); pwd)"/"
+agh_dns=$agh_dir"dns.conf"
+local_dns=$agh_dir"local.dns.conf"
+custom_dns=$agh_dir"custom.dns.conf"
+gfwlist_dns=$agh_dir"gfwlist.dns.conf"
 
 # check dependency
 command -v curl &>/dev/null || { echo "curl is not installed in this system" 1>&2; exit 1; }
@@ -26,37 +28,35 @@ s@^\*?\.|^.*\.\*?$@@;
 s@(?=[^0-9a-zA-Z.-]).*+$@@;
 s@^\d+\.\d+\.\d+\.\d+(?::\d+)?$@@;
 s@^\s*+$@@'
-} | sort | uniq -i > $gfwlist_dns".tmp"
+} | sort | uniq -i > /tmp/gfwlist_dns.tmp
 
-curl https://ghproxy.com/https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/adh/custom.dns.conf -o $custom_dns".tmp"
+curl https://ghproxy.com/https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/adh/custom.dns.conf -o /tmp/custom_dns.tmp
 
 
-filesize=`ls -l $gfwlist_dns".tmp" | awk '{print $5}'`
+filesize=`ls -l /tmp/gfwlist_dns.tmp | awk '{print $5}'`
 if [ $filesize -gt 40960 ]; then
-  mv -f $gfwlist_dns".tmp" "$gfwlist_dns"
+  mv -f /tmp/gfwlist_dns.tmp "$gfwlist_dns"
 else
-  rm $gfwlist_dns".tmp"
+  rm /tmp/gfwlist_dns.tmp
 fi
 
-filesize=`ls -l $custom_dns".tmp" | awk '{print $5}'`
+filesize=`ls -l /tmp/custom_dns.tmp | awk '{print $5}'`
 if [ $filesize -gt 200 ]; then
-  mv -f $custom_dns".tmp" "$custom_dns"
+  mv -f /tmp/custom_dns.tmp "$custom_dns"
 else
-  rm $custom_dns".tmp"
+  rm /tmp/custom_dns.tmp
 fi
 
-echo "# Generated at $(date '+%F %T')" > "$adh_dns"
+echo "# Generated at $(date '+%F %T')" > "$agh_dns"
 
 if [ -f "$local_dns" ]; then
-  cat "$local_dns" >> "$adh_dns"
+  cat "$local_dns" >> "$agh_dns"
 else
-  echo "114.114.114.114" >> "$adh_dns"
+  echo "114.114.114.114" >> "$agh_dns"
 fi
 
 if [ -f "$custom_dns" ]; then
-  cat "$custom_dns" >> "$adh_dns"
+  cat "$custom_dns" >> "$agh_dns"
 fi
 
-perl -pe "s@^.*+\$@[/$&/]127.0.0.1:253@" "$gfwlist_dns" >> "$adh_dns"
-
-
+perl -pe "s@^.*+\$@[/$&/]127.0.0.1:253@" "$gfwlist_dns" >> "$agh_dns"
