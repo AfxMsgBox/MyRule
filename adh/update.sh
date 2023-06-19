@@ -1,14 +1,19 @@
-#!/bin/sh
+#!/bin/bash
 
-if [ -f "/root/adguardhome/dns.conf" ]; then mv /root/adguardhome/dns.conf /root/adguardhome/dns.conf.bak; fi
+#agh_dir=$(cd $(dirname ${BASH_SOURCE[0]}); pwd)"/"
+agh_dir=$(cd $(dirname $0); pwd)"/"
 
-#echo "127.0.0.1:253" > /root/adguardhome/dns.conf
+cd $agh_dir
+
+#if [ -f $agh_dir"dns.conf" ]; then mv $agh_dir"dns.conf" $agh_dir"dns.conf.bak"; fi
+
+#echo "127.0.0.1:253" > $agh_dir"dns.conf"
 #/etc/init.d/adguardhome restart
 
-if [ -f "/root/adguardhome/update-adh.sh" ]; then mv /root/adguardhome/update-adh.sh /root/adguardhome/update-adh.sh.bak; fi
-curl https://ghproxy.com/https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/adh/update-adh.sh -o /root/adguardhome/update-adh.sh
+if [ -f $agh_dir"update-agh.sh" ]; then mv $agh_dir"update-agh.sh" $agh_dir"update-agh.sh.bak"; fi
+curl https://ghproxy.com/https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/agh/update-agh.sh -o $agh_dir"update-agh.sh"
 
-chmod +x /root/adguardhome/update-adh.sh
-/root/adguardhome/update-adh.sh
+chmod +x $agh_dir"update-agh.sh"
+$agh_dir"update-agh.sh"
 
-/etc/init.d/adguardhome restart
+/etc/init.d/proxy restart
