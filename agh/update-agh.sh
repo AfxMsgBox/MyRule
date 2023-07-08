@@ -30,7 +30,7 @@ s@^\d+\.\d+\.\d+\.\d+(?::\d+)?$@@;
 s@^\s*+$@@'
 } | sort | uniq -i > /tmp/gfwlist_dns.tmp
 
-curl https://ghproxy.com/https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/adh/custom.dns.conf -o /tmp/custom_dns.tmp
+curl https://ghproxy.com/https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/agh/custom.dns.conf -o /tmp/custom_dns.tmp
 
 
 filesize=`ls -l /tmp/gfwlist_dns.tmp | awk '{print $5}'`
