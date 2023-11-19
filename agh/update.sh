@@ -11,7 +11,7 @@ cd $agh_dir
 #/etc/init.d/adguardhome restart
 
 if [ -f $agh_dir"update-agh.sh" ]; then mv $agh_dir"update-agh.sh" $agh_dir"update-agh.sh.bak"; fi
-curl https://ghproxy.com/https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/agh/update-agh.sh -o $agh_dir"update-agh.sh"
+curl --proxy http://127.0.0.1:7890 https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/agh/update-agh.sh -o $agh_dir"update-agh.sh"
 
 chmod +x $agh_dir"update-agh.sh"
 $agh_dir"update-agh.sh"
