@@ -16,7 +16,7 @@ command -v base64 &>/dev/null || { echo "base64 is not installed in this system"
 base64 -d       </dev/null &>/dev/null && base64='base64 -d'
 base64 --decode </dev/null &>/dev/null && base64='base64 --decode'
 [ "$base64" ] || { echo "[ERR] Command not found: 'base64'" 1>&2; exit 1; }
-curl -4sSkL https://ghproxy.com/https://raw.github.com/gfwlist/gfwlist/master/gfwlist.txt | $base64 | { perl -pe '
+curl -4sSkL --proxy http://127.0.0.1:7890 https://raw.github.com/gfwlist/gfwlist/master/gfwlist.txt | $base64 | { perl -pe '
 if (/URL Keywords/i) { $null = <> until $null =~ /^!/ }
 s#^\s*+$|^!.*+$|^@@.*+$|^\[AutoProxy.*+$|^/.*/$##i;
 s@^\|\|?|\|$@@;
@@ -30,7 +30,7 @@ s@^\d+\.\d+\.\d+\.\d+(?::\d+)?$@@;
 s@^\s*+$@@'
 } | sort | uniq -i > /tmp/gfwlist_dns.tmp
 
-curl https://ghproxy.com/https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/agh/custom.dns.conf -o /tmp/custom_dns.tmp
+curl --proxy http://127.0.0.1:7890 https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/agh/custom.dns.conf -o /tmp/custom_dns.tmp
 
 
 filesize=`ls -l /tmp/gfwlist_dns.tmp | awk '{print $5}'`
