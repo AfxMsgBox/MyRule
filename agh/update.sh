@@ -16,4 +16,9 @@ curl --proxy http://127.0.0.1:7890 https://raw.githubusercontent.com/AfxMsgBox/M
 chmod +x $agh_dir"update-agh.sh"
 $agh_dir"update-agh.sh"
 
-/etc/init.d/proxy restart
+if [ -f "/etc/init.d/adguardhome" ]; then
+  /etc/init.d/adguardhome restart
+fi
+if [ -f "/etc/init.d/proxy" ]; then
+  /etc/init.d/proxy restart
+fi
