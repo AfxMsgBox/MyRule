@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 #agh_dir=$(cd $(dirname ${BASH_SOURCE[0]}); pwd)"/"
 agh_dir=$(cd $(dirname $0); pwd)"/"
