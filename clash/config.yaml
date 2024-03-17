@@ -174,7 +174,7 @@ rule-providers:
     interval: 86400
     path: ./ruleset/chatgpt_domain.yaml
     type: http
-    url: "https://ghproxy.com/https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/ChatGPTDomain"
+    url: "https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/ChatGPTDomain"
     
 rules:
  - RULE-SET,chatgpt_domain,chatgptProxy
