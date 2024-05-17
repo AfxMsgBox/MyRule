@@ -1,6 +1,8 @@
 payload:
   - '+.cloudflare.com'
   - '+.openai.com'
+  - '+.openaicom.imgix.net'
+  - '+.chatgpt.com'
   - '+.compute-pipe.com'
   - '+.edgecompute.app'
   - '+.every1dns.net'
