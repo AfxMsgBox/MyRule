@@ -1,5 +1,6 @@
 payload:
 #D&D 8C
+  - '+.docker.com'
   - '+.clerksystems.com'
   - '+.roonlabs.com'
   - '+.roonlabs.net'
