@@ -61,4 +61,4 @@ fi
 
 perl -pe "s@^.*+\$@[/$&/]127.0.0.1:253@" "$gfwlist_dns" >> "$agh_dns"
 
-curl --proxy http://127.0.0.1:7890 https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/tld-not-cn.txt | sed -n "s/^[ \t]*- '+\\(.*\\)'$/[\\/\\1\\/]127.0.0.1:253/p" >> "$agh_dns"
+curl --proxy http://127.0.0.1:7890 https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/tld-not-cn.txt |  sed -n "s/^[ \t]*- '+\.\(.*\)'$/[\/\1\/]127.0.0.1:253/p" >> "$agh_dns"
