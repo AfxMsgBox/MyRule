@@ -18,19 +18,17 @@ download_file() {
     local use_proxy=$3     # 第三个参数（可选）：是否使用代理
 
     curl --connect-timeout 10 ${use_proxy:+--proxy $_PROXY} "$1" -o "$temp_file" > /dev/null 2>&1
-    [ $? -ne 0 ] && echo "Download failed." && return 1
+    [ $? -ne 0 ] && return 1
 
     # 检查文件大小是否大于 32 字节
     local file_size=$(get_file_size $temp_file)
     if [ -z "$file_size" ] || [ "$file_size" -le 32 ]; then
-        echo "Downloaded file is too small or missing."
         rm -f "$temp_file"
         return 1
     fi
 
     # 替换目标文件
     mv "$temp_file" "$2"
-    echo "Download succeeded, file saved to $2."
     return 0
 }
 
