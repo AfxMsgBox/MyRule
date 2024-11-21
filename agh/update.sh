@@ -1,6 +1,6 @@
 #!/bin/sh
 
-URL_SCRIPT="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/domain/agh/update.sh"
+URL_SCRIPT="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/agh/update.sh"
 URL_MYPROXYLIST="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/domain/myproxylist.txt"
 URL_GPT="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/domain/gpt.txt"
 URL_NOTCN="https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/tld-not-cn.txt"
