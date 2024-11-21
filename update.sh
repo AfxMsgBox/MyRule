@@ -28,11 +28,11 @@ URL_SCRIPT="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/update.sh"
 
 if [ "$1" != "--noupdate" ]; then
 	if download_file $URL_SCRIPT $0; then
-		echo_log "update script succeeded, exec new script "$0"."
+		echo_log "update $0 succeeded."
 		exec sh $0 --noupdate
 		exit 0
   	else
-   		echo_log "update script failed."
+   		echo_log "update $0 failed."
 	fi
 fi
 
@@ -40,5 +40,7 @@ _dir=$(cd $(dirname $0); pwd)
 
 sh $_dir"/agh/update.sh"
 sh $_dir"/clash/update.sh"
+
+sleep 2s
 
 /etc/init.d/proxy restart
