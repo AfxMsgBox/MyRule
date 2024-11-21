@@ -1,6 +1,7 @@
 #!/bin/sh
 #----------------------------------------------------
 get_file_size() { [ -f "$1" ] && ls -l "$1" | awk '{print $5}' || echo 0; }
+echo_log() { [ $# -eq 1 ] && set -- "$1" "$1"; echo "$1" && logger "$2"; }
 
 download_file() { 
 	#下载URL 目标文件名  1（可选）：是否使用代理
@@ -27,11 +28,11 @@ URL_SCRIPT="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/update.sh"
 
 if [ "$1" != "--noupdate" ]; then
 	if download_file $URL_SCRIPT $0; then
-		echo "update script succeeded, exec new script "$0"."
+		echo_log "update script succeeded, exec new script "$0"."
 		exec sh $0 --noupdate
 		exit 0
   	else
-   		echo "update script failed."
+   		echo_log "update script failed."
 	fi
 fi
 
