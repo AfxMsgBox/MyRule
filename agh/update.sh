@@ -75,7 +75,7 @@ download_file $URL_NOTCN "$DIR_SCRIPT/download/notcn.txt" 1
 if [ "$(get_file_size "$DIR_SCRIPT/download/notcn.txt")" -gt 32 ]; then
     echo -e "\n# Not China Domian\n" >> "$agh_dns"
     sed -En "s/^[ \t]*- '(\+\.)?([^']+)'$/[\/\2\/]127.0.0.1:253/p" "$DIR_SCRIPT/download/notcn.txt" >> "$agh_dns"
-    sed -i '/\[\/\.bj\/\]/d' "$agh_dns" #删除 [/.bj/]127.0.0.1:253
+    sed -i '/\[\/bj\/\]/d' "$agh_dns" #删除 [/.bj/]127.0.0.1:253
 fi
 
 #----------------------------------------------------
