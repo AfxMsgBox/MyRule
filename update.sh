@@ -27,7 +27,7 @@ URL_SCRIPT="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/update.sh"
 
 if [ "$1" != "--noupdate" ]; then
 	if download_file $URL_SCRIPT $0; then
-		echo "update script successed, exec new script "$0"."
+		echo "update script succeeded, exec new script "$0"."
 		exec sh $0 --noupdate
 		exit 0
   	else
