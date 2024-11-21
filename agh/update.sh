@@ -36,13 +36,15 @@ download_file() {
 #----------------------------------------------------
 if [ "$1" != "--noupdate" ]; then
 	if download_file $URL_SCRIPT $0; then
-		echo "update $0 script succeeded."
+		echo "update $0 succeeded."
 		exec sh $0 --noupdate
 		exit 0
   	else
-   		echo "update script $0 failed."
+   		echo "update $0 failed."
 	fi
 fi
+
+echo "update agh start."
 
 agh_dns=$DIR_SCRIPT"/dns.conf"
 
@@ -57,6 +59,7 @@ else
 fi
 
 #----------------------------------------------------
+echo "download MyProxyList."
 download_file $URL_MYPROXYLIST "$DIR_SCRIPT/download/myproxylist.txt" 1
 if [ "$(get_file_size "$DIR_SCRIPT/download/myproxylist.txt")" -gt 32 ]; then
     echo -e "\n# My Prox List\n" >> "$agh_dns"
@@ -64,6 +67,7 @@ if [ "$(get_file_size "$DIR_SCRIPT/download/myproxylist.txt")" -gt 32 ]; then
 fi
 
 #----------------------------------------------------
+echo "download gpt."
 download_file $URL_GPT "$DIR_SCRIPT/download/gpt.txt" 1
 if [ "$(get_file_size "$DIR_SCRIPT/download/gpt.txt")" -gt 32 ]; then
     echo -e "\n# GPT List\n" >> "$agh_dns"
@@ -71,6 +75,7 @@ if [ "$(get_file_size "$DIR_SCRIPT/download/gpt.txt")" -gt 32 ]; then
 fi
 
 #----------------------------------------------------
+echo "download not-cn."
 download_file $URL_NOTCN "$DIR_SCRIPT/download/notcn.txt" 1
 if [ "$(get_file_size "$DIR_SCRIPT/download/notcn.txt")" -gt 32 ]; then
     echo -e "\n# Not China Domian\n" >> "$agh_dns"
@@ -79,6 +84,7 @@ if [ "$(get_file_size "$DIR_SCRIPT/download/notcn.txt")" -gt 32 ]; then
 fi
 
 #----------------------------------------------------
+echo "download gfwlist."
 download_file $URL_GFWLIST "$DIR_SCRIPT/download/gfwlist.txt" 1
 if [ "$(get_file_size "$DIR_SCRIPT/download/gfwlist.txt")" -gt 32 ]; then
     echo -e "\n# GFW List\n" >> "$agh_dns"
@@ -86,5 +92,5 @@ if [ "$(get_file_size "$DIR_SCRIPT/download/gfwlist.txt")" -gt 32 ]; then
 fi
 
 
-echo "All done."
+echo "update agh done."
 exit 0
