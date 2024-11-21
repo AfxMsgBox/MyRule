@@ -46,8 +46,8 @@ payload:
 
 #B&O
   - '+.bang-olufsen.com'
-  - '+.BeoCloudIoTHubLiveNorthEu1.azure-devices.net'
-  - '+.beocloudpubliciplivewesteu.westeurope.cloudapp.azure.com'
+  - '+.azure-devices.net'
+  - '+.westeurope.cloudapp.azure.com'
 
 #telegram
   - '+.t.me'
