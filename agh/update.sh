@@ -60,21 +60,21 @@ fi
 download_file $URL_MYPROXYLIST "$DIR_SCRIPT/download/myproxylist.txt" 1
 if [ "$(get_file_size "$DIR_SCRIPT/download/myproxylist.txt")" -gt 32 ]; then
     echo -e "\n# My Prox List\n" >> "$agh_dns"
-    sed -n "s/^[ \t]*- '+\\(.*\\)'$/[\\/\\1\\/]127.0.0.1:253/p" "$DIR_SCRIPT/download/myproxylist.txt" >> "$agh_dns"
+    sed -En "s/^[ \t]*- '(\+\.)?([^']+)'$/[\/\2\/]127.0.0.1:253/p" "$DIR_SCRIPT/download/myproxylist.txt" >> "$agh_dns"
 fi
 
 #----------------------------------------------------
 download_file $URL_GPT "$DIR_SCRIPT/download/gpt.txt" 1
 if [ "$(get_file_size "$DIR_SCRIPT/download/gpt.txt")" -gt 32 ]; then
     echo -e "\n# GPT List\n" >> "$agh_dns"
-    sed -n "s/^[ \t]*- '+\\(.*\\)'$/[\\/\\1\\/]127.0.0.1:253/p" "$DIR_SCRIPT/download/gpt.txt" >> "$agh_dns"
+    sed -En "s/^[ \t]*- '(\+\.)?([^']+)'$/[\/\2\/]127.0.0.1:253/p" "$DIR_SCRIPT/download/gpt.txt" >> "$agh_dns"
 fi
 
 #----------------------------------------------------
 download_file $URL_NOTCN "$DIR_SCRIPT/download/notcn.txt" 1
 if [ "$(get_file_size "$DIR_SCRIPT/download/notcn.txt")" -gt 32 ]; then
     echo -e "\n# Not China Domian\n" >> "$agh_dns"
-    sed -n "s/^[ \t]*- '+\\(.*\\)'$/[\\/\\1\\/]127.0.0.1:253/p" "$DIR_SCRIPT/download/notcn.txt" >> "$agh_dns"
+    sed -En "s/^[ \t]*- '(\+\.)?([^']+)'$/[\/\2\/]127.0.0.1:253/p" "$DIR_SCRIPT/download/notcn.txt" >> "$agh_dns"
     sed -i '/\[\/\.bj\/\]/d' "$agh_dns" #删除 [/.bj/]127.0.0.1:253
 fi
 
@@ -82,7 +82,7 @@ fi
 download_file $URL_GFWLIST "$DIR_SCRIPT/download/gfwlist.txt" 1
 if [ "$(get_file_size "$DIR_SCRIPT/download/gfwlist.txt")" -gt 32 ]; then
     echo -e "\n# GFW List\n" >> "$agh_dns"
-    sed -n "s/^[ \t]*- '+\\(.*\\)'$/[\\/\\1\\/]127.0.0.1:253/p" "$DIR_SCRIPT/download/gfwlist.txt" >> "$agh_dns"
+    sed -En "s/^[ \t]*- '(\+\.)?([^']+)'$/[\/\2\/]127.0.0.1:253/p" "$DIR_SCRIPT/download/gfwlist.txt" >> "$agh_dns"
 fi
 
 
