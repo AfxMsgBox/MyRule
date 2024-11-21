@@ -1,6 +1,6 @@
 #!/bin/sh
 
-URL_SCRIPT="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/agh/update.sh"
+URL_SCRIPT="http://192.168.1.2/share.cgi?ssid=a778dfb1ed394ff69cbdbe587a4a212b&openfolder=forcedownload&ep=&_dc=1732022473581&fid=a778dfb1ed394ff69cbdbe587a4a212b"
 URL_MYPROXYLIST="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/domain/myproxylist.txt"
 URL_GPT="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/domain/gpt.txt"
 URL_NOTCN="https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/tld-not-cn.txt"
@@ -36,14 +36,13 @@ download_file() {
 
 
 #----------------------------------------------------
-if [ "$1" = "--update" ]; then
+if [ "$1" != "--noupdate" ]; then
 	if download_file $URL_SCRIPT $0; then
 		echo "updpate script done, exec new script "$0"."
-		exec sh $0
+		exec sh $0 --noupdate
 		exit 0
 	fi
 fi
-
 
 agh_dns=$DIR_SCRIPT"/dns.conf"
 
