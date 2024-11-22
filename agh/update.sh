@@ -54,8 +54,8 @@ mkdir -p $DIR_SCRIPT"/download"
 echo "# Generated at $(date '+%F %T')" > "$agh_dns"
 
 #----------------------------------------------------
-if [ -f "local.dns.conf" ]; then
-  cat "local.dns.conf" >> "$agh_dns"
+if [ -f $DIR_SCRIPT"/local.dns.conf" ]; then
+  cat $DIR_SCRIPT"/local.dns.conf" >> "$agh_dns"
 else
   echo "114.114.114.114" >> "$agh_dns"
 fi
