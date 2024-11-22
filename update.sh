@@ -1,5 +1,6 @@
 #!/bin/sh
 #----------------------------------------------------
+_PROXY="http://127.0.0.1:7890"
 URL_SCRIPT="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/update.sh"
 get_file_size() { [ -f "$1" ] && ls -l "$1" | awk '{print $5}' || echo 0; }
 echo_log() { [ $# -eq 1 ] && set -- "$1" "$1"; echo "$1" && logger "$2"; }
