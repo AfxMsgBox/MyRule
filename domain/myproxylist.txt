@@ -14,7 +14,7 @@ payload:
   - '+.mikrotik.com'
   - '+.mobile01.com'
   - '+.moodeaudio.org'
-  - '+.mynetname.net'
+#  - '+.mynetname.net'
   - '+.myzyxel.com'
   - '+.notion.so'
   - '+.openwrt.org'
