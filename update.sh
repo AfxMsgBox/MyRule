@@ -1,5 +1,6 @@
 #!/bin/sh
 #----------------------------------------------------
+URL_SCRIPT="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/update.sh"
 get_file_size() { [ -f "$1" ] && ls -l "$1" | awk '{print $5}' || echo 0; }
 echo_log() { [ $# -eq 1 ] && set -- "$1" "$1"; echo "$1" && logger "$2"; }
 
@@ -23,9 +24,6 @@ download_file() {
     return 0
 }
 
-#----------------------------------------------------
-URL_SCRIPT="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/update.sh"
-
 if [ "$1" != "--noupdate" ]; then
 	if download_file $URL_SCRIPT $0; then
 		echo_log "update $0 succeeded."
@@ -35,8 +33,12 @@ if [ "$1" != "--noupdate" ]; then
    		echo_log "update $0 failed."
 	fi
 fi
+#----------------------------------------------------
 
 _dir=$(cd $(dirname $0); pwd)
+
+echo_log "update keeplive.sh"
+download_file "https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/keeplive.sh" $_dir"/keeplive.sh" 1
 
 sh $_dir"/agh/update.sh"
 sh $_dir"/clash/update.sh"
