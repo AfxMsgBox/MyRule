@@ -62,7 +62,7 @@ fi
 #----------------------------------------------------
 echo_log "download MyUpStream."
 download_file $URL_MYUPSTREAM "$DIR_SCRIPT/download/myupstream.txt" 1
-if [ "$(get_file_size "$DIR_SCRIPT/download/myupstream.txt")" -gt 4 ]; then
+if [ "$(get_file_size "$DIR_SCRIPT/download/myupstream.txt")" -gt 8 ]; then
     echo -e "\n# My Up Stream\n" >> "$agh_dns"
     cat "$DIR_SCRIPT/download/myupstream.txt" >> "$agh_dns"
 fi
