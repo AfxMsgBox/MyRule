@@ -1,6 +1,7 @@
 #!/bin/sh
 
 URL_SCRIPT="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/agh/update.sh"
+URL_MYUPSTREAM="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/agh/myupstream.txt"
 URL_MYPROXYLIST="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/domain/myproxylist.txt"
 URL_GPT="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/domain/gpt.txt"
 URL_NOTCN="https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/tld-not-cn.txt"
@@ -57,6 +58,13 @@ if [ -f "local.dns.conf" ]; then
   cat "local.dns.conf" >> "$agh_dns"
 else
   echo "114.114.114.114" >> "$agh_dns"
+fi
+#----------------------------------------------------
+echo_log "download MyUpStream."
+download_file $URL_MYUPSTREAM "$DIR_SCRIPT/download/myupstream.txt" 1
+if [ "$(get_file_size "$DIR_SCRIPT/download/myupstream.txt")" -gt 4 ]; then
+    echo -e "\n# My Up Stream\n" >> "$agh_dns"
+    cat "$DIR_SCRIPT/download/myupstream.txt" >> "$agh_dns"
 fi
 
 #----------------------------------------------------
