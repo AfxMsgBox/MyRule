@@ -24,7 +24,7 @@ download_file() {
 
     # 检查文件大小是否大于 32 字节
     local file_size=$(get_file_size $temp_file)
-    if [ -z "$file_size" ] || [ "$file_size" -le 32 ]; then
+    if [ -z "$file_size" ] || [ "$file_size" -le 8 ]; then
         rm -f "$temp_file"
         return 1
     fi
