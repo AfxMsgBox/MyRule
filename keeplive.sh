@@ -1,3 +1,3 @@
 #!/bin/sh
 
-curl -I https://www.google.com > /dev/null 2>&1
+curl --connect-timeout 5 -I https://www.google.com > /dev/null 2>&1
