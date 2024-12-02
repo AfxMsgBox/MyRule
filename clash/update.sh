@@ -4,6 +4,28 @@ DIR_SCRIPT="$(cd "$(dirname "$0")" && pwd)"
 _PROXY="http://127.0.0.1:7890"
 
 #----------------------------------------------------
+SED_EXPR=""
+
+replace_strings_from_config() {
+    CONFIG_FILE="$1"
+
+    # 从配置文件中读取所有的键值对并构建 sed 表达式
+    while IFS='=' read -r key value; do
+        # 跳过空行或无效行
+        if [ -z "$key" ] || [ -z "$value" ]; then
+            continue
+        fi
+
+        # 转义特殊字符
+        ESCAPED_KEY=$(printf '%s\n' "$key" | sed -e 's/[][\/.^$*]/\\&/g')
+        ESCAPED_VALUE=$(printf '%s\n' "$value" | sed -e 's/[&\\/]/\\&/g')
+
+        # 构建 sed 表达式
+        SED_EXPR="${SED_EXPR}s|{${ESCAPED_KEY}}|${ESCAPED_VALUE}|g;"
+    done < "$CONFIG_FILE"
+}
+
+#----------------------------------------------------
 get_file_size() { [ -f "$1" ] && ls -l "$1" | awk '{print $5}' || echo 0; }
 echo_log() { [ $# -eq 1 ] && set -- "$1" "$1"; echo "$1" && logger "$2"; }
 
@@ -38,6 +60,13 @@ if [ "$1" != "--noupdate" ]; then
 fi
 #----------------------------------------------------
 echo_log "...update clash start."
+
+if [ -e "$DIR_SCRIPT/local.conf" ]; then
+        if download_file $URL_CONFIG "$DIR_SCRIPT/config.new" 1; then
+                replace_strings_from_config local.conf
+                sed -i $SED_EXPR "$DIR_SCRIPT/config.new"
+        fi
+fi
 
 curl -X PUT  http://127.0.0.1:3721/providers/proxies/TaiWan
 sleep 2s
