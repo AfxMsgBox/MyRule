@@ -40,10 +40,15 @@ _dir=$(cd $(dirname $0); pwd)
 
 echo_log "update keeplive.sh"
 download_file "https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/keeplive.sh" $_dir"/keeplive.sh" 1
-#download_file "https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/agh/update.sh" $_dir"/agh/update.sh" 1
 #download_file "https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/clash/update.sh" $_dir"/clash/update.sh" 1
 
-sh $_dir"/agh/update.sh"
+if [ ! -e "$_dir/agh/update.sh" ]; then
+    download_file "https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/agh/update.sh" $_dir"/agh/update.sh" 1
+    sh $_dir"/agh/update.sh" --noupdate
+else
+    sh $_dir"/agh/update.sh"
+fi
+
 sh $_dir"/clash/update.sh"
 
 sleep 2s
