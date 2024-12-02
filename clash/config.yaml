@@ -1,0 +1,94 @@
+mixed-port: 7890
+redir-port: 7892
+tproxy-port: 7893
+authentication: [""]
+allow-lan: true
+mode: rule
+log-level: warning
+ipv6: false
+external-controller: 0.0.0.0:3721
+external-ui: ui
+#secret:
+
+profile:
+  store-selected: true
+
+tun:
+  enable: true
+  stack: system
+  auto-route: false
+#  auto-redir: true
+#  interface-name: eth1
+  auto-detect-interface: true
+#  dns-hijack:
+#    - any:53
+
+dns:
+  enable: true
+  ipv6: false
+  enhanced-mode: fake-ip
+  listen: 0.0.0.0:253
+  use-hosts: true
+  fake-ip-range: 198.18.0.1/16
+  default-nameserver:
+    - 223.5.5.5
+  nameserver:
+    - 223.5.5.5
+  fallback:
+    - 223.5.5.5
+#  fallback-filter:
+#    geoip: true
+
+proxy-providers:
+  HongKong:
+    type: http
+    path: ./proxy/HongKong.yaml
+    interval: 86400
+    url: {SUBSCRIBURL}&insert=false&exclude=%E8%AF%95%E7%94%A8&include=%E9%A6%99%E6%B8%AF&append_type=true&emoji=true&list=true&tfo=false&scv=false&fdn=true&sort=true&udp=true&new_name=true
+    health-check:
+      enable: true
+      url: http://www.gstatic.com/generate_204
+      interval: 1800
+
+  TaiWan:
+    type: http
+    path: ./proxy/TaiWan.yaml
+    interval: 86400
+    url: {SUBSCRIBURL}&insert=false&exclude=%E8%AF%95%E7%94%A8&include=%E5%8F%B0%E6%B9%BE&append_type=true&emoji=true&list=true&tfo=false&scv=false&fdn=true&sort=true&udp=true&new_name=true
+    health-check:
+      enable: true
+      url: http://www.gstatic.com/generate_204
+      interval: 1800
+
+proxy-groups:
+  - name: fastHongKong
+    type: url-test
+    interval: 600
+    tolerance: 50
+    lazy: true
+    url: 'http://www.gstatic.com/generate_204'
+    use:
+      - HongKong
+
+  - name: fastTaiWan
+    type: url-test
+    interval: 600
+    tolerance: 50
+    lazy: true
+    url: 'http://www.gstatic.com/generate_204'
+    use:
+      - TaiWan
+
+rule-providers:
+  rule_gpt:
+    behavior: domain
+    interval: 86400
+    path: ./ruleset/gpt.yaml
+    type: http
+    url: "https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/domain/gpt.txt"
+
+rules:
+# - GEOIP,LAN, DIRECT
+# - GEOIP,CN, DIRECT
+ - RULE-SET,rule_gpt,fastTaiWan
+ - MATCH, fastHongKong
