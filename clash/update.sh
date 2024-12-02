@@ -40,7 +40,8 @@ fi
 echo_log "...update clash start."
 
 curl -X PUT  http://127.0.0.1:3721/providers/proxies/TaiWan
-sleep 1s
+sleep 2s
 curl -X PUT  http://127.0.0.1:3721/providers/proxies/HongKong
-sleep 1s
+sleep 2s
+curl -X PUT  http://127.0.0.1:3721/providers/rules/gpt_domain
 echo_log "...update clash done."
