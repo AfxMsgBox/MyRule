@@ -11,5 +11,5 @@ payload:
   - '+.bing.net'
   - 'gemini.google.com'
   - '+.ai.com'
+  - '+.ai'
   - '+.anthropic.com'
-  - '+.claude.ai'
