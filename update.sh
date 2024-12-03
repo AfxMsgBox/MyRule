@@ -54,3 +54,12 @@ sh $_dir"/clash/update.sh"
 sleep 2s
 
 /etc/init.d/proxy restart
+
+sleep 2s
+
+curl -X PUT  http://127.0.0.1:3721/providers/proxies/TaiWan
+sleep 2s
+curl -X PUT  http://127.0.0.1:3721/providers/proxies/HongKong
+sleep 2s
+curl -X PUT  http://127.0.0.1:3721/providers/rules/rule_gpt
+
