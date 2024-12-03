@@ -52,7 +52,7 @@ download_file() {
 
 if [ "$1" != "--noupdate" ]; then
         if download_file $URL_SCRIPT $0; then
-                echo_log "update $0 succeeded."
+                echo_log "update script $0 succeeded."
                 exec sh $0 --noupdate
                 exit 0
         else
@@ -60,7 +60,7 @@ if [ "$1" != "--noupdate" ]; then
         fi
 fi
 #----------------------------------------------------
-echo_log "...update clash start."
+echo_log "update clash config file."
 
 if [ -e "$DIR_SCRIPT/local.conf" ]; then
         if download_file $URL_CONFIG "$DIR_SCRIPT/config.new" 1; then
@@ -71,5 +71,3 @@ if [ -e "$DIR_SCRIPT/local.conf" ]; then
                 mv -f "$DIR_SCRIPT/config.new" "$DIR_SCRIPT/config.yaml" > /dev/null 2>&1
         fi
 fi
-
-echo_log "...update clash done."
