@@ -64,7 +64,7 @@ echo_log "...update clash start."
 
 if [ -e "$DIR_SCRIPT/local.conf" ]; then
         if download_file $URL_CONFIG "$DIR_SCRIPT/config.new" 1; then
-                replace_strings_from_config local.conf
+                replace_strings_from_config "$DIR_SCRIPT/local.conf"
                 sed -i $SED_EXPR "$DIR_SCRIPT/config.new"
                 
                 mv -f "$DIR_SCRIPT/config.yaml" "$DIR_SCRIPT/config.yaml.bak" > /dev/null 2>&1
