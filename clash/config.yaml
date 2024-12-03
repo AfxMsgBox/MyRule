@@ -6,7 +6,7 @@ allow-lan: true
 mode: rule
 log-level: warning
 ipv6: false
-external-controller: 0.0.0.0:3721
+external-controller:  :3721
 external-ui: ui
 #secret:
 
