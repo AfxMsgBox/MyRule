@@ -38,15 +38,15 @@ download_file() {
 #----------------------------------------------------
 if [ "$1" != "--noupdate" ]; then
 	if download_file $URL_SCRIPT $0; then
-		echo_log "update $0 succeeded."
+		echo_log "update script $0 succeeded."
 		exec sh $0 --noupdate
 		exit 0
   	else
-   		echo_log "update $0 failed."
+   		echo_log "update script $0 failed."
 	fi
 fi
 
-echo_log "...update agh start."
+echo_log "update agh start..."
 
 agh_dns=$DIR_SCRIPT"/dns.conf"
 
@@ -60,7 +60,7 @@ else
   echo "114.114.114.114" >> "$agh_dns"
 fi
 #----------------------------------------------------
-echo_log "download MyUpStream."
+echo_log "  download MyUpStream."
 download_file $URL_MYUPSTREAM "$DIR_SCRIPT/download/myupstream.txt" 1
 if [ "$(get_file_size "$DIR_SCRIPT/download/myupstream.txt")" -gt 8 ]; then
     echo -e "\n# My Up Stream\n" >> "$agh_dns"
@@ -68,7 +68,7 @@ if [ "$(get_file_size "$DIR_SCRIPT/download/myupstream.txt")" -gt 8 ]; then
 fi
 
 #----------------------------------------------------
-echo_log "download MyProxyList."
+echo_log "  download MyProxyList."
 download_file $URL_MYPROXYLIST "$DIR_SCRIPT/download/myproxylist.txt" 1
 if [ "$(get_file_size "$DIR_SCRIPT/download/myproxylist.txt")" -gt 32 ]; then
     echo -e "\n# My Prox List\n" >> "$agh_dns"
@@ -76,7 +76,7 @@ if [ "$(get_file_size "$DIR_SCRIPT/download/myproxylist.txt")" -gt 32 ]; then
 fi
 
 #----------------------------------------------------
-echo_log "download gpt."
+echo_log "  download gpt."
 download_file $URL_GPT "$DIR_SCRIPT/download/gpt.txt" 1
 if [ "$(get_file_size "$DIR_SCRIPT/download/gpt.txt")" -gt 32 ]; then
     echo -e "\n# GPT List\n" >> "$agh_dns"
@@ -84,7 +84,7 @@ if [ "$(get_file_size "$DIR_SCRIPT/download/gpt.txt")" -gt 32 ]; then
 fi
 
 #----------------------------------------------------
-echo_log "download not-cn."
+echo_log "  download not-cn."
 download_file $URL_NOTCN "$DIR_SCRIPT/download/notcn.txt" 1
 if [ "$(get_file_size "$DIR_SCRIPT/download/notcn.txt")" -gt 32 ]; then
     echo -e "\n# Not China Domian\n" >> "$agh_dns"
@@ -93,7 +93,7 @@ if [ "$(get_file_size "$DIR_SCRIPT/download/notcn.txt")" -gt 32 ]; then
 fi
 
 #----------------------------------------------------
-echo_log "download gfwlist."
+echo_log "  download gfwlist."
 download_file $URL_GFWLIST "$DIR_SCRIPT/download/gfwlist.txt" 1
 if [ "$(get_file_size "$DIR_SCRIPT/download/gfwlist.txt")" -gt 32 ]; then
     echo -e "\n# GFW List\n" >> "$agh_dns"
@@ -101,5 +101,5 @@ if [ "$(get_file_size "$DIR_SCRIPT/download/gfwlist.txt")" -gt 32 ]; then
 fi
 
 
-echo_log "...update agh done."
+echo_log "update agh done."
 exit 0
