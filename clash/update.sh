@@ -67,8 +67,8 @@ if [ -e "$DIR_SCRIPT/local.conf" ]; then
                 replace_strings_from_config local.conf
                 sed -i $SED_EXPR "$DIR_SCRIPT/config.new"
                 
-                mv -f "$DIR_SCRIPT/config.yaml" "$DIR_SCRIPT/config.yaml.bak"
-                mv -f "$DIR_SCRIPT/config.new" "$DIR_SCRIPT/config.yaml"
+                mv -f "$DIR_SCRIPT/config.yaml" "$DIR_SCRIPT/config.yaml.bak" > /dev/null 2>&1
+                mv -f "$DIR_SCRIPT/config.new" "$DIR_SCRIPT/config.yaml" > /dev/null 2>&1
         fi
 fi
 
