@@ -56,7 +56,6 @@ sleep 2s
 echo_log "restart proxy ..."
 /etc/init.d/proxy restart
 sleep 2s
-echo log "proxy restarted."
 
 echo_log "update TaiWan proxy..."
 curl -X PUT  http://127.0.0.1:3721/providers/proxies/TaiWan
