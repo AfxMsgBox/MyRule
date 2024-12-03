@@ -53,13 +53,20 @@ sh $_dir"/clash/update.sh"
 
 sleep 2s
 
+echo_log "restart proxy ..."
 /etc/init.d/proxy restart
-
 sleep 2s
+echo log "proxy restarted."
 
+echo_log "update TaiWan proxy..."
 curl -X PUT  http://127.0.0.1:3721/providers/proxies/TaiWan
 sleep 2s
+
+echo_log "update HongKong proxy..."
 curl -X PUT  http://127.0.0.1:3721/providers/proxies/HongKong
 sleep 2s
+
+echo_log "update gpt rules..."
 curl -X PUT  http://127.0.0.1:3721/providers/rules/rule_gpt
 
+echo_log "all done."
