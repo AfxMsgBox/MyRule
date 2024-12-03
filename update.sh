@@ -27,11 +27,11 @@ download_file() {
 
 if [ "$1" != "--noupdate" ]; then
 	if download_file $URL_SCRIPT $0; then
-		echo_log "update $0 succeeded."
+		echo_log "update script $0 succeeded."
 		exec sh $0 --noupdate
 		exit 0
   	else
-   		echo_log "update $0 failed."
+   		echo_log "update script $0 failed."
 	fi
 fi
 #----------------------------------------------------
