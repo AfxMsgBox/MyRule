@@ -1,5 +1,5 @@
 #!/bin/sh
-URL_SCRIPT="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/clash/update.sh"
+URL_SCRIPT="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/clash/update-config.sh"
 URL_CONFIG="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/clash/config.yaml"
 DIR_SCRIPT="$(cd "$(dirname "$0")" && pwd)"
 _PROXY="http://127.0.0.1:7890"
