@@ -1,5 +1,5 @@
 #!/bin/sh
-URL_SCRIPT="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/clash/update-proxy-rule.sh"
+URL_SCRIPT="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/update-proxy-rule.sh"
 DIR_SCRIPT="$(cd "$(dirname "$0")" && pwd)"
 _PROXY="http://127.0.0.1:7890"
 
