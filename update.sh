@@ -42,30 +42,29 @@ echo_log "update keeplive.sh"
 download_file "https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/keeplive.sh" $_dir"/keeplive.sh" 1
 #download_file "https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/clash/update.sh" $_dir"/clash/update.sh" 1
 
-if [ ! -e "$_dir/agh/update.sh" ]; then
-    download_file "https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/agh/update.sh" $_dir"/agh/update.sh" 1
-    sh $_dir"/agh/update.sh" --noupdate
+if [ ! -e "$_dir/agh/update-config.sh" ]; then
+    download_file "https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/agh/update.sh" $_dir"/agh/update-config.sh" 1
+    sh $_dir"/agh/update-config.sh" --noupdate
 else
-    sh $_dir"/agh/update.sh"
+    sh $_dir"/agh/update-config.sh"
 fi
 
-sh $_dir"/clash/update.sh"
-
-sleep 2s
+if [ ! -e "$_dir/clash/update-config.sh" ]; then
+    download_file "https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/clash/update.sh" $_dir"/clash/update-config.sh" 1
+    sh $_dir"/clash/update-config.sh" --noupdate
+else
+    sh $_dir"/clash/update-config.sh"
+fi
 
 echo_log "restart proxy ..."
 /etc/init.d/proxy restart
 sleep 2s
 
-echo_log "update TaiWan proxy..."
-curl -X PUT  http://127.0.0.1:3721/providers/proxies/TaiWan
-sleep 2s
-
-echo_log "update HongKong proxy..."
-curl -X PUT  http://127.0.0.1:3721/providers/proxies/HongKong
-sleep 2s
-
-echo_log "update gpt rules..."
-curl -X PUT  http://127.0.0.1:3721/providers/rules/rule_gpt
+if [ ! -e "$_dir/clash/update-proxy-rule.sh" ]; then
+    download_file "https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/clash/update-proxy-rule.sh" $_dir"/clash/update-proxy-rule.sh" 1
+    sh $_dir"/clash/update-proxy-rule.sh" --noupdate
+else
+    sh $_dir"/clash/update-proxy-rule.sh"
+fi
 
 echo_log "all done."
