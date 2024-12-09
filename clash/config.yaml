@@ -19,11 +19,8 @@ tun:
   stack: system
   auto-route: false
   auto-redir: false
-#  interface-name: eth1
   auto-detect-interface: false
-#  dns-hijack:
-#    - any:53
-
+  
 dns:
   enable: true
   ipv6: false
@@ -37,8 +34,6 @@ dns:
     - 223.5.5.5
   fallback:
     - 223.5.5.5
-#  fallback-filter:
-#    geoip: true
 
 proxy-providers:
   HongKong:
@@ -89,7 +84,5 @@ rule-providers:
     url: "https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/domain/gpt.txt"
 
 rules:
-# - GEOIP,LAN, DIRECT
-# - GEOIP,CN, DIRECT
  - RULE-SET,rule_gpt,fastTaiWan
  - MATCH, fastHongKong
