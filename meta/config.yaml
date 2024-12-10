@@ -1,5 +1,5 @@
 mixed-port: 7890
-redir-port: 7892
+#redir-port: 7892
 tproxy-port: 7893
 authentication: [""]
 allow-lan: true
@@ -11,6 +11,15 @@ external-ui: ui
 #secret:
 tcp-concurrent: true
 geodata-loader: memconservative
+geo-auto-update: false
+
+#长连接alive问题：https://github.com/vernesong/OpenClash/issues/2614
+#keep-alive-idle 没有数据活动，它会发起一个 keep alive 包给客户端
+keep-alive-idle: 1800
+#如果客户端没有回应,内核会每间隔 keep-alive-interval 发送一次探测包
+#持续发送 KEEP_COUNT (默认值为 9) 次后，如果一直没有收到回应，则认为连接无效，会从内存中清除相关的连接信息
+keep-alive-interval: 60
+disable-keep-alive: true
 
 profile:
   store-selected: true
@@ -29,38 +38,55 @@ dns:
   listen: :253
   use-hosts: false
   fake-ip-range: 172.16.0.1/12
+  # 用于解析 nameserver，fallback 以及其他 DNS 服务器配置的，DNS 服务域名
+  # 只能使用纯 IP 地址，可使用加密 DNS
   default-nameserver:
     - 223.5.5.5
+  # 这部分为主要 DNS 配置，影响所有直连，确保使用对大陆解析精准的 DNS  
   nameserver:
     - 223.5.5.5
+  # 当配置 fallback 时，会查询 nameserver 中返回的 IP 是否为 CN，非必要配置
+  # 当不是 CN，则使用 fallback 中的 DNS 查询结果
+  # 确保配置 fallback 时能够正常查询
   fallback:
-    - 223.5.5.5
+    - 8.8.8.8
+
+tunnels:
+- network: [tcp, udp]
+  address: 127.0.0.1:853
+  target: 8.8.8.8:53
+  proxy: fastHongKong
+  
 proxy-providers:
   HongKong:
     type: http
     path: ./proxy/HongKong.yaml
     interval: 86400
+    proxy: fastHongKong
     url: {SUBSCRIBE_URL}&insert=false&exclude=%E8%AF%95%E7%94%A8&include=%E9%A6%99%E6%B8%AF&append_type=true&emoji=true&list=true&tfo=false&scv=false&fdn=true&sort=true&udp=true&new_name=true
     health-check:
       enable: true
       url: http://www.gstatic.com/generate_204
+      expected-status: 204
       interval: 1800
 
   TaiWan:
     type: http
     path: ./proxy/TaiWan.yaml
     interval: 86400
+    proxy: fastHongKong
     url: {SUBSCRIBE_URL}&insert=false&exclude=%E8%AF%95%E7%94%A8&include=%E5%8F%B0%E6%B9%BE&append_type=true&emoji=true&list=true&tfo=false&scv=false&fdn=true&sort=true&udp=true&new_name=true
     health-check:
       enable: true
       url: http://www.gstatic.com/generate_204
+      expected-status: 204
       interval: 1800
 
 proxy-groups:
   - name: fastHongKong
     type: url-test
     interval: 600
-    tolerance: 50
+    tolerance: 30
     lazy: true
     url: 'http://www.gstatic.com/generate_204'
     use:
@@ -69,7 +95,7 @@ proxy-groups:
   - name: fastTaiWan
     type: url-test
     interval: 600
-    tolerance: 50
+    tolerance: 30
     lazy: true
     url: 'http://www.gstatic.com/generate_204'
     use:
@@ -81,6 +107,7 @@ rule-providers:
     interval: 86400
     path: ./ruleset/gpt.yaml
     type: http
+    proxy: fastHongKong
     url: "https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/domain/gpt.txt"
 
 rules:
