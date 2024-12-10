@@ -5,7 +5,8 @@ AGH_DIR=/etc/proxy/agh
 AGH_CONFIG=/etc/proxy/agh/agh.yaml
 CLASH_PROG=/etc/proxy/clash/clash
 CLASH_DIR=/etc/proxy/clash
-
+META_PROG=/etc/proxy/meta/mihomo
+META_DIR=/etc/proxy/meta
 
 # starts after network starts
 START=21
@@ -15,6 +16,12 @@ STOP=89
 SERVICE_WRITE_PID=1
 SERVICE_DAEMONIZE=1
 USE_PROCD=1
+
+if[ -e $META_PROG ]; then
+	CLASH_PROG=$META_PROG
+	CLASH_DIR=$META_DIR
+	logger "use meta"
+fi
 
 start_service() {
 
