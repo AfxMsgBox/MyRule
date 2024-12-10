@@ -44,6 +44,12 @@ replace_strings_from_config() {
     local SED_EXPR=""
     local CONFIG_FILE="$1"
 
+    # 检查文件是否存在
+    if [ ! -f "$1" ] || [ ! -f "$2" ]; then
+        echo "Error: Either '$1' or '$2' does not exist."
+        return 1  # 退出函数并返回错误码
+    fi
+
     # 从配置文件中读取所有的键值对并构建 sed 表达式
     while IFS='=' read -r key value; do
         # 跳过空行或无效行
