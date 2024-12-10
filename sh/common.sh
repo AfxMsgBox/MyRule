@@ -34,3 +34,28 @@ if [ "$1" != "--noupdate" ] && [ -n "$URL_SCRIPT" ]; then
    		echo_log "update script $0 failed."
 	fi
 fi
+
+#------------------------------------------------------
+replace_strings_from_config() {
+#configfile destfile
+    local SED_EXPR=""
+    local CONFIG_FILE="$1"
+
+    # 从配置文件中读取所有的键值对并构建 sed 表达式
+    while IFS='=' read -r key value; do
+        # 跳过空行或无效行
+        if [ -z "$key" ] || [ -z "$value" ]; then
+            continue
+        fi
+
+        # 转义特殊字符
+        local ESCAPED_KEY=$(printf '%s\n' "$key" | sed -e 's/[][\/.^$*]/\\&/g')
+        local ESCAPED_VALUE=$(printf '%s\n' "$value" | sed -e 's/[&\\/]/\\&/g')
+
+        # 构建 sed 表达式
+        SED_EXPR="${SED_EXPR}s|{${ESCAPED_KEY}}|${ESCAPED_VALUE}|g;"
+    done < "$CONFIG_FILE"
+
+    replace_strings_from_config "$DIR_SCRIPT/local.conf"
+    sed -i $SED_EXPR $2
+}
