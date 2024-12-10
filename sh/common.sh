@@ -28,8 +28,8 @@ download_file() {
     return 0
 }
 
-local _RUL_COMMON_SH="https://github.com/AfxMsgBox/MyRule/raw/refs/heads/main/sh/common.sh"
-local _URL_SCRIPT="${URL_SCRIPT:-$_RUL_COMMON_SH}"  
+_RUL_COMMON_SH="https://github.com/AfxMsgBox/MyRule/raw/refs/heads/main/sh/common.sh"
+_URL_SCRIPT="${URL_SCRIPT:-$_RUL_COMMON_SH}"  
 if [ "$1" != "--noupdate" ] && [ -n "$_URL_SCRIPT" ]; then
 	if download_file $_URL_SCRIPT $0; then
 		echo_log "update script $0 succeeded."
