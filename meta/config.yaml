@@ -18,16 +18,16 @@ profile:
 tun:
   enable: true
   stack: mixed
-  auto-route: false
   mtu: 1500
+  auto-route: false
   auto-redir: false
   auto-detect-interface: false
 dns:
   enable: true
   ipv6: false
   enhanced-mode: fake-ip
-  listen: 0.0.0.0:253
-  use-hosts: true
+  listen: :253
+  use-hosts: false
   fake-ip-range: 172.16.0.1/12
   default-nameserver:
     - 223.5.5.5
