@@ -11,6 +11,7 @@ payload:
   - '+.ip138.com'
   - '+.jsdelivr.net'
   - '+.khanacademy.org'
+  - '+.metacubex.one'
   - '+.mikrotik.com'
   - '+.mobile01.com'
   - '+.moodeaudio.org'
