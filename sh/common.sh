@@ -1,5 +1,8 @@
 #!/bin/sh
-_RUL_COMMON_SH="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/common.sh"
+PATH_SCRIPT=$(readlink -f "$0")
+DIR_SCRIPT=$(dirname "$PATH_SCRIPT")
+
+source $DIR_SCRIPT"/url.sh"
 #----------------------------------------------------
 get_file_size() { [ -f "$1" ] && ls -l "$1" | awk '{print $5}' || echo 0; }
 echo_log() { [ $# -eq 1 ] && set -- "$1" "$1"; echo "$1" && logger "$2"; }
@@ -59,15 +62,14 @@ replace_strings_from_config() {
 }
 #------------------------------------------------------
 
-_URL_SCRIPT="${URL_SCRIPT:-$_RUL_COMMON_SH}"  
-_script_path=$(readlink -f "$0")
+_URL_SCRIPT="${URL_SCRIPT:-$URL_COMMON_SH}"  
 
 if [ "$1" != "--noupdate" ] && [ -n "$_URL_SCRIPT" ]; then
-	if download_file $_URL_SCRIPT $_script_path; then
-		echo_log "update script $_script_path succeeded."
-		exec sh $_script_path --noupdate
+	if download_file $_URL_SCRIPT $PATH_SCRIPT; then
+		echo_log "update script $PATH_SCRIPT succeeded."
+		exec sh $PATH_SCRIPT --noupdate
 		exit 0
 	else
-		echo_log "update script $_script_path failed."
+		echo_log "update script $PATH_SCRIPT failed."
 	fi
 fi
