@@ -1,7 +1,7 @@
 #!/bin/sh
 
-URL_SCRIPT="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/update-proxy-rule.sh"
 DIR_SCRIPT="$(cd "$(dirname "$0")" && pwd)"
+URL_SCRIPT="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/update-proxy-rule.sh"
 source $DIR_SCRIPT"/common.sh"
 #----------------------------------------------------
 
