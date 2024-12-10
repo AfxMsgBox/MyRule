@@ -65,6 +65,5 @@ replace_strings_from_config() {
         SED_EXPR="${SED_EXPR}s|{${ESCAPED_KEY}}|${ESCAPED_VALUE}|g;"
     done < "$CONFIG_FILE"
 
-    replace_strings_from_config "$DIR_SCRIPT/local.conf"
     sed -i $SED_EXPR $2
 }
