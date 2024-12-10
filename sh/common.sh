@@ -61,7 +61,7 @@ replace_strings_from_config() {
 }
 #------------------------------------------------------
 
-_URL_SCRIPT="${URL_SCRIPT:-$URL_COMMON_SH}"  
+_URL_SCRIPT="${URL_SCRIPT:-$_URL_COMMON_SH}"  
 
 if [ "$1" != "--noupdate" ] && [ -n "$_URL_SCRIPT" ]; then
 	if download_file $_URL_SCRIPT $PATH_SCRIPT; then
