@@ -28,18 +28,6 @@ download_file() {
     return 0
 }
 
-_RUL_COMMON_SH="https://github.com/AfxMsgBox/MyRule/raw/refs/heads/main/sh/common.sh"
-_URL_SCRIPT="${URL_SCRIPT:-$_RUL_COMMON_SH}"  
-if [ "$1" != "--noupdate" ] && [ -n "$_URL_SCRIPT" ]; then
-	if download_file $_URL_SCRIPT $0; then
-		echo_log "update script $0 succeeded."
-		exec sh $0 --noupdate
-		exit 0
-	else
-		echo_log "update script $0 failed."
-	fi
-fi
-
 #------------------------------------------------------
 replace_strings_from_config() {
 #configfile destfile
@@ -69,3 +57,15 @@ replace_strings_from_config() {
 
     sed -i $SED_EXPR $2
 }
+#------------------------------------------------------
+_RUL_COMMON_SH="https://github.com/AfxMsgBox/MyRule/raw/refs/heads/main/sh/common.sh"
+_URL_SCRIPT="${URL_SCRIPT:-$_RUL_COMMON_SH}"  
+if [ "$1" != "--noupdate" ] && [ -n "$_URL_SCRIPT" ]; then
+	if download_file $_URL_SCRIPT $0; then
+		echo_log "update script $0 succeeded."
+		exec sh $0 --noupdate
+		exit 0
+	else
+		echo_log "update script $0 failed."
+	fi
+fi
