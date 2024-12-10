@@ -1,7 +1,9 @@
 #!/bin/sh
 
-URL_SCRIPT="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/update-all.sh"
 DIR_SCRIPT=$(dirname "$(readlink -f "$0")")
+sh $DIR_SCRIPT"/common.sh"
+
+URL_SCRIPT="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/update-all.sh"
 source $DIR_SCRIPT"/common.sh"
 
 URL_UPDATE_AGH="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/update-agh-config.sh"
