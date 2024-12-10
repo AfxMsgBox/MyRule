@@ -8,6 +8,7 @@ source $DIR_SCRIPT"/common.sh"
 URL_CONFIG="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/meta/config.yaml"
 DIR_CONFIG=$DIR_SCRIPT"/../meta"
 #----------------------------------------------------
+
 echo_log "update clash config file."
 
 if [ -e "$DIR_CONFIG/local.conf" ]; then
