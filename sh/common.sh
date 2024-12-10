@@ -11,7 +11,7 @@ download_file() {
     local use_proxy="${3:-1}"                 # 第三个参数默认值为 1
 
     local temp_file="/tmp/download_temp"
-    locla url_proxy="http://127.0.0.1:7890"
+    local url_proxy="http://127.0.0.1:7890"
  
     curl --connect-timeout 10 ${use_proxy:+--proxy $url_proxy} "$1" -o "$temp_file" > /dev/null 2>&1
     [ $? -ne 0 ] && return 1
