@@ -8,10 +8,13 @@ URL_UPDATE_CLASH="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/upd
 URL_UPDATE_META="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/update-meta-config.sh"
 URL_UPDATE_PROXY_RULE="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/update-proxy-rule.sh"
 
-wget $URL_COMMON_SH
-wget $URL_KEEPLIVE
-wget $URL_UPDATE_AGH
-wget $URL_UPDATE_ALL
-wget $URL_UPDATE_CLASH
-wget $URL_UPDATE_META
-wget $URL_UPDATE_PROXY_RULE
+_download(){
+  wget $1 -O $(basename $2)
+}
+_download $URL_COMMON_SH
+_download $URL_KEEPLIVE
+_download $URL_UPDATE_AGH
+_download $URL_UPDATE_ALL
+_download $URL_UPDATE_CLASH
+_download $URL_UPDATE_META
+_download $URL_UPDATE_PROXY_RULE
