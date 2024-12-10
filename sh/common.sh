@@ -1,16 +1,19 @@
 #!/bin/sh
 #----------------------------------------------------
-__PROXY="http://127.0.0.1:7890"
 
 get_file_size() { [ -f "$1" ] && ls -l "$1" | awk '{print $5}' || echo 0; }
 echo_log() { [ $# -eq 1 ] && set -- "$1" "$1"; echo "$1" && logger "$2"; }
 
 download_file() { 
-	#下载URL 目标文件名  1（可选）：是否使用代理
-    local temp_file="/tmp/download_temp"
-    local use_proxy=$3     # 第三个参数（可选）：是否使用代理
+#下载URL 目标文件名  bUseProxy=1（可选）
+    local url="${1:?Error: URL is required}"   # 第一个参数必须存在，否则报错并退出
+    local filename="${2:?Error: Filename is required}"  # 第二个参数必须存在
+    local use_proxy="${3:-1}"                 # 第三个参数默认值为 1
 
-    curl --connect-timeout 10 ${use_proxy:+--proxy $__PROXY} "$1" -o "$temp_file" > /dev/null 2>&1
+    local temp_file="/tmp/download_temp"
+    locla url_proxy="http://127.0.0.1:7890"
+ 
+    curl --connect-timeout 10 ${use_proxy:+--proxy $url_proxy} "$1" -o "$temp_file" > /dev/null 2>&1
     [ $? -ne 0 ] && return 1
 
     # 检查文件大小是否大于 8 字节
@@ -30,8 +33,8 @@ if [ "$1" != "--noupdate" ] && [ -n "$URL_SCRIPT" ]; then
 		echo_log "update script $0 succeeded."
 		exec sh $0 --noupdate
 		exit 0
-  	else
-   		echo_log "update script $0 failed."
+	else
+		echo_log "update script $0 failed."
 	fi
 fi
 
