@@ -1,5 +1,5 @@
 #!/bin/sh
-_RUL_COMMON_SH="https://github.com/AfxMsgBox/MyRule/raw/main/sh/common.sh"
+_RUL_COMMON_SH="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/common.sh"
 #----------------------------------------------------
 get_file_size() { [ -f "$1" ] && ls -l "$1" | awk '{print $5}' || echo 0; }
 echo_log() { [ $# -eq 1 ] && set -- "$1" "$1"; echo "$1" && logger "$2"; }
