@@ -60,12 +60,14 @@ replace_strings_from_config() {
 #------------------------------------------------------
 
 _URL_SCRIPT="${URL_SCRIPT:-$_RUL_COMMON_SH}"  
+_script_path=$(readlink -f "$0")
+
 if [ "$1" != "--noupdate" ] && [ -n "$_URL_SCRIPT" ]; then
-	if download_file $_URL_SCRIPT $0; then
-		echo_log "update script $0 succeeded."
-		exec sh $0 --noupdate
+	if download_file $_URL_SCRIPT $_script_path; then
+		echo_log "update script $_script_path succeeded."
+		exec sh $_script_path --noupdate
 		exit 0
 	else
-		echo_log "update script $0 failed."
+		echo_log "update script $_script_path failed."
 	fi
 fi
