@@ -4,6 +4,7 @@ URL_SCRIPT="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/update-pr
 DIR_SCRIPT="$(cd "$(dirname "$0")" && pwd)"
 source $DIR_SCRIPT"/common.sh"
 #----------------------------------------------------
+
 echo_log "update clash proxy & rules."
 
 echo_log "update TaiWan proxy..."
