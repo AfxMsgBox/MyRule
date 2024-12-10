@@ -1,6 +1,6 @@
 #!/bin/sh
+_RUL_COMMON_SH="https://github.com/AfxMsgBox/MyRule/raw/main/sh/common.sh"
 #----------------------------------------------------
-
 get_file_size() { [ -f "$1" ] && ls -l "$1" | awk '{print $5}' || echo 0; }
 echo_log() { [ $# -eq 1 ] && set -- "$1" "$1"; echo "$1" && logger "$2"; }
 
@@ -58,7 +58,7 @@ replace_strings_from_config() {
     sed -i $SED_EXPR $2
 }
 #------------------------------------------------------
-_RUL_COMMON_SH="https://github.com/AfxMsgBox/MyRule/raw/main/sh/common.sh"
+
 _URL_SCRIPT="${URL_SCRIPT:-$_RUL_COMMON_SH}"  
 if [ "$1" != "--noupdate" ] && [ -n "$_URL_SCRIPT" ]; then
 	if download_file $_URL_SCRIPT $0; then
