@@ -2,10 +2,11 @@
 
 DIR_SCRIPT="$(cd "$(dirname "$0")" && pwd)"
 URL_SCRIPT="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/update-meta-config.sh"
+source $DIR_SCRIPT"/common.sh"
+#----------------------------------------------------
+
 URL_CONFIG="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/meta/config.yaml"
 DIR_CONFIG=$DIR_SCRIPT"/../meta"
-
-source $DIR_SCRIPT"/common.sh"
 #----------------------------------------------------
 echo_log "update clash config file."
 
