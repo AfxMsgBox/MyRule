@@ -1,5 +1,5 @@
 #!/bin/sh
-
+#wget -O- https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/inst.sh|sh
 URL_COMMON_SH="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/common.sh"
 URL_KEEPLIVE="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/keeplive.sh"
 URL_UPDATE_AGH="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/update-agh-config.sh"
