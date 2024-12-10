@@ -1,8 +1,7 @@
 #!/bin/sh
 PATH_SCRIPT=$(readlink -f "$0")
 DIR_SCRIPT=$(dirname "$PATH_SCRIPT")
-
-source $DIR_SCRIPT"/url.sh"
+_URL_COMMON_SH="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/common.sh"
 #----------------------------------------------------
 get_file_size() { [ -f "$1" ] && ls -l "$1" | awk '{print $5}' || echo 0; }
 echo_log() { [ $# -eq 1 ] && set -- "$1" "$1"; echo "$1" && logger "$2"; }
