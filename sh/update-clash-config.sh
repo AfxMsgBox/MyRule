@@ -1,7 +1,7 @@
 #!/bin/sh
 
-DIR_SCRIPT="$(cd "$(dirname "$0")" && pwd)"
 URL_SCRIPT="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/update-clash-config.sh"
+DIR_SCRIPT=$(dirname "$(readlink -f "$0")")
 source $DIR_SCRIPT"/common.sh"
 #----------------------------------------------------
 
