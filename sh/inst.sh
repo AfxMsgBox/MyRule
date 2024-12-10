@@ -9,7 +9,7 @@ URL_UPDATE_META="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/upda
 URL_UPDATE_PROXY_RULE="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/update-proxy-rule.sh"
 
 _download(){
-  wget $1 -O $(basename $2)
+  wget $1 -O $(basename $1)
 }
 _download $URL_COMMON_SH
 _download $URL_KEEPLIVE
