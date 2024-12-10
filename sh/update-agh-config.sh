@@ -4,6 +4,7 @@ DIR_SCRIPT="$(cd "$(dirname "$0")" && pwd)"
 URL_SCRIPT="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/update-agh-config.sh"
 source $DIR_SCRIPT"/common.sh"
 #----------------------------------------------------
+
 URL_MYUPSTREAM="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/agh/myupstream.txt"
 URL_MYPROXYLIST="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/domain/myproxylist.txt"
 URL_GPT="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/domain/gpt.txt"
@@ -13,6 +14,7 @@ URL_GFWLIST="https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/
 DIR_AGH=$DIR_SCRIPT"/../agh"
 agh_dns=$DIR_AGH"/dns.conf"
 #----------------------------------------------------
+
 mkdir -p $DIR_AGH"/download"
 
 echo_log "update agh config start..."
