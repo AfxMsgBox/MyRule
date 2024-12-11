@@ -1,5 +1,5 @@
 #!/bin/sh
-
+#0 3 * * * sh /etc/proxy/sh/update-proxy-rule.sh
 URL_SCRIPT="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/update-proxy-rule.sh"
 DIR_SCRIPT=$(dirname "$(readlink -f "$0")")
 source $DIR_SCRIPT"/common.sh"
