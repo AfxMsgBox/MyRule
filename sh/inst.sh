@@ -9,6 +9,8 @@ URL_UPDATE_META="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/upda
 URL_UPDATE_PROXY_RULE="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/update-proxy-rule.sh"
 URL_HOTPLUG_TUN="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/etc/hotplug.d/net/99-meta-route"
 URL_INIT_D_PROXY="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/etc/init.d/proxy"
+URL_INIT_D_CLASH_META="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/etc/init.d/clash_meta"
+URL_INIT_D_AGH="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/etc/init.d/agh"
 
 _download(){
   wget $1 -O $(basename $1)
@@ -22,3 +24,5 @@ _download $URL_UPDATE_META
 _download $URL_UPDATE_PROXY_RULE
 _download $URL_HOTPLUG_TUN
 _download $URL_INIT_D_PROXY
+_download $URL_INIT_D_CLASH_META
+_download $URL_INIT_D_AGH
