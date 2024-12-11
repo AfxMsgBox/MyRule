@@ -26,6 +26,7 @@ profile:
   store-fake-ip: true
 tun:
   enable: true
+  device: utun
   stack: mixed
   mtu: 1500
   auto-route: false
