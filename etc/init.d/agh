@@ -32,6 +32,6 @@ service_triggers() {
   if [ -n "$adguardhome_boot" ]; then
     # Wait for interfaces to be up before starting AdGuard Home for real.
     # Prevents issues like https://github.com/openwrt/packages/issues/21868.
-    procd_add_raw_trigger "interface.*.up" 5000 /etc/init.d/adguardhome restart
+    procd_add_raw_trigger "interface.*.up" 5000 /etc/init.d/agh restart
   fi
 }
