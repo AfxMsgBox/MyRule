@@ -1,5 +1,5 @@
 payload:
-  - '+.compute-pipe.com'
+#  - '+.compute-pipe.com'
   - '+.edgecompute.app'
   - '+.every1dns.net'
   - '+.bing.com'
