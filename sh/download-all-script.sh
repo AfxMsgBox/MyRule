@@ -26,12 +26,12 @@ _download $URL_UPDATE_CLASH
 _download $URL_UPDATE_META
 _download $URL_UPDATE_PROXY_RULE
 
-mkdir -p ./etc/init.d
-mkdir -p ./etc/hotplug.d/net
-wget $URL_HOTPLUG_TUN -O ./etc/hotplug.d/net/99-meta-route
-wget $URL_INIT_D_PROXY -O ./etc/init.d/proxy
-wget $URL_INIT_D_CLASH_META -O ./etc/init.d/clas_meta
-wget $URL_INIT_D_AGH -O ./etc/init.d/agh
+#mkdir -p ./etc/init.d
+#mkdir -p ./etc/hotplug.d/net
+wget $URL_HOTPLUG_TUN -O /etc/hotplug.d/net/99-meta-route
+wget $URL_INIT_D_PROXY -O /etc/init.d/proxy
+wget $URL_INIT_D_CLASH_META -O /etc/init.d/clas_meta
+wget $URL_INIT_D_AGH -O /etc/init.d/agh
 
 _download $URL_DOWNLOAD_ALL_SCRIPT_SH
 #最后把inst也更新一下
