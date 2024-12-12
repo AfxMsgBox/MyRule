@@ -1,7 +1,7 @@
 #!/bin/sh
 
-[ "$ACTION" = "add" ] && [ "$INTERFACE" = "Meta" ] && {
+[ "$ACTION" = "add" ] && { [ "$INTERFACE" = "Meta" ] || [ "$INTERFACE" = "utun" ]; } && {
     ip route del 172.16.0.0/30
-    ip route add 172.16.0.0/12 dev Meta
-    logger "Route added to Meta via hotplug"
+    ip route add 172.16.0.0/12 dev "$INTERFACE"
+    logger "Route added to $INTERFACE via hotplug"
 }
