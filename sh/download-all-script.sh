@@ -12,6 +12,8 @@ URL_INIT_D_PROXY="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/etc/in
 URL_INIT_D_CLASH_META="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/etc/init.d/clash_meta"
 URL_INIT_D_AGH="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/etc/init.d/agh"
 
+URL_INTST_SH="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/inst.sh"
+
 _download(){
   wget $1 -O $(basename $1)
 }
@@ -26,3 +28,6 @@ _download $URL_HOTPLUG_TUN
 _download $URL_INIT_D_PROXY
 _download $URL_INIT_D_CLASH_META
 _download $URL_INIT_D_AGH
+
+#最后把inst也更新一下
+_download $URL_INTST_SH
