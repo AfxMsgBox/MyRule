@@ -12,6 +12,7 @@ URL_INIT_D_PROXY="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/etc
 URL_INIT_D_CLASH_META="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/etc/init.d/clash_meta"
 URL_INIT_D_AGH="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/etc/init.d/agh"
 
+URL_DOWNLOAD_ALL_SCRIPT_SH="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/download-all-script.sh"
 URL_INTST_SH="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/inst.sh"
 
 _download(){
@@ -32,5 +33,6 @@ wget $URL_INIT_D_PROXY -O ./etc/init.d/proxy
 wget $URL_INIT_D_CLASH_META -O ./etc/init.d/clas_meta
 wget $URL_INIT_D_AGH -O ./etc/init.d/agh
 
+_download $URL_DOWNLOAD_ALL_SCRIPT_SH
 #最后把inst也更新一下
 _download $URL_INTST_SH 
