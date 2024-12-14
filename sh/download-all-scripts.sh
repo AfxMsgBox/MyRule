@@ -18,7 +18,7 @@ URL_DOWNLOAD_ALL_SCRIPTS_SH="https://raw.githubusercontent.com/AfxMsgBox/MyRule/
 URL_INTST_SH="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/inst.sh"
 
 _download(){
-  wget $1 -O DIR_SCRIPT"/"$(basename $1)
+  wget $1 -O $DIR_SCRIPT"/"$(basename $1)
 }
 _download $URL_COMMON_SH
 _download $URL_KEEPLIVE
