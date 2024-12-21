@@ -24,7 +24,8 @@ echo "# Generated at $(date '+%F %T')" > "$agh_dns"
 if [ -f $DIR_AGH"/local.dns.conf" ]; then
   cat $DIR_AGH"/local.dns.conf" >> "$agh_dns"
 else
-  echo "223.5.5.5" >> "$agh_dns"
+  ip route | grep default | awk '{print $3}' >> "$agh_dns"
+  #echo "223.5.5.5" >> "$agh_dns"
 fi
 #----------------------------------------------------
 echo_log "  download MyUpStream."
