@@ -11,7 +11,6 @@ URL_UPDATE_META="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/upda
 URL_UPDATE_PROXY_RULE="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/update-proxy-rule.sh"
 URL_UPDATE_ALL_RESTART="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/update-all-configs-restart-services.sh"
 URL_HOTPLUG_TUN="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/etc/hotplug.d/net/99-meta-route"
-#URL_INIT_D_PROXY="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/etc/init.d/proxy"
 URL_INIT_D_CLASH_META="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/etc/init.d/clash_meta"
 URL_INIT_D_AGH="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/etc/init.d/agh"
 
@@ -33,7 +32,6 @@ _download $URL_UPDATE_ALL_RESTART
 #mkdir -p ./etc/init.d
 #mkdir -p ./etc/hotplug.d/net
 wget $URL_HOTPLUG_TUN -O /etc/hotplug.d/net/99-meta-route
-#wget $URL_INIT_D_PROXY -O /etc/init.d/proxy
 wget $URL_INIT_D_CLASH_META -O /etc/init.d/clash_meta
 wget $URL_INIT_D_AGH -O /etc/init.d/agh
 chmod +x /etc/init.d/clash_meta
