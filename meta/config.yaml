@@ -23,7 +23,7 @@ disable-keep-alive: true
 
 profile:
   store-selected: true
-  store-fake-ip: true
+#  store-fake-ip: true
 tun:
   enable: true
   device: utun
