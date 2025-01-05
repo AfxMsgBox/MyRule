@@ -22,6 +22,7 @@ payload:
   - '+.roonlabs.com'
   - '+.roonlabs.net'
   - '+.roon.app'
+  - '+.sagernet.org'
   - '+.socloud.fun'
   - '+.socloud.me'
   - '+.v2ex.com'
