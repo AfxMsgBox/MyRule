@@ -8,6 +8,7 @@ payload:
   - '+.google.cn'
   - '+.google.com.hk'
   - '+.hpe.com'
+  - '+.id.me'
   - '+.ip138.com'
   - '+.jsdelivr.net'
   - '+.khanacademy.org'
