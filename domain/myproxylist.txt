@@ -28,6 +28,7 @@ payload:
   - '+.sagernet.org'
   - '+.socloud.fun'
   - '+.socloud.me'
+  - '+.yahoo.com'
   - '+.v2ex.com'
   - '+.volumio.org'
   - '+.zyxel.com'
