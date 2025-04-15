@@ -4,7 +4,6 @@ payload:
   - '+.every1dns.net'
   - '+.bing.com'
   - '+.bing.net'
-  - 'gemini.google.com'
   - '+.ai'
   - '+.anthropic.com'
 
@@ -16,6 +15,22 @@ payload:
   - '+.oaiusercontent.com'
   - '+.openai.com'
   - '+.sora.com'
+#Google
+  - '+.android.com'
+  - '+.ggpht.com'
+  - '+.gmail.com'
+  - '+.google.cn'
+  - '+.google.com'
+  - '+.google-analytics.com'
+  - '+.googleapis.com'
+  - '+.googletagmanager.com'
+  - '+.googleusercontent.com'
+  - '+.googlevideo.com'
+  - '+.gstatic.com'
+  - '+.gvt1.com'
+  - '+.recaptcha.net'
+  - '+.youtube.com'
+  - '+.ytimg.com'
 
 # CDN & API
   - '+.openai.com.cdn.cloudflare.net'
