@@ -115,14 +115,14 @@ proxy-groups:
     type: select
     proxies:
       - fastHongKong
-      - fastTaiwan
+      - fastTaiWan
       - fastSingapore
 
   - name: gptProxy
     type: select
     proxies:
       - fastSingapore
-      - fastTaiwan
+      - fastTaiWan
       - fastHongKong
 
 rule-providers:
