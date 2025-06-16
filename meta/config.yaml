@@ -10,6 +10,7 @@ external-controller:  :3721
 external-ui: ui
 #secret:
 tcp-concurrent: true
+geo-auto-update: false
 
 #长连接alive问题：https://github.com/vernesong/OpenClash/issues/2614
 #keep-alive-idle 没有数据活动，它会发起一个 keep alive 包给客户端
