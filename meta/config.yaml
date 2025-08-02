@@ -20,9 +20,11 @@ keep-alive-idle: 1800
 keep-alive-interval: 60
 disable-keep-alive: true
 
+#
 profile:
   store-selected: true
-#  store-fake-ip: true
+  store-fake-ip: true
+#
 
 tunnels:
 - network: [tcp, udp]
