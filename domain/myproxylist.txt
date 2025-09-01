@@ -21,6 +21,7 @@ payload:
   - '+.myzyxel.com'
   - '+.notion.so'
   - '+.openwrt.org'
+  - '+.proxmox.com'
   - '+.raspberrypi.com'
   - '+.roonlabs.com'
   - '+.roonlabs.net'
