@@ -3,6 +3,7 @@ payload:
   - '+.clerksystems.com'
   - '+.doata.net'
   - '+.docker.io'
+  - '+.docker.com'
   - '+.docusign.com'
   - '+.freenas.org'
   - '+.gitbook.io'
