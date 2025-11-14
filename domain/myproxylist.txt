@@ -2,6 +2,7 @@ payload:
   - '+.cpubenchmark.net'
   - '+.clerksystems.com'
   - '+.doata.net'
+  - '+.docker.io'
   - '+.docusign.com'
   - '+.freenas.org'
   - '+.gitbook.io'
