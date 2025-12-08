@@ -20,6 +20,9 @@ payload:
   - '+.ggpht.com'
   - '+.gmail.com'
   - '+.google.cn'
+  - '+.google.cn'
+  - '+.googleapis.cn'
+  - '+.google.com.hk'
   - '+.google.com'
   - '+.google-analytics.com'
   - '+.googleapis.com'
@@ -29,6 +32,7 @@ payload:
   - '+.gstatic.com'
   - '+.gvt1.com'
   - '+.recaptcha.net'
+  - '+.withgoogle.com'
   - '+.youtube.com'
   - '+.ytimg.com'
 
