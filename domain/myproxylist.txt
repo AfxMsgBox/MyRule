@@ -1,4 +1,5 @@
 payload:
+  - '+.4d4y.com'
   - '+.cpubenchmark.net'
   - '+.clerksystems.com'
   - '+.doata.net'
