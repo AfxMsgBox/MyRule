@@ -4,8 +4,10 @@ payload:
   - '+.every1dns.net'
   - '+.bing.com'
   - '+.bing.net'
-  - '+.ai'
+#  - '+.ai'
+  - '+claude.ai'
   - '+.anthropic.com'
+  - '+.claudeusercontent.com'
 
   - '+.openaicom.imgix.net'
   - '+.ai.com'
@@ -17,6 +19,9 @@ payload:
   - '+.sora.com'
 #Google
   - '+.android.com'
+  - '+.deepmind.com'
+  - '+.deepmind.google'
+  - '+.generativeai.google'
   - '+.ggpht.com'
   - '+.gmail.com'
   - '+.google.cn'
