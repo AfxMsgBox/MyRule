@@ -18,7 +18,6 @@ payload:
   - '+.mikrotik.com'
   - '+.mobile01.com'
   - '+.moodeaudio.org'
-  - '+.myzyxel.com'
   - '+.notion.so'
   - '+.openwrt.org'
   - '+.proxmox.com'
@@ -32,7 +31,6 @@ payload:
   - '+.yahoo.com'
   - '+.v2ex.com'
   - '+.volumio.org'
-  - '+.zyxel.com'
 
 #ddns
   - '+.zhome.picp.vip'
@@ -45,7 +43,6 @@ payload:
   - '+.steampowered.com'
 
 #Tidal
-#  - '+.tidal.com'
   - '+.tidal.com'
 #  - '+.sp-pr-cf.audio.tidal.com'
 #  - '+.account.tidal.com'
