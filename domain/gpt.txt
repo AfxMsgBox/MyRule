@@ -5,6 +5,9 @@ payload:
   - '+.bing.com'
   - '+.bing.net'
 #  - '+.ai'
+
+  - '+.openrouter.ai'
+
   - '+.claude.ai'
   - '+.claude.com'
   - '+.anthropic.com'
