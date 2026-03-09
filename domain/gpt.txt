@@ -6,6 +6,7 @@ payload:
   - '+.bing.net'
 #  - '+.ai'
   - '+.claude.ai'
+  - '+.claude.com'
   - '+.anthropic.com'
   - '+.claudeusercontent.com'
 
