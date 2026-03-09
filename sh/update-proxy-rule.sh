@@ -15,5 +15,9 @@ echo_log "update HongKong proxy..."
 curl -X PUT  http://127.0.0.1:3721/providers/proxies/HongKong
 sleep 2s
 
+echo_log "update Singapore proxy..."
+curl -X PUT  http://127.0.0.1:3721/providers/proxies/Singapore
+sleep 2s
+
 echo_log "update gpt rules..."
 curl -X PUT  http://127.0.0.1:3721/providers/rules/rule_gpt
