@@ -32,32 +32,41 @@ download_file() {
 
 #------------------------------------------------------
 replace_strings_from_config() {
-#configfile destfile
-    local SED_EXPR=""
-    local CONFIG_FILE="$1"
+    local config_file="$1"
+    local target_file="$2"
 
-    # 检查文件是否存在
-    if [ ! -f "$1" ] || [ ! -f "$2" ]; then
-        echo "Error: Either '$1' or '$2' does not exist."
-        return 1  # 退出函数并返回错误码
-    fi
+    # 基础校验：确保文件均存在
+    [ ! -f "$config_file" ] || [ ! -f "$target_file" ] && return 1
 
-    # 从配置文件中读取所有的键值对并构建 sed 表达式
-    while IFS='=' read -r key value; do
-        # 跳过空行或无效行
-        if [ -z "$key" ] || [ -z "$value" ]; then
-            continue
-        fi
-
-        # 转义特殊字符
-        local ESCAPED_KEY=$(printf '%s\n' "$key" | sed -e 's/[][\/.^$*]/\\&/g')
-        local ESCAPED_VALUE=$(printf '%s\n' "$value" | sed -e 's/[&\\/]/\\&/g')
-
-        # 构建 sed 表达式
-        SED_EXPR="${SED_EXPR}s|{${ESCAPED_KEY}}|${ESCAPED_VALUE}|g;"
-    done < "$CONFIG_FILE"
-
-    sed -i $SED_EXPR $2
+    awk '
+    # 阶段1：读取配置文件 (NR==FNR 表示当前正在处理第一个文件)
+    NR == FNR {
+        idx = index($0, "=")
+        if (idx > 0) {
+            # 以第一个 "=" 为界限进行严格切分
+            k = substr($0, 1, idx-1)
+            v = substr($0, idx+1)
+            # 构建映射字典，键名加上花括号
+            map["{" k "}"] = v
+        }
+        next
+    }
+    # 阶段2：处理目标模板文件
+    {
+        line = $0
+        for (k in map) {
+            out = ""
+            rem = line
+            # 使用纯粹的索引查找，避免死循环和正则注入
+            while ((idx = index(rem, k)) > 0) {
+                out = out substr(rem, 1, idx-1) map[k]
+                rem = substr(rem, idx+length(k))
+            }
+            line = out rem
+        }
+        print line
+    }
+    ' "$config_file" "$target_file" > "${target_file}.tmp" && mv "${target_file}.tmp" "$target_file"
 }
 #------------------------------------------------------
 
