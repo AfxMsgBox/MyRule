@@ -61,7 +61,23 @@ dns:
   # 确保配置 fallback 时能够正常查询
   fallback:
     - 8.8.8.8
-  
+
+proxies:
+  - name: "wgSingapore"
+    type: wireguard
+    ip: {WG_localip}
+    private-key: {WG_privatekey}
+    peers:
+      - server: {WG_server}
+        port: {WG_serverport}
+        public-key: {WG_serverpubkey}
+        allowed-ips: ['0.0.0.0/0']
+        persistent-keepalive: 600
+    udp: true
+    # mtu: 1408
+    remote-dns-resolve: true 
+    dns: [ 8.8.8.8, 1,1,1,1 ] 
+
 proxy-providers:
   HongKong:
     type: http
@@ -129,6 +145,7 @@ proxy-groups:
       - fastHongKong
       - fastTaiWan
       - fastSingapore
+      - wgSingapore
 
   - name: gptProxy
     type: select
@@ -136,6 +153,7 @@ proxy-groups:
       - fastSingapore
       - fastTaiWan
       - fastHongKong
+      - wgSingapore
 
 rule-providers:
   rule_gpt:
