@@ -36,7 +36,7 @@ tun:
   enable: true
   device: utun
   stack: mixed
-  mtu: 1500
+  mtu: 1400
   auto-route: false
   auto-redir: false
   auto-detect-interface: false
