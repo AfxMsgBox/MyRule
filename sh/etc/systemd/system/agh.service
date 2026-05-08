@@ -1,23 +1,28 @@
 [Unit]
+# 服务名描述与项目链接
 Description=AdGuardHome (MyProxy 部署)
 Documentation=https://github.com/AfxMsgBox/MyRule
+# 等本机网络与代理内核就绪后再启动
 Wants=network-online.target
 After=network-online.target proxy_core.service
+# 与 procd respawn 3600 5 5 等价
 StartLimitIntervalSec=3600
 StartLimitBurst=5
 
 [Service]
 Type=simple
-# AGH 二进制约定在 /usr/bin/AdGuardHome；如需改，写到 env.local.conf 的 AGH_BIN 即可。
+# 用 sh -c 引导以便 source env.conf；AGH_BIN 缺省取 /usr/bin/AdGuardHome
 ExecStart=/bin/sh -c '. /etc/proxy/sh/env.conf && exec "${AGH_BIN:-/usr/bin/AdGuardHome}" -c "$AGH_DIR/agh.yaml" -w "$AGH_DIR" --no-check-update'
 
+# 进程崩溃自动重启
 Restart=on-failure
 RestartSec=5
 
-# AGH 需要 53 端口
+# 绑定 53 端口需要 NET_BIND_SERVICE
 AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_RAW
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_RAW
 
+# 日志走 journald
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=MyProxy

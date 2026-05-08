@@ -1,51 +1,48 @@
 #!/bin/sh
 # 拉取最新 core/config.yaml 模板，用本地 local.conf 替换 {占位符}，
-# 替换完成后做一轮粗略 yaml 校验，校验失败则保留旧配置。
+# 替换完成后做粗略 yaml 完整性校验，校验失败保留旧 config.yaml 不替换。
 
-URL_SCRIPT="${REPO_RAW_URL:-https://raw.githubusercontent.com/AfxMsgBox/MyRule/main}/sh/update-core-config.sh"
+# 本脚本所在目录
 DIR_SCRIPT=$(dirname "$(readlink -f "$0")")
+# 自更新用
+URL_SCRIPT="${REPO_RAW_URL:-https://raw.githubusercontent.com/AfxMsgBox/MyRule/main}/sh/update-core-config.sh"
 
+# 加载公共函数与环境变量
 # shellcheck disable=SC1091
 . "$DIR_SCRIPT/common.sh"
 
-URL_CONFIG="${REPO_RAW_URL:-https://raw.githubusercontent.com/AfxMsgBox/MyRule/main}/core/config.yaml"
+# 远程模板 URL
+URL_CONFIG="$REPO_RAW_URL/core/config.yaml"
+# 本地内核工作目录
 DIR_CONFIG="${CORE_DIR:-$DIR_SCRIPT/../core}"
 
 echo_log "更新代理内核 config.yaml"
 
-if [ ! -f "$DIR_CONFIG/local.conf" ]; then
-    echo_log "未找到 $DIR_CONFIG/local.conf，跳过（首次部署请补齐占位符再运行本脚本）"
-    exit 0
-fi
+# 没写本地敏感参数就跳过（首次部署提示）
+[ -f "$DIR_CONFIG/local.conf" ] || { echo_log "未找到 $DIR_CONFIG/local.conf，跳过"; exit 0; }
 
-if ! download_file "$URL_CONFIG" "$DIR_CONFIG/config.new" 1; then
-    echo_log "下载 config.yaml 失败"
-    exit 1
-fi
+# 拉取模板到 .new；失败直接退出
+download_file "$URL_CONFIG" "$DIR_CONFIG/config.new" 1 || { echo_log "下载 config.yaml 失败"; exit 1; }
 
-if ! replace_strings_from_config "$DIR_CONFIG/local.conf" "$DIR_CONFIG/config.new"; then
-    echo_log "占位符替换失败"
-    rm -f "$DIR_CONFIG/config.new"
-    exit 1
-fi
+# 替换 {KEY} 占位符；失败清理后退出
+replace_strings_from_config "$DIR_CONFIG/local.conf" "$DIR_CONFIG/config.new" \
+    || { echo_log "占位符替换失败"; rm -f "$DIR_CONFIG/config.new"; exit 1; }
 
-# 粗略 yaml 完整性检查：必须包含几个关键顶层 key，且没有未替换的 {占位符}
-if ! grep -q '^proxies:' "$DIR_CONFIG/config.new" \
-   || ! grep -q '^proxy-providers:' "$DIR_CONFIG/config.new" \
-   || ! grep -q '^rules:' "$DIR_CONFIG/config.new"; then
-    echo_log "校验失败：config.new 缺少关键段落，放弃替换"
-    rm -f "$DIR_CONFIG/config.new"
-    exit 1
-fi
+# 粗略校验 1：必须含 proxies / proxy-providers / rules 三个顶层段
+grep -q '^proxies:' "$DIR_CONFIG/config.new" \
+    && grep -q '^proxy-providers:' "$DIR_CONFIG/config.new" \
+    && grep -q '^rules:' "$DIR_CONFIG/config.new" \
+    || { echo_log "校验失败：缺少关键段落，放弃替换"; rm -f "$DIR_CONFIG/config.new"; exit 1; }
+
+# 粗略校验 2：不能残留 {占位符}（残留=local.conf 缺键）
 if grep -q '{[A-Za-z_][A-Za-z0-9_]*}' "$DIR_CONFIG/config.new"; then
-    echo_log "校验失败：仍有未替换的占位符，请检查 local.conf"
+    echo_log "校验失败：仍有未替换的占位符（local.conf 缺键？）"
     grep -n '{[A-Za-z_][A-Za-z0-9_]*}' "$DIR_CONFIG/config.new" | head -5
     rm -f "$DIR_CONFIG/config.new"
     exit 1
 fi
 
-# 校验通过，原子替换并保留备份
+# 校验通过：旧文件备份成 .bak，再原子替换
 [ -f "$DIR_CONFIG/config.yaml" ] && mv -f "$DIR_CONFIG/config.yaml" "$DIR_CONFIG/config.yaml.bak"
 mv -f "$DIR_CONFIG/config.new" "$DIR_CONFIG/config.yaml"
-
 echo_log "config.yaml 已更新"

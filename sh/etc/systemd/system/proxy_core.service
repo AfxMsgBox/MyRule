@@ -1,34 +1,37 @@
 [Unit]
+# 服务名描述与项目链接
 Description=MyProxy core (mihomo / clash 兼容)
 Documentation=https://github.com/AfxMsgBox/MyRule
+# 等本机网络与 DNS 就绪后再启动
 Wants=network-online.target
 After=network-online.target nss-lookup.target
+# 在 AGH 之前启动，保证 fake-ip 解析端口先就绪
 Before=adguardhome.service agh.service
-# 与 OpenWrt procd respawn 3600 5 5 等价：1 小时窗口内崩溃 5 次后停止重启
+# 与 procd respawn 3600 5 5 等价：1 小时窗口内崩 5 次后停止重启
 StartLimitIntervalSec=3600
 StartLimitBurst=5
 
 [Service]
 Type=simple
-# 用 sh 引导以 source env.conf 中的 CORE_BIN / CORE_DIR；env.conf 包含 ${VAR:-default}
-# 形式的展开，systemd 的 EnvironmentFile 解析不了。
+# 用 sh -c 引导以便 source env.conf；systemd 的 EnvironmentFile 解析不了 ${VAR:-default}
 ExecStart=/bin/sh -c '. /etc/proxy/sh/env.conf && exec "$CORE_BIN" -d "$CORE_DIR"'
-# mihomo 启动后会创建 TUN 接口；这一步等接口就绪后修正路由（参见 setup-fake-ip-route.sh）。
-ExecStartPost=/bin/sh -c '/etc/proxy/sh/setup-fake-ip-route.sh || true'
+# 等 mihomo 起好后修正 fake-ip 路由；sleep 5 给 TUN 创建与 /30 出现留时间
+ExecStartPost=/bin/sh -c 'sleep 5 && /etc/proxy/sh/setup-fake-ip-route.sh || true'
 
+# 进程崩溃自动重启
 Restart=on-failure
 RestartSec=5
 
-# 内核要管理 TUN，需要 NET_ADMIN；按需放开
+# 内核要管理 TUN，需要 NET_ADMIN；同时放开 53/853 等低位端口绑定
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
 
-# 日志走 journald（journalctl -u proxy_core -f）
+# 日志走 journald；journalctl -t MyProxy / -u proxy_core 都能看
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=MyProxy
 
-# 防止失控：不允许内核 fork 子守护或长期占用临时目录
+# 简单的进程隔离
 PrivateTmp=true
 ProtectSystem=full
 NoNewPrivileges=true

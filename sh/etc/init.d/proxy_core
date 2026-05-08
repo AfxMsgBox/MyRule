@@ -1,37 +1,37 @@
 #!/bin/sh /etc/rc.common
 # 启动代理内核（mihomo 或同协议替代品）的 procd 服务。
-# 内核可执行路径由 /etc/proxy/sh/env.conf 中的 CORE_BIN 决定，换内核只需改一处。
+# CORE_BIN 由 /etc/proxy/sh/env.conf 决定，换内核只改一处。
 
+# OpenWrt rc.common 约定的启停优先级
 START=98
 STOP=2
 USE_PROCD=1
 
+# 加载共享配置
 # shellcheck disable=SC1091
 [ -f /etc/proxy/sh/env.conf ] && . /etc/proxy/sh/env.conf
+# 兜底默认值
 CORE_DIR="${CORE_DIR:-/etc/proxy/core}"
 CORE_BIN="${CORE_BIN:-$CORE_DIR/mihomo}"
 LOG_TAG="${LOG_TAG:-MyProxy}"
 
 start_service() {
-    if [ ! -x "$CORE_BIN" ]; then
-        logger -t "$LOG_TAG" "代理内核可执行文件不存在或不可执行：$CORE_BIN"
-        return 1
-    fi
+    # 二进制不存在或不可执行时记录后退出
+    [ -x "$CORE_BIN" ] || { logger -t "$LOG_TAG" "代理内核不存在或不可执行：$CORE_BIN"; return 1; }
+    # 让 procd 接管进程
     procd_open_instance
+    # 主命令：mihomo -d <work-dir>
     procd_set_param command "$CORE_BIN" -d "$CORE_DIR"
-    # 1 小时窗口内崩溃 5 次后停止重启，避免崩溃循环拖死设备
+    # 1 小时窗口内崩 5 次后停止重启，避免崩溃循环拖死设备
     procd_set_param respawn 3600 5 5
+    # stdout / stderr 走 logread
     procd_set_param stdout 1
     procd_set_param stderr 1
     procd_close_instance
 }
 
-stop_service() {
-    # 交给 procd 默认逻辑用 SIGTERM 收尾，避免 killall 误伤
-    return 0
-}
+# 让 procd 默认 SIGTERM 收尾，避免 killall 误伤
+stop_service() { return 0; }
 
-reload_service() {
-    stop
-    start
-}
+# reload 等价于完整重启
+reload_service() { stop; start; }
