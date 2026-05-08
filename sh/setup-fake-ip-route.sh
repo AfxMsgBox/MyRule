@@ -32,13 +32,18 @@ case "$ACTION" in
     *) exit 0 ;;
 esac
 
-# 找一个真正存在的 TUN 接口；hotplug 用 $INTERFACE 直接命中，systemd
-# ExecStartPost 触发时 TUN 通常还没就绪，最多等 10 秒
+# 找一个真正存在的 TUN 接口。
+# - hotplug 调用：$INTERFACE 已被上游 99-meta-route 校验过命中 $TUN_IFACES，
+#   这里再做一次以防直接调用本脚本时 INTERFACE 被设成非 TUN 接口名；
+#   如果不命中则直接放弃（不 fall through 到 wait 循环）。
+# - systemd ExecStartPost 调用：$INTERFACE 未设置，进 wait 循环最多等 10 秒
+#   等 TUN 接口出现。
 _find_iface() {
     if [ -n "$INTERFACE" ]; then
         for _i in $TUN_IFACES; do
             [ "$INTERFACE" = "$_i" ] && { echo "$INTERFACE"; return 0; }
         done
+        return 1
     fi
     _try=0
     while [ "$_try" -lt 10 ]; do

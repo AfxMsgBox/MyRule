@@ -1,9 +1,26 @@
 #!/bin/sh
-# OpenWrt hotplug 入口：TUN 接口 add 事件触发时，调用统一的路由修正脚本。
+# OpenWrt hotplug 入口：仅当 TUN 接口（${TUN_IFACES} 列表中之一）add 时，
+# 调用统一的路由修正脚本。其他接口（USB 网卡、WiFi roam、wg 隧道等）的
+# add 事件直接忽略，避免不必要的路由删改与日志噪声。
+#
 # 真正的逻辑（删 mihomo /30 错路由 + 加正确网段）在 sh/setup-fake-ip-route.sh，
 # 这一份是为了让 systemd 与 hotplug 共享同一段实现。
 
 [ "$ACTION" = "add" ] || exit 0
+
+# shellcheck disable=SC1091
+[ -f /etc/proxy/sh/env.conf ] && . /etc/proxy/sh/env.conf
+TUN_IFACES="${TUN_IFACES:-utun Meta}"
+
+# 仅对 TUN_IFACES 中列出的接口名响应
+_match=0
+for _i in $TUN_IFACES; do
+    if [ "$INTERFACE" = "$_i" ]; then
+        _match=1
+        break
+    fi
+done
+[ "$_match" = "1" ] || exit 0
 
 # 优先用部署在 /etc/proxy/sh 的副本（OpenWrt 默认安装路径）
 for _p in /etc/proxy/sh/setup-fake-ip-route.sh \
@@ -13,7 +30,7 @@ for _p in /etc/proxy/sh/setup-fake-ip-route.sh \
     fi
 done
 
-# 兜底：找不到统一脚本时，沿用旧实现
+# 兜底：找不到统一脚本时，沿用旧实现（写死 172.16.0.0/12）
 ip route del 172.16.0.0/30 2>/dev/null
 ip route replace 172.16.0.0/12 dev "$INTERFACE"
 logger -t MyProxy "fake-ip fallback route -> $INTERFACE"
