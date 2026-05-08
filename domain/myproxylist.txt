@@ -1,7 +1,7 @@
 payload:
   - '+.4d4y.com'
   - '+.citi.com'
-  - ‘+.cncbinternational.com'
+  - '+.cncbinternational.com'
   - '+.cpubenchmark.net'
   - '+.clerksystems.com'
   - '+.doata.net'
@@ -36,10 +36,6 @@ payload:
 
 #ddns
   - '+.zhome.picp.vip'
-
-#docker
-  - '+.docker.com'
-  - '+.docker.io'
 
 #steam
   - '+.steampowered.com'

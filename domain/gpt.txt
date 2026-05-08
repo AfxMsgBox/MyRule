@@ -36,7 +36,6 @@ payload:
   - '+.ggpht.com'
   - '+.gmail.com'
   - '+.google.cn'
-  - '+.google.cn'
   - '+.googleapis.cn'
   - '+.google.com.hk'
   - '+.google.com'

@@ -1,7 +1,18 @@
 #!/bin/sh
+# TUN 接口上线时把 fake-ip 网段路由到该接口。
+# 配合 core/config.yaml 中 tun.auto-route: false 使用——路由完全由本脚本管理。
 
-[ "$ACTION" = "add" ] && { [ "$INTERFACE" = "Meta" ] || [ "$INTERFACE" = "utun" ]; } && {
-    ip route del 172.16.0.0/30
-    ip route add 172.16.0.0/12 dev "$INTERFACE"
-    logger "Route added to $INTERFACE via hotplug"
-}
+# shellcheck disable=SC1091
+[ -f /etc/proxy/sh/env.conf ] && . /etc/proxy/sh/env.conf
+FAKE_IP_CIDR="${FAKE_IP_CIDR:-172.16.0.0/12}"
+TUN_IFACES="${TUN_IFACES:-utun Meta}"
+LOG_TAG="${LOG_TAG:-MyRule}"
+
+[ "$ACTION" = "add" ] || exit 0
+
+for iface in $TUN_IFACES; do
+    [ "$INTERFACE" = "$iface" ] || continue
+    ip route replace "$FAKE_IP_CIDR" dev "$INTERFACE"
+    logger -t "$LOG_TAG" "fake-ip 路由 $FAKE_IP_CIDR -> $INTERFACE"
+    exit 0
+done
