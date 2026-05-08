@@ -250,14 +250,19 @@ TUN 接口 `add` 事件触发器，仅一行 `exec /etc/proxy/sh/setup-fake-ip-r
 
 ### sh/setup-fake-ip-route.sh （OpenWrt + Debian 共用）
 
-修复 **mihomo 的一个 TUN 路由 bug**：不论 `core/config.yaml` 中 `fake-ip-range` 写多少，mihomo 在 TUN 上线时总是把路由加成 `<网段起始>/30`（只覆盖 4 个 IP，余下整个 fake-ip 段无法被 TUN 接管）。本脚本：
+修复 **mihomo 的一个 TUN 路由 bug**：不论 `core/config.yaml` 中 `fake-ip-range` 写多少，mihomo 在 TUN 上线时总是把路由加成 `<网段起始>/30`（只覆盖 4 个 IP，余下整个 fake-ip 段无法被 TUN 接管）。
 
-1. 等待 `${TUN_IFACES}` 中任一接口出现（systemd ExecStartPost 触发时 TUN 还没就绪，最多等 10 秒；OpenWrt hotplug 直接命中 `$INTERFACE`）；
-2. `ip route del <base>/30` 删掉 mihomo 加错的那条；
-3. `ip route replace ${FAKE_IP_CIDR} dev <iface>` 加上配置中真正期望的网段；
-4. 通过 `logger -t ${LOG_TAG}` 留痕。
+时序坑点：systemd 的 `ExecStartPost` 在 mihomo 进程刚 fork 后就触发，**TUN 尚未创建、/30 错路由尚未加上**——这时 `ip route del /30` 是 no-op，再 `ip route replace /12` 之后 mihomo 又会把 /30 覆盖回来，问题没解。OpenWrt hotplug 没这个问题，因为 hotplug 是接口完全配置好之后才 fire。
 
-`OpenWrt` 由 hotplug 触发；`Debian` 由 `proxy_core.service` 的 `ExecStartPost` 触发。同一段实现，避免双份代码漂移。
+所以脚本流程是：
+
+1. 找到 `${TUN_IFACES}` 中真正存在的接口（最多等 10 秒）；
+2. **等 mihomo 把 `/30` 错路由真的加上来**（最多等 15 秒；hotplug 场景通常立刻命中）；
+3. `ip route del <base>/30` + `ip route replace ${FAKE_IP_CIDR} dev <iface>`；
+4. 睡 3 秒做二次校验，如果 mihomo 又抢回 `/30`（初始连接稳定前偶发）再修一次；
+5. 通过 `logger -t ${LOG_TAG}` 留痕。
+
+最坏情况 ~28s（系统启动期才会跑满），通常 1–3s 完成。OpenWrt 由 hotplug 触发，Debian 由 `proxy_core.service` 的 `ExecStartPost` 触发，同一段实现共用。
 
 ### sh/etc/systemd/system/proxy_core.service / agh.service （Debian / Ubuntu）
 
