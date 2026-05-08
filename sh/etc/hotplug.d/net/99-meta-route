@@ -1,18 +1,19 @@
 #!/bin/sh
-# TUN 接口上线时把 fake-ip 网段路由到该接口。
-# 配合 core/config.yaml 中 tun.auto-route: false 使用——路由完全由本脚本管理。
-
-# shellcheck disable=SC1091
-[ -f /etc/proxy/sh/env.conf ] && . /etc/proxy/sh/env.conf
-FAKE_IP_CIDR="${FAKE_IP_CIDR:-172.16.0.0/12}"
-TUN_IFACES="${TUN_IFACES:-utun Meta}"
-LOG_TAG="${LOG_TAG:-MyRule}"
+# OpenWrt hotplug 入口：TUN 接口 add 事件触发时，调用统一的路由修正脚本。
+# 真正的逻辑（删 mihomo /30 错路由 + 加正确网段）在 sh/setup-fake-ip-route.sh，
+# 这一份是为了让 systemd 与 hotplug 共享同一段实现。
 
 [ "$ACTION" = "add" ] || exit 0
 
-for iface in $TUN_IFACES; do
-    [ "$INTERFACE" = "$iface" ] || continue
-    ip route replace "$FAKE_IP_CIDR" dev "$INTERFACE"
-    logger -t "$LOG_TAG" "fake-ip 路由 $FAKE_IP_CIDR -> $INTERFACE"
-    exit 0
+# 优先用部署在 /etc/proxy/sh 的副本（OpenWrt 默认安装路径）
+for _p in /etc/proxy/sh/setup-fake-ip-route.sh \
+          /usr/local/lib/myrule/setup-fake-ip-route.sh; do
+    if [ -x "$_p" ]; then
+        exec "$_p"
+    fi
 done
+
+# 兜底：找不到统一脚本时，沿用旧实现
+ip route del 172.16.0.0/30 2>/dev/null
+ip route replace 172.16.0.0/12 dev "$INTERFACE"
+logger -t MyProxy "fake-ip fallback route -> $INTERFACE"

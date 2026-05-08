@@ -10,7 +10,7 @@ USE_PROCD=1
 [ -f /etc/proxy/sh/env.conf ] && . /etc/proxy/sh/env.conf
 CORE_DIR="${CORE_DIR:-/etc/proxy/core}"
 CORE_BIN="${CORE_BIN:-$CORE_DIR/mihomo}"
-LOG_TAG="${LOG_TAG:-MyRule}"
+LOG_TAG="${LOG_TAG:-MyProxy}"
 
 start_service() {
     if [ ! -x "$CORE_BIN" ]; then

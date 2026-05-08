@@ -8,7 +8,7 @@ DIR_SCRIPT=$(dirname "$PATH_SCRIPT")
 # 加载共享环境（PROXY_HTTP / CORE_* / REPO_RAW_URL / LOG_TAG ...）
 [ -f "$DIR_SCRIPT/env.conf" ] && . "$DIR_SCRIPT/env.conf"
 
-LOG_TAG="${LOG_TAG:-MyRule}"
+LOG_TAG="${LOG_TAG:-MyProxy}"
 PROXY_HTTP="${PROXY_HTTP:-http://127.0.0.1:7890}"
 REPO_RAW_URL="${REPO_RAW_URL:-https://raw.githubusercontent.com/AfxMsgBox/MyRule/main}"
 _URL_COMMON_SH="${_URL_COMMON_SH:-$REPO_RAW_URL/sh/common.sh}"
