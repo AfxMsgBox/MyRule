@@ -71,7 +71,7 @@ GitHub: AfxMsgBox/MyRule (main)
         │
         │ wget inst.sh | sh                  （首次安装）
         ▼
-inst.sh ─▶ download-all-scripts.sh ─▶ 把脚本/服务/hotplug 全部下到本地
+inst.sh ─▶ 把脚本/服务/hotplug 下到本地，刷新配置，启用并启动服务
                                      ├──▶ /etc/init.d/{agh, proxy_core}
                                      ├──▶ /etc/hotplug.d/net/99-meta-route
                                      └──▶ /etc/proxy/sh/{env.conf, common.sh, *.sh}
@@ -111,8 +111,7 @@ update-all-configs(-restart-services).sh
 ├── .gitignore
 ├── sh/
 │   ├── env.conf                                 # 共享环境（端口/路径/URL/日志 tag）
-│   ├── inst.sh                                  # 一键安装入口
-│   ├── download-all-scripts.sh                  # 把仓库脚本与服务文件下到本地
+│   ├── inst.sh                                  # 一键安装：下载/分发服务文件/刷新配置/启动服务
 │   ├── common.sh                                # 公共函数库（下载/替换/锁/日志/yaml/自更新）
 │   ├── update-all-configs.sh                    # 顶层编排：依次刷新四类配置
 │   ├── update-all-configs-restart-services.sh   # 全量更新成功后重启服务
@@ -197,15 +196,19 @@ dir_self=$(dirname "$(readlink -f "$0")")  # 本脚本目录
 
 > `path_self` / `dir_self` 是 `common.sh` 派生的局部变量；调用方设置的 `url_self` 也是局部变量。三者都不带 `MP_` 前缀，对照 env 中的全局变量一目了然。
 
-### sh/inst.sh / sh/download-all-scripts.sh
+### sh/inst.sh
 
-`inst.sh` 一行 `wget | sh` 的入口；`download-all-scripts.sh` 自动识别系统：
+唯一的安装入口，前提是本机已按默认路径装好 `mihomo`（`/etc/proxy/core/mihomo`）和 `AdGuardHome`（`/usr/bin/AdGuardHome`）。inst 完成四件事：
 
-- 检测到 OpenWrt（`/etc/openwrt_release` 或 `/etc/os-release` 含 `ID=openwrt`）→ 装 `init.d/{agh,proxy_core}` 与 `hotplug.d/net/99-meta-route`；
-- 检测到 systemd（`systemctl` + `/etc/systemd/system`）→ 装 `proxy_core.service` 与 `agh.service`，并执行 `systemctl daemon-reload`；
-- 都识别不出 → 报错并提示通过 `OS_TYPE=openwrt|systemd sh download-all-scripts.sh` 强制指定。
+1. 下载 `sh/*` 公共脚本到 `/etc/proxy/sh/`；
+2. 按 OS 分发服务文件：
+   - OpenWrt（`/etc/openwrt_release` 或 `/etc/os-release` 含 `ID=openwrt`）→ `init.d/{proxy_core,agh}` + `hotplug.d/net/99-meta-route`；
+   - systemd（有 `systemctl` 且 `/etc/systemd/system` 存在）→ `proxy_core.service` + `agh.service`，并 `systemctl daemon-reload`；
+   - 都识别不出 → 报错并提示通过 `OS_TYPE=openwrt|systemd sh inst.sh` 强制指定。
+3. 调用 `update-all-configs.sh` 生成 `dns.conf` 与 `core/config.yaml`（缺 `local.conf` 时优雅跳过 yaml 生成）；
+4. `enable` 并 `start` 两个服务（任一失败仅警告，不中断 inst）。
 
-公共 `sh/*.sh` 两类系统都会装。之所以仍然用 `wget` 而不是 `common.sh` 的 `download_file`：首次安装时 `common.sh` 自身也还没就位，必须用 BusyBox / GNU `wget` 引导。
+之所以 inst 内仍然用 `wget` 而不是 `common.sh` 的 `download_file`：首次安装时 `common.sh` 自身也还没就位，必须用 BusyBox / GNU `wget` 引导。这也是仓库内**唯一**允许在脚本里硬编码 `MP_REPO_RAW_URL` 默认值的地方。
 
 ### sh/update-all-configs.sh / sh/update-all-configs-restart-services.sh
 
@@ -346,50 +349,76 @@ Clash payload YAML 域名清单。**修复**：
 /etc/proxy/agh/     AdGuardHome 工作目录
 ```
 
-### OpenWrt
+### 前置：装好 mihomo 与 AdGuardHome
 
-#### 1. 安装内核与 AdGuardHome
+inst 脚本不负责安装内核与 AGH，请先按默认路径就位：
 
-- 把 AdGuardHome 装到 `/usr/bin/AdGuardHome`，工作目录 `/etc/proxy/agh`；
-- 把 mihomo 装到 `/etc/proxy/core/mihomo`（或在 `sh/env.local.conf` 改 `CORE_BIN`）。
+- `mihomo` → `/etc/proxy/core/mihomo`（如改路径请在后续 `env.local.conf` 中设 `MP_CORE_BIN`）
+- `AdGuardHome` → `/usr/bin/AdGuardHome`（如改路径请在 `env.local.conf` 中设 `MP_AGH_BIN`）
 
-#### 2. 一键拉取本仓库
+Debian / Ubuntu 还需要：
 
 ```sh
-mkdir -p /etc/proxy/sh && cd /etc/proxy/sh
+sudo apt install -y curl wget util-linux iproute2
+echo 'net.ipv4.ip_forward=1' | sudo tee /etc/sysctl.d/99-myproxy.conf
+sudo sysctl --system
+```
+
+如果用 `nftables` / `iptables` 防火墙，放行 `7890` / `3721` / `253` / `53`。
+
+### 一键安装（OpenWrt 与 Debian/Ubuntu 通用）
+
+```sh
+# OpenWrt（默认 root）
 wget -O- https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/inst.sh | sh
+
+# Debian / Ubuntu
+sudo sh -c 'wget -O- https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/inst.sh | sh'
 ```
 
-`download-all-scripts.sh` 会自动识别为 openwrt，把 `init.d/{proxy_core,agh}` 与 `hotplug.d/net/99-meta-route` 装到 `/etc/`。
+`inst.sh` 自动完成：
 
-#### 3. 配置本地敏感参数
+1. 下载 `sh/*` 公共脚本到 `/etc/proxy/sh/`；
+2. 按 OS 装服务文件：OpenWrt → `init.d/{proxy_core,agh}` + `hotplug.d/net/99-meta-route`；systemd → `/etc/systemd/system/{proxy_core,agh}.service`；
+3. 调用 `update-all-configs.sh` 生成 `dns.conf` 与 `core/config.yaml`；
+4. `enable` + `start` 两个服务。
 
-`/etc/proxy/core/local.conf` 写入：
+自托管或 fork：
+
+```sh
+MP_REPO_RAW_URL=https://my.fork.example/raw \
+    wget -O- https://my.fork.example/raw/sh/inst.sh | sh
+```
+
+### 配置本地敏感参数（首次部署必须）
+
+`/etc/proxy/core/local.conf` 写入订阅 URL 与节点参数：
 
 ```
-SUBSCRIBE_URL=https://api.subcsub.com/sub?target=clash&url=<你的订阅 URL，URL-encoded>
+SUBSCRIBE_URL=https://api.subcsub.com/sub?target=clash&url=<URL-encoded>
 sshSOS_password=...
 sshSOS_user=...
 sshSOS_server=...
 sshSOS_port=22
 ```
 
-如需覆盖默认端口/路径，再写 `/etc/proxy/sh/env.local.conf`，例如：
+如需覆盖默认端口/路径，可建 `/etc/proxy/sh/env.local.conf`：
 
 ```
-PROXY_HTTP=http://127.0.0.1:17890
-CORE_BIN=/etc/proxy/core/sing-box-clash
+MP_PROXY_HTTP=http://127.0.0.1:17890
+MP_CORE_BIN=/etc/proxy/core/sing-box-clash
+MP_NOUPDATE=false   # 让 cron 自动同步最新脚本
 ```
 
-#### 4. 首次刷新并启动
+填好后重新刷新 + 重启：
 
 ```sh
-sh /etc/proxy/sh/update-all-configs.sh
-service proxy_core enable && service proxy_core start
-service agh enable && service agh start
+sh /etc/proxy/sh/update-all-configs-restart-services.sh
 ```
 
-#### 5. 推荐计划任务（cron）
+### 推荐计划任务
+
+OpenWrt（cron）：
 
 ```cron
 */5 * * * * sh /etc/proxy/sh/keeplive.sh
@@ -397,49 +426,7 @@ service agh enable && service agh start
 0   4 * * * sh /etc/proxy/sh/update-all-configs-restart-services.sh
 ```
 
-### Debian / Ubuntu
-
-#### 1. 准备目录与依赖
-
-```sh
-sudo mkdir -p /etc/proxy/{sh,core,agh}
-sudo apt install -y curl wget util-linux iproute2
-```
-
-把 mihomo 解压到 `/etc/proxy/core/mihomo`（`chmod +x`），AGH 解压到 `/usr/bin/AdGuardHome`（`chmod +x`）。
-
-> Debian 上需要打开 IPv4 转发：`echo 'net.ipv4.ip_forward=1' | sudo tee /etc/sysctl.d/99-myproxy.conf && sudo sysctl --system`。如果用 `nftables` / `iptables` 防火墙，请放行 `7890` / `3721` / `253` / `53`。
-
-#### 2. 一键拉取本仓库
-
-```sh
-sudo sh -c 'cd /etc/proxy/sh && wget -O- https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/inst.sh | sh'
-```
-
-`download-all-scripts.sh` 会自动识别为 systemd，把 `proxy_core.service` 与 `agh.service` 装到 `/etc/systemd/system/` 并执行 `systemctl daemon-reload`。
-
-#### 3. 配置本地敏感参数
-
-同 OpenWrt：填写 `/etc/proxy/core/local.conf` 与（可选）`/etc/proxy/sh/env.local.conf`。
-
-#### 4. 首次刷新并启动
-
-```sh
-sudo sh /etc/proxy/sh/update-all-configs.sh
-sudo systemctl enable --now proxy_core.service
-sudo systemctl enable --now agh.service
-```
-
-观察日志：
-
-```sh
-journalctl -t MyProxy -f                  # 全部带 MyProxy tag 的脚本日志
-journalctl -u proxy_core.service -f       # 内核 stdout / stderr
-```
-
-#### 5. 推荐计划任务
-
-可继续用 cron（`/etc/cron.d/myproxy`），也可用 systemd timer：
+Debian / Ubuntu 同样可以用 cron；也可改用 systemd timer：
 
 ```ini
 # /etc/systemd/system/myproxy-keeplive.timer
@@ -452,8 +439,6 @@ Persistent=true
 WantedBy=timers.target
 
 # /etc/systemd/system/myproxy-keeplive.service
-[Unit]
-Description=MyProxy keeplive runner
 [Service]
 Type=oneshot
 ExecStart=/etc/proxy/sh/keeplive.sh
@@ -463,11 +448,11 @@ ExecStart=/etc/proxy/sh/keeplive.sh
 sudo systemctl enable --now myproxy-keeplive.timer
 ```
 
-`update-proxy-rule.sh` 与 `update-all-configs-restart-services.sh` 同理，按需做对应 service+timer。
+`update-proxy-rule.sh` 与 `update-all-configs-restart-services.sh` 同理，按需各自 service + timer。
 
-#### 6. 关于路由修正
+### 关于路由修正
 
-mihomo 在 Debian 启动 TUN 后同样会把 fake-ip 路由加成 `/30`。`proxy_core.service` 的 `ExecStartPost` 会调用 `setup-fake-ip-route.sh`，等 TUN 接口就绪后自动修正成 `${FAKE_IP_CIDR}`，**无须** networkd-dispatcher / if-up.d 这类额外集成。如果你重启 mihomo 后仍要再次修路由，`systemctl restart proxy_core` 即可，ExecStartPost 会再跑一次。
+mihomo 启动 TUN 后会把 fake-ip 路由错加成 `/30`。OpenWrt 由 `99-meta-route` hotplug 触发；Debian 由 `proxy_core.service` 的 `ExecStartPost`（含 `sleep 5`）触发；二者都调用同一份 `setup-fake-ip-route.sh`。重启 mihomo 后路由会再被自动修正，无需手动操作。
 
 ---
 
@@ -546,5 +531,5 @@ service proxy_core enable && service proxy_core start
 6. **配置坏了不上线**：`update-core-config.sh` 校验失败保留旧 `config.yaml`；`update-all-configs-restart-services.sh` 任一步失败就不重启服务。
 7. **provider 自动发现**：`update-proxy-rule.sh` 从 `config.yaml` 读出所有 provider 自动 PUT；增减 provider 不再需要同步改脚本。
 8. **集中配置 + 通用命名**：`sh/env.conf` 收敛硬编码，`core/proxy_core/CORE_BIN` 全部用通用词，未来换内核或迁移仓库都只改一处。
-9. **跨平台**：相同的 `sh/` 脚本同时跑在 OpenWrt（BusyBox `sh`）和 Debian/Ubuntu（dash）上，全部用 POSIX 子集；OS 差异只体现在服务文件层面（procd vs systemd），由 `download-all-scripts.sh` 在安装时按系统分发。
+9. **跨平台**：相同的 `sh/` 脚本同时跑在 OpenWrt（BusyBox `sh`）和 Debian/Ubuntu（dash）上，全部用 POSIX 子集；OS 差异只体现在服务文件层面（procd vs systemd），由 `inst.sh` 在安装时按系统分发。
 9. **保活**：`keeplive.sh` 配合 `disable-keep-alive: true`、`keep-alive-idle: 1800` 缓解长连断流；探测流量必须经过代理链路，确保探测的是真实出口。
