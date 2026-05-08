@@ -9,19 +9,27 @@
 #   MP_*  来自 env.conf 的全局变量（必须）
 #   小写  本文件 / 调用方的局部变量
 
-# 当前脚本绝对路径（自更新时用来覆写自己）
-path_self=$(readlink -f "$0")
+# 当前脚本绝对路径（自更新时用来覆写自己）；wget|sh 管道场景下 $0 可能是 "sh"
+path_self=$(readlink -f "$0" 2>/dev/null || echo "$0")
 # 当前脚本所在目录
 dir_self=$(dirname "$path_self")
 
-# env.conf 是硬性依赖，缺失即报错退出
-[ -f "$dir_self/env.conf" ] || { echo "缺少 $dir_self/env.conf" >&2; exit 1; }
+# env.conf 查找：先 dir_self（开发 / 自定义路径）；再 /etc/proxy/sh（约定部署位置，
+# 用于 inst.sh 通过 wget|sh 启动时 $0 不指向真实路径的场景）
+env_dir=""
+for d in "$dir_self" /etc/proxy/sh; do
+    if [ -f "$d/env.conf" ]; then
+        env_dir="$d"
+        break
+    fi
+done
+[ -n "$env_dir" ] || { echo "缺少 env.conf（试过 $dir_self 与 /etc/proxy/sh）" >&2; exit 1; }
 # 加载全局变量
 # shellcheck disable=SC1091
-. "$dir_self/env.conf"
+. "$env_dir/env.conf"
 # 本地覆盖（可选）
 # shellcheck disable=SC1091
-[ -f "$dir_self/env.local.conf" ] && . "$dir_self/env.local.conf"
+[ -f "$env_dir/env.local.conf" ] && . "$env_dir/env.local.conf"
 
 # ----------------------------------------------------------------------
 # 日志：同时打到终端和系统 log（logread / journalctl 都能查到）
@@ -163,20 +171,30 @@ _yaml_extract_keys() {
 }
 
 # ----------------------------------------------------------------------
-# 自更新：三级优先决定是否跳过：
-#   1) 命令行含 --noupdate          → 跳过
-#   2) MP_NOUPDATE=true / 1 / yes   → 跳过
-#   3) 否则 → 下载最新 url_self 覆盖自身后 exec 重启
-# 调用方未设 url_self 时回退到 MP_URL_COMMON_SH（仅当本文件被直接执行时有意义）
+# 自更新决策：
+#   1) 命令行含 --noupdate      → 跳过
+#   2) MP_NOUPDATE=true/1/yes  → 跳过
+#   3) caller 未设 url_self    → 跳过（如 inst.sh 走 wget|sh，$0 不可靠，
+#                                    强行更新会写到 /usr/bin/sh 等危险位置）
+#   4) common.sh 被直接执行     → 自动用 MP_URL_COMMON_SH 更新 common.sh 自己
+#   5) 其它情况                 → 用 url_self 更新 caller 后 exec 重启
 # ----------------------------------------------------------------------
 case " $* " in
     *" --noupdate "*) MP_NOUPDATE=true ;;
 esac
 
+# 直接执行 common.sh 时（如 update-all-configs.sh 用 sh common.sh 触发自身刷新），
+# 自动把 url_self 指向 common.sh 的 raw URL
+case "$0" in
+    *common.sh) url_self="${url_self:-$MP_URL_COMMON_SH}" ;;
+esac
+
 case "$MP_NOUPDATE" in
     1|true|TRUE|yes|YES|on|ON) ;;
     *)
-        if download_file "${url_self:-$MP_URL_COMMON_SH}" "$path_self"; then
+        if [ -z "$url_self" ]; then
+            : # caller 没声明更新目标，安静跳过
+        elif download_file "$url_self" "$path_self"; then
             echo_log "self-update OK: $path_self"
             # 透传原参数 + 加 --noupdate 防止再次重入
             exec sh "$path_self" "$@" --noupdate
