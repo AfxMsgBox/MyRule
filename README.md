@@ -143,39 +143,59 @@ update-all-configs(-restart-services).sh
 
 ## 文件逐一说明
 
-### sh/env.conf（新增）
+### sh/env.conf（硬性依赖）
 
-被 `common.sh`、`init.d/proxy_core`、`99-meta-route` 共同 `source`。集中管理：
+所有脚本必须能 source 到 `env.conf`，否则报错退出（init.d / hotplug / systemd unit 也是）。设计要点：
+
+- **命名约定**：env 中的全局变量统一加 `MP_` 前缀（MyProxy）。读到 `MP_FOO` 一眼就知道来自 env；不带前缀的（小写、`_` 前缀等）是脚本/函数局部变量。
+- **本地覆盖**：相同位置的 `env.local.conf` 会在 `env.conf` 之后被 source，可以覆盖任何 `MP_*`，并且**不入库**（`.gitignore` 已忽略）。
+- **不再用 `${VAR:-default}` 兜底**：`env.conf` 提供完整默认值，调用方直接 `$MP_FOO` 用。
+- **URL 全部收敛进 env**：仓库 raw 根、各脚本自更新 URL、配置 / 清单 URL 都列在 env 里，迁移仓库或自托管时改一处即可。
 
 | 变量 | 默认值 | 用途 |
 | --- | --- | --- |
-| `PROXY_HTTP` | `http://127.0.0.1:7890` | 下载与保活走的本地 HTTP 代理 |
-| `CORE_API` | `http://127.0.0.1:3721` | 代理内核外部控制器 |
-| `CORE_DNS_PORT` | `253` | 内核内置 DNS 端口（fake-ip 出口） |
-| `FAKE_IP_CIDR` | `172.16.0.0/12` | fake-ip 网段，hotplug 路由依据 |
-| `CORE_DIR` / `CORE_BIN` | `/etc/proxy/core` / `$CORE_DIR/mihomo` | 内核工作目录与可执行文件 |
-| `AGH_DIR` | `/etc/proxy/agh` | AdGuardHome 工作目录 |
-| `TUN_IFACES` | `utun Meta` | 触发 hotplug 路由挂载的接口名 |
-| `REPO_RAW_URL` | `https://raw.githubusercontent.com/AfxMsgBox/MyRule/main` | 仓库 raw 根 URL |
-| `EXCLUDE_TLDS` | `bj` | 写入 `dns.conf` 时排除的伪 TLD |
-| `LOG_TAG` | `MyProxy` | `logger -t` 用的统一 tag（`logread -e MyProxy` / `journalctl -t MyProxy`） |
+| `MP_NOUPDATE` | `true` | 自更新策略，见下文 |
+| `MP_REPO_RAW_URL` | `https://raw.githubusercontent.com/AfxMsgBox/MyRule/main` | 仓库 raw 根 URL |
+| `MP_PROXY_HTTP` | `http://127.0.0.1:7890` | 本地 HTTP 代理出口 |
+| `MP_CORE_API` | `http://127.0.0.1:3721` | 代理内核外部控制器 |
+| `MP_CORE_DNS_PORT` | `253` | 内核内置 DNS 端口（fake-ip 出口） |
+| `MP_FAKE_IP_CIDR` | `172.16.0.0/12` | fake-ip 网段，路由依据 |
+| `MP_CORE_DIR` / `MP_CORE_BIN` | `/etc/proxy/core` / `$MP_CORE_DIR/mihomo` | 内核工作目录与可执行文件 |
+| `MP_AGH_DIR` / `MP_AGH_BIN` | `/etc/proxy/agh` / `/usr/bin/AdGuardHome` | AGH 工作目录与可执行文件 |
+| `MP_TUN_IFACES` | `utun Meta` | hotplug / 修路由要匹配的 TUN 接口名 |
+| `MP_EXCLUDE_TLDS` | `bj` | 写 `dns.conf` 时排除的伪 TLD |
+| `MP_LOG_TAG` | `MyProxy` | `logger -t` 统一 tag |
+| `MP_URL_*` | 由 `MP_REPO_RAW_URL` 派生 | 各脚本与远程模板/清单的 URL |
 
-末尾会尝试 source `sh/env.local.conf`（被 `.gitignore` 忽略）做本地覆盖。
+#### 自更新（`--noupdate` / `MP_NOUPDATE`）三级优先
+
+每个 `update-*.sh` 通过 `common.sh` 实现"启动时把自己升级到最新版后 exec 重启"。是否跳过自更新按以下顺序决定：
+
+1. **命令行含 `--noupdate`** → 跳过；
+2. 否则取 **`MP_NOUPDATE`**（来自 env.conf / env.local.conf）：`true` / `1` / `yes` 均跳过；
+3. 兜底：**默认 `true`**，即默认跳过自更新。
+
+> 默认跳过是为了安全：开发或运维场景下手动跑脚本时，本地修改不会被远程版本覆盖。
+> 让 cron 自动同步的部署，请在 `env.local.conf` 中显式设 `MP_NOUPDATE=false`。
 
 ### sh/common.sh
 
-公共函数库。除继承原有 `download_file` / `replace_strings_from_config` / `echo_log` 之外，新增：
+公共函数库；调用方第一行约定：
 
-- `_run_step <label> <cmd…>`：包一段子任务，统一日志开头/结尾，返回子命令 exit。
-- `_acquire_lock [path]`：基于 `flock` 的并发锁；若系统没有 flock 则降级为 noop。
-- `_yaml_extract_keys <file> <top>`：从缩进式 yaml 取顶层 map 下的子 key 列表，给 `update-proxy-rule.sh` 自动发现 provider。
+```sh
+url_self="$MP_URL_UPDATE_AGH_CONFIG_SH"   # 本脚本对应的 raw URL（来自 env）
+dir_self=$(dirname "$(readlink -f "$0")")  # 本脚本目录
+. "$dir_self/common.sh"                    # 引入函数 + env.conf + env.local.conf
+```
 
-修复要点：
+`common.sh` 启动时强制 source `env.conf`（缺失即 exit 1），随后可选 source `env.local.conf`，最后跑一段自更新逻辑。提供函数：
 
-- `download_file` 用 `case` 严格判断 `use_proxy`，传 `0/false/no` 时不再误启用代理；代理失败时自动直连重试；临时文件改用 `mktemp` 避免并发互踩。
-- `echo_log` 通过 `logger -t "$LOG_TAG"` 写日志，方便 `logread -e MyProxy`（OpenWrt）/ `journalctl -t MyProxy`（Debian）过滤。
-- 自更新段透传原始命令行参数：`exec sh "$PATH_SCRIPT" "$@" --noupdate`。
-- 所有变量加引号，避免空格 / 特殊字符破坏。
+- `echo_log`：`echo` + `logger -t $MP_LOG_TAG`，`logread -e MyProxy`（OpenWrt）/ `journalctl -t MyProxy`（Debian）都能查到。
+- `download_file <url> <dst> [use_proxy=1] [min_size=8]`：走 `MP_PROXY_HTTP` 下载；代理失败自动直连回退；写 `mktemp` 后原子 `mv`。
+- `replace_strings_from_config <kv> <target>`：把 `target` 中的 `{KEY}` 用 kv 文件的 `KEY=VALUE` 替换；按"第一个 `=`"切分以容纳 value 中的 `=`。
+- `_yaml_extract_keys <file> <top-key>`：从缩进式 yaml 取顶层 map 下的子 key 列表（给 `update-proxy-rule.sh` 自动发现 provider）。
+
+> `path_self` / `dir_self` 是 `common.sh` 派生的局部变量；调用方设置的 `url_self` 也是局部变量。三者都不带 `MP_` 前缀，对照 env 中的全局变量一目了然。
 
 ### sh/inst.sh / sh/download-all-scripts.sh
 

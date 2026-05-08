@@ -3,17 +3,13 @@
 # 任一步失败仍继续，最终 exit code 反映"是否全部成功"，
 # 上层 update-all-configs-restart-services.sh 据此决定要不要重启服务。
 
+# 自更新用：本脚本的 raw URL（来自 env 全局）
+url_self="$MP_URL_UPDATE_ALL_CONFIGS_SH"
 # 本脚本所在目录
-DIR_SCRIPT=$(dirname "$(readlink -f "$0")")
-# 自更新用：common.sh 据此把本脚本升级到最新
-URL_SCRIPT="${REPO_RAW_URL:-https://raw.githubusercontent.com/AfxMsgBox/MyRule/main}/sh/update-all-configs.sh"
-
-# 先把 common.sh 升级到最新（直接执行时它会自更新自己）
-sh "$DIR_SCRIPT/common.sh"
-
-# 加载公共函数与环境变量
+dir_self=$(dirname "$(readlink -f "$0")")
+# 加载公共函数与 env（env 缺失会在 common.sh 中报错退出）
 # shellcheck disable=SC1091
-. "$DIR_SCRIPT/common.sh"
+. "$dir_self/common.sh"
 
 # 用 flock 防止 cron 与手动同时跑互踩
 exec 9>/var/lock/myproxy-update.lock 2>/dev/null
@@ -25,13 +21,13 @@ echo_log "============ update all configs ============"
 rc=0
 # 第 1 步：AGH dns.conf
 echo_log ">>> 更新 AdGuardHome dns.conf"
-sh "$DIR_SCRIPT/update-agh-config.sh" --noupdate || rc=$?
+sh "$dir_self/update-agh-config.sh" --noupdate || rc=$?
 # 第 2 步：代理内核 config.yaml
 echo_log ">>> 更新代理内核 config.yaml"
-sh "$DIR_SCRIPT/update-core-config.sh" --noupdate || rc=$?
+sh "$dir_self/update-core-config.sh" --noupdate || rc=$?
 # 第 3 步：订阅与规则集
 echo_log ">>> 刷新订阅与规则集"
-sh "$DIR_SCRIPT/update-proxy-rule.sh" --noupdate || rc=$?
+sh "$dir_self/update-proxy-rule.sh" --noupdate || rc=$?
 
 # 总结输出
 [ "$rc" -eq 0 ] && echo_log "============ all done ============" \

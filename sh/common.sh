@@ -1,22 +1,27 @@
 #!/bin/sh
 # 公共函数库：被各 update-*.sh 通过 `source common.sh` 引入。
 # 提供：日志、下载、占位符替换、yaml 提取、脚本自更新。
+#
+# 调用方约定：在 source 本文件之前可设 url_self 指向自己的 raw URL，
+# 自更新会用它把当前脚本覆盖为最新版后 exec 重启。
+#
+# 命名约定：
+#   MP_*  来自 env.conf 的全局变量（必须）
+#   小写  本文件 / 调用方的局部变量
 
 # 当前脚本绝对路径（自更新时用来覆写自己）
-PATH_SCRIPT=$(readlink -f "$0")
+path_self=$(readlink -f "$0")
 # 当前脚本所在目录
-DIR_SCRIPT=$(dirname "$PATH_SCRIPT")
+dir_self=$(dirname "$path_self")
 
-# 加载共享环境变量（PROXY_HTTP / CORE_* / REPO_RAW_URL / LOG_TAG ...）
+# env.conf 是硬性依赖，缺失即报错退出
+[ -f "$dir_self/env.conf" ] || { echo "缺少 $dir_self/env.conf" >&2; exit 1; }
+# 加载全局变量
 # shellcheck disable=SC1091
-[ -f "$DIR_SCRIPT/env.conf" ] && . "$DIR_SCRIPT/env.conf"
-
-# 兜底默认值，防止 env.conf 缺失时变量为空
-LOG_TAG="${LOG_TAG:-MyProxy}"
-PROXY_HTTP="${PROXY_HTTP:-http://127.0.0.1:7890}"
-REPO_RAW_URL="${REPO_RAW_URL:-https://raw.githubusercontent.com/AfxMsgBox/MyRule/main}"
-# common.sh 自身的 raw URL；当被 sh common.sh 直接执行时用
-_URL_COMMON_SH="$REPO_RAW_URL/sh/common.sh"
+. "$dir_self/env.conf"
+# 本地覆盖（可选）
+# shellcheck disable=SC1091
+[ -f "$dir_self/env.local.conf" ] && . "$dir_self/env.local.conf"
 
 # ----------------------------------------------------------------------
 # 日志：同时打到终端和系统 log（logread / journalctl 都能查到）
@@ -25,7 +30,7 @@ echo_log() {
     # 输出到 stdout 便于实时观察
     echo "$1"
     # 写入系统日志，统一 tag 方便过滤
-    logger -t "$LOG_TAG" -- "$1"
+    logger -t "$MP_LOG_TAG" -- "$1"
 }
 
 # ----------------------------------------------------------------------
@@ -38,7 +43,7 @@ get_file_size() {
 # ----------------------------------------------------------------------
 # 下载（带代理 / 直连回退 / 大小校验 / 原子替换）
 #   download_file <url> <dst> [use_proxy=1] [min_size=8]
-#   use_proxy: 1/true/yes 才走 PROXY_HTTP；其他值（含 0/no/空）走直连。
+#   use_proxy: 1/true/yes 才走 MP_PROXY_HTTP；其它值（含 0/no/空）走直连。
 #   走代理失败时自动直连重试一次。
 # ----------------------------------------------------------------------
 download_file() {
@@ -53,7 +58,7 @@ download_file() {
 
     # 根据 use_proxy 决定 curl 是否带 --proxy
     case "$use_proxy" in
-        1|true|TRUE|yes|YES|on|ON) proxy_arg="--proxy $PROXY_HTTP" ;;
+        1|true|TRUE|yes|YES|on|ON) proxy_arg="--proxy $MP_PROXY_HTTP" ;;
         *)                          proxy_arg="" ;;
     esac
 
@@ -61,8 +66,9 @@ download_file() {
     tmp=$(mktemp 2>/dev/null) || tmp="/tmp/.dl.$$"
 
     # 第一次尝试：按 use_proxy 设置走代理或直连
+    # --fail 让 4xx/5xx 也当下载失败，避免把 404 HTML 当成正常文件覆盖目标
     # shellcheck disable=SC2086
-    curl --silent --show-error --connect-timeout 10 --max-time 60 \
+    curl --silent --show-error --fail --connect-timeout 10 --max-time 60 \
          --retry 2 --retry-delay 1 \
          $proxy_arg "$url" -o "$tmp" >/dev/null 2>&1
     rc=$?
@@ -70,7 +76,7 @@ download_file() {
     # 走代理失败时自动降级直连重试一次
     if [ "$rc" -ne 0 ] && [ -n "$proxy_arg" ]; then
         echo_log "下载经代理失败，回退直连：$url"
-        curl --silent --show-error --connect-timeout 10 --max-time 60 \
+        curl --silent --show-error --fail --connect-timeout 10 --max-time 60 \
              --retry 2 --retry-delay 1 \
              "$url" -o "$tmp" >/dev/null 2>&1
         rc=$?
@@ -128,7 +134,6 @@ replace_strings_from_config() {
 # ----------------------------------------------------------------------
 # 从缩进式 yaml 取顶层 map 下的子 key 列表（够覆盖 mihomo 配置）。
 #   _yaml_extract_keys <file> <top-key>
-# 例：_yaml_extract_keys core/config.yaml proxy-providers
 # ----------------------------------------------------------------------
 _yaml_extract_keys() {
     # 待解析的 yaml 文件
@@ -158,20 +163,25 @@ _yaml_extract_keys() {
 }
 
 # ----------------------------------------------------------------------
-# 脚本自更新：调用方 source 前设 URL_SCRIPT 指向自己的 raw URL，
-# 启动参数含 --noupdate 时跳过；否则下载替换自身后 exec 重启并透传原参数。
+# 自更新：三级优先决定是否跳过：
+#   1) 命令行含 --noupdate          → 跳过
+#   2) MP_NOUPDATE=true / 1 / yes   → 跳过
+#   3) 否则 → 下载最新 url_self 覆盖自身后 exec 重启
+# 调用方未设 url_self 时回退到 MP_URL_COMMON_SH（仅当本文件被直接执行时有意义）
 # ----------------------------------------------------------------------
-# 已包含 --noupdate 就不再自更新（避免无限重入）
 case " $* " in
-    *" --noupdate "*) ;;
+    *" --noupdate "*) MP_NOUPDATE=true ;;
+esac
+
+case "$MP_NOUPDATE" in
+    1|true|TRUE|yes|YES|on|ON) ;;
     *)
-        # 没传 URL_SCRIPT 时回退更新 common.sh 自身（直接 sh common.sh 时用得到）
-        if download_file "${URL_SCRIPT:-$_URL_COMMON_SH}" "$PATH_SCRIPT"; then
-            echo_log "self-update OK: $PATH_SCRIPT"
+        if download_file "${url_self:-$MP_URL_COMMON_SH}" "$path_self"; then
+            echo_log "self-update OK: $path_self"
             # 透传原参数 + 加 --noupdate 防止再次重入
-            exec sh "$PATH_SCRIPT" "$@" --noupdate
+            exec sh "$path_self" "$@" --noupdate
         else
-            echo_log "self-update FAILED: $PATH_SCRIPT"
+            echo_log "self-update FAILED: $path_self"
         fi
         ;;
 esac

@@ -1,13 +1,18 @@
 #!/bin/sh
-# 首次安装：把仓库脚本与对应平台的服务文件下到本地。
-# 自动识别 OpenWrt（procd + hotplug）与 systemd（Debian/Ubuntu），分发不同的服务文件。
+# 首次安装 / 全量重装：把仓库脚本与对应平台的服务文件下到本地。
+# 自动识别 OpenWrt（procd + hotplug）与 systemd（Debian/Ubuntu）。
+#
+# 注意：这是 bootstrap 阶段，env.conf 尚未下载，所以本脚本是唯一允许
+# 在脚本内部硬编码 MP_REPO_RAW_URL 默认值的地方；其它脚本一律通过
+# env.conf 拿到这些常量。可通过环境变量覆盖：
+#   MP_REPO_RAW_URL=https://my.fork.example/raw sh download-all-scripts.sh
 
 set -e
 
-# 本脚本所在目录；公共脚本都装到这里
-DIR_SCRIPT=$(dirname "$(readlink -f "$0")")
+# 本脚本所在目录（公共脚本都装到这里）
+dir_self=$(dirname "$(readlink -f "$0")")
 # 仓库 raw 根 URL；可通过环境变量覆盖
-REPO_RAW_URL="${REPO_RAW_URL:-https://raw.githubusercontent.com/AfxMsgBox/MyRule/main}"
+MP_REPO_RAW_URL="${MP_REPO_RAW_URL:-https://raw.githubusercontent.com/AfxMsgBox/MyRule/main}"
 
 # 识别 OS：openwrt | systemd | unknown，可通过 OS_TYPE 环境变量强制
 if [ -n "$OS_TYPE" ]; then
@@ -33,20 +38,20 @@ for name in env.conf common.sh keeplive.sh setup-fake-ip-route.sh \
             update-all-configs-restart-services.sh \
             update-core-config.sh update-proxy-rule.sh \
             download-all-scripts.sh inst.sh; do
-    fetch "$REPO_RAW_URL/sh/$name" "$DIR_SCRIPT/$name"
+    fetch "$MP_REPO_RAW_URL/sh/$name" "$dir_self/$name"
 done
 # 全部加可执行权限
-chmod +x "$DIR_SCRIPT"/*.sh
+chmod +x "$dir_self"/*.sh
 
 # 按 OS 分发服务文件
 case "$OS_TYPE" in
     openwrt)
         # 代理内核 procd 服务
-        fetch "$REPO_RAW_URL/sh/etc/init.d/proxy_core" /etc/init.d/proxy_core
+        fetch "$MP_REPO_RAW_URL/sh/etc/init.d/proxy_core" /etc/init.d/proxy_core
         # AdGuardHome procd 服务
-        fetch "$REPO_RAW_URL/sh/etc/init.d/agh" /etc/init.d/agh
+        fetch "$MP_REPO_RAW_URL/sh/etc/init.d/agh" /etc/init.d/agh
         # TUN 接口路由热插拔处理器
-        fetch "$REPO_RAW_URL/sh/etc/hotplug.d/net/99-meta-route" /etc/hotplug.d/net/99-meta-route
+        fetch "$MP_REPO_RAW_URL/sh/etc/hotplug.d/net/99-meta-route" /etc/hotplug.d/net/99-meta-route
         # 加可执行权限
         chmod +x /etc/init.d/proxy_core /etc/init.d/agh /etc/hotplug.d/net/99-meta-route
         echo "已装到 /etc/init.d/{proxy_core,agh}、/etc/hotplug.d/net/99-meta-route"
@@ -55,9 +60,9 @@ case "$OS_TYPE" in
         ;;
     systemd)
         # 代理内核 systemd 单元
-        fetch "$REPO_RAW_URL/sh/etc/systemd/system/proxy_core.service" /etc/systemd/system/proxy_core.service
+        fetch "$MP_REPO_RAW_URL/sh/etc/systemd/system/proxy_core.service" /etc/systemd/system/proxy_core.service
         # AdGuardHome systemd 单元
-        fetch "$REPO_RAW_URL/sh/etc/systemd/system/agh.service" /etc/systemd/system/agh.service
+        fetch "$MP_REPO_RAW_URL/sh/etc/systemd/system/agh.service" /etc/systemd/system/agh.service
         # 让 systemd 重新加载 unit 列表
         systemctl daemon-reload
         echo "已装到 /etc/systemd/system/{proxy_core,agh}.service"
@@ -66,10 +71,12 @@ case "$OS_TYPE" in
         ;;
     *)
         echo "未识别的系统；用 OS_TYPE=openwrt 或 OS_TYPE=systemd 强制：" >&2
-        echo "  OS_TYPE=systemd sh $DIR_SCRIPT/download-all-scripts.sh" >&2
+        echo "  OS_TYPE=systemd sh $dir_self/download-all-scripts.sh" >&2
         ;;
 esac
 
 echo
-echo "下一步：编辑 \${CORE_DIR:-/etc/proxy/core}/local.conf 写入订阅与节点参数"
-echo "      然后运行 sh $DIR_SCRIPT/update-all-configs.sh"
+echo "下一步："
+echo "  1. 编辑 $dir_self/env.local.conf（可选，覆盖 env.conf 中的 MP_* 默认值）"
+echo "  2. 编辑 \$MP_CORE_DIR/local.conf（默认 /etc/proxy/core/local.conf）写入订阅 URL 等"
+echo "  3. 运行 sh $dir_self/update-all-configs.sh"
