@@ -66,20 +66,25 @@ _yaml_extract_keys() {
     ' "$1"
 }
 
-# 自更新：cmdline --noupdate 或 MP_NOUPDATE=true 跳过；
-# 否则一并刷新 env.conf + common.sh + caller 自身后 exec 重启。
-case " $* " in *" --noupdate "*) MP_NOUPDATE=true ;; esac
+# 自更新：MP_AUTOUPDATE=true/1/yes 时把 env.conf + common.sh + caller 自身刷到最新，
+# 然后 exec 重启已更新的脚本。命令行 --autoupdate=true|false 覆盖 env 中的值；
+# 父脚本调子脚本时传 --autoupdate=false 防 exec 后无限重入。
+for arg in "$@"; do
+    case "$arg" in
+        --autoupdate=*) MP_AUTOUPDATE="${arg#*=}" ;;
+        --autoupdate)   MP_AUTOUPDATE=true ;;
+    esac
+done
 case "$0" in *common.sh) url_self="${url_self:-$MP_URL_COMMON_SH}" ;; esac
 
-case "$MP_NOUPDATE" in
-    1|true|yes) ;;
-    *)
+case "$MP_AUTOUPDATE" in
+    1|true|yes)
         if [ -n "$url_self" ]; then
             download_file "$MP_URL_ENV_CONF"  "$dir_self/env.conf"  >/dev/null 2>&1
             download_file "$MP_URL_COMMON_SH" "$dir_self/common.sh" >/dev/null 2>&1
             if download_file "$url_self" "$path_self"; then
                 echo_log "self-update OK: $path_self"
-                exec sh "$path_self" "$@" --noupdate
+                exec sh "$path_self" "$@" --autoupdate=false
             fi
             echo_log "self-update FAILED: $path_self"
         fi

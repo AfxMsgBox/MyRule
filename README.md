@@ -92,7 +92,7 @@ update-all-configs(-restart-services).sh
 
 要点：
 
-- **脚本自更新**：所有 `update-*.sh` 顶部都设置 `URL_SCRIPT` 指向自己的 GitHub raw URL，`source common.sh` 会用 `download_file` 把当前脚本替换到最新版后 `exec sh "$0" "$@" --noupdate`，**保留**原始命令行参数。
+- **脚本自更新**：所有 `update-*.sh` 顶部都设置 `url_self` 指向自己的 GitHub raw URL，`source common.sh` 会用 `download_file` 把 env.conf + common.sh + 当前脚本一并替换到最新版后 `exec sh "$0" "$@" --autoupdate=false`，**保留**原始命令行参数。
 - **占位符 + env.local.conf**：仓库里只放可公开的模板（含 `{MP_SUBSCRIBE_URL}`、`{MP_SSHSOS_*}` 等）；敏感值写到 `env.local.conf` 里的 `MP_SUBSCRIBE_URL=...` 这类赋值，**不进仓库**。`update-core-config.sh` 用 awk 通过 `ENVIRON` 自动拿到所有 `MP_*` 替换占位符；env.conf 顶部 `set -a` 让所有变量自动 export 给子进程。
 - **稳健下载**：`download_file` 默认走本地 HTTP 代理；若代理失败自动**降级直连**重试一次。临时文件用 `mktemp`，写入后做大小校验再原子替换目标。
 - **集中配置**：所有硬编码的端口 / 路径 / URL 收敛到 `sh/env.conf`，被 `common.sh` 与各 `init.d` / `hotplug` 脚本共同 `source`。本地覆盖放 `sh/env.local.conf`（`.gitignore` 已忽略）。
@@ -152,7 +152,7 @@ update-all-configs(-restart-services).sh
 
 | 变量 | 默认值 | 用途 |
 | --- | --- | --- |
-| `MP_NOUPDATE` | `true` | 自更新策略，见下文 |
+| `MP_AUTOUPDATE` | `true` | 自更新策略，见下文 |
 | `MP_REPO_RAW_URL` | `https://raw.githubusercontent.com/AfxMsgBox/MyRule/main` | 仓库 raw 根 URL |
 | `MP_PROXY_HTTP` | `http://127.0.0.1:7890` | 本地 HTTP 代理出口 |
 | `MP_CORE_API` | `http://127.0.0.1:3721` | 代理内核外部控制器 |
@@ -165,16 +165,20 @@ update-all-configs(-restart-services).sh
 | `MP_LOG_TAG` | `MyProxy` | `logger -t` 统一 tag |
 | `MP_URL_*` | 由 `MP_REPO_RAW_URL` 派生 | 各脚本与远程模板/清单的 URL |
 
-#### 自更新（`--noupdate` / `MP_NOUPDATE`）三级优先
+#### 自更新（`MP_AUTOUPDATE` / `--autoupdate=value`）
 
-每个 `update-*.sh` 通过 `common.sh` 实现"启动时把自己升级到最新版后 exec 重启"。是否跳过自更新按以下顺序决定：
+任何脚本启动时 `common.sh` 会判断 `MP_AUTOUPDATE`：
 
-1. **命令行含 `--noupdate`** → 跳过；
-2. 否则取 **`MP_NOUPDATE`**（来自 env.conf / env.local.conf）：`true` / `1` / `yes` 均跳过；
-3. 兜底：**默认 `true`**，即默认跳过自更新。
+- **`true` / `1` / `yes`（默认）** → 一并刷新 `env.conf` + `common.sh` + 当前脚本，再 `exec` 重启已更新的脚本继续执行；
+- **其它值** → 不动，沿用本地版本。
 
-> 默认跳过是为了安全：开发或运维场景下手动跑脚本时，本地修改不会被远程版本覆盖。
-> 让 cron 自动同步的部署，请在 `env.local.conf` 中显式设 `MP_NOUPDATE=false`。
+命令行 `--autoupdate=true|false` 会覆盖 env 中的值，专门用于：
+- `--autoupdate=false` `exec` 重启时透传，防止刚更新完又触发一次更新陷入循环；
+- 父脚本（如 `update-all-configs.sh`）调子脚本时显式跳过子脚本的自更新；
+- 调试时手动 `--autoupdate=false` 阻止远程版本覆盖本地修改。
+
+> 默认 `true` 让 cron / 手动跑都自动拿到最新。开发调试时在 `env.local.conf` 设 `MP_AUTOUPDATE=false`，
+> 或单次运行加 `--autoupdate=false`。
 
 ### sh/common.sh
 
@@ -318,8 +322,8 @@ MP_SSHSOS_PASSWORD=...
 MP_SSHSOS_USER=...
 MP_SSHSOS_SERVER=...
 MP_SSHSOS_PORT=22
-# 让 cron 自动同步最新脚本：
-MP_NOUPDATE=false
+# 调试时阻止远程版本覆盖本地修改：
+MP_AUTOUPDATE=false
 ```
 
 env.local.conf 中任何 `MP_*` 都会覆盖 env.conf 中的同名默认值；不在仓库内（`.gitignore` 已忽略）。
@@ -412,7 +416,7 @@ MP_SSHSOS_PORT=22
 # 可选覆盖
 MP_PROXY_HTTP=http://127.0.0.1:17890
 MP_CORE_BIN=/etc/proxy/core/sing-box-clash
-MP_NOUPDATE=false   # 让 cron 自动同步最新脚本
+MP_AUTOUPDATE=false  # 调试场景下阻止脚本被远程版本覆盖（默认 true 让 cron 自动同步）
 ```
 
 填好后重新刷新 + 重启：
@@ -496,7 +500,7 @@ service proxy_core enable && service proxy_core start
 | 仅刷新规则不重启 | `sh /etc/proxy/sh/update-all-configs.sh` |
 | 仅刷新订阅 / `rule_gpt` | `sh /etc/proxy/sh/update-proxy-rule.sh` |
 | 仅重新生成 AGH 的 `dns.conf` | `sh /etc/proxy/sh/update-agh-config.sh` |
-| 跳过自更新 | 任一脚本加 `--noupdate` |
+| 跳过自更新 | 任一脚本加 `--autoupdate=false` |
 | 清空 fake-ip 缓存 | `curl -X POST $CORE_API/cache/fakeip/flush` |
 | 看带 tag 的日志（OpenWrt） | `logread -e MyProxy -f` |
 | 看带 tag 的日志（Debian） | `journalctl -t MyProxy -f` |
@@ -531,7 +535,7 @@ service proxy_core enable && service proxy_core start
 
 1. **DNS 与代理双层分流**：AGH 决定"哪些域名要被代理"，代理内核决定"被代理的域名走哪个出口"。任一层修改都不牵动另一层。
 2. **fake-ip + 路由修正**：mihomo 启动 TUN 时会把 fake-ip 路由错加成 `/30`（不论配置怎么写）。`setup-fake-ip-route.sh` 通过先删后加的方式修正：OpenWrt 由 hotplug 触发，Debian 由 `proxy_core.service` 的 `ExecStartPost` 触发，同一段实现共用。
-3. **脚本自更新 + `--noupdate` 防递归**：单点维护、批量生效；自更新时透传原始参数，避免命令行被吞。
+3. **脚本自更新 + `--autoupdate=false` 防递归**：单点维护、批量生效；自更新时透传原始参数，避免命令行被吞。
 4. **占位符模板 + local.conf**：仓库可公开，敏感数据完全留在设备本地。`awk` 严格按第一个 `=` 切分，避免正则注入。
 5. **下载稳健**：默认走代理；代理不可用时自动直连回退；临时文件 `mktemp` + 大小校验 + 原子替换。
 6. **配置坏了不上线**：`update-core-config.sh` 校验失败保留旧 `config.yaml`；`update-all-configs-restart-services.sh` 任一步失败就不重启服务。
