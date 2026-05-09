@@ -8,16 +8,18 @@ echo_log "更新代理内核 config.yaml"
 download_file "$MP_URL_CORE_CONFIG" "$MP_CORE_DIR/config.new" \
     || { echo_log "下载 config.yaml 失败"; exit 1; }
 
-# 替换 {MP_*} 占位符；MP_* 已被 env.conf 的 set -a 自动 export，awk 通过 ENVIRON 拿到
+# 扫描每行 {MP_xxx} 形式的占位符，用同名环境变量值替换；变量不存在则保留原样
+# MP_* 已被 env.conf 的 set -a 自动 export，awk 通过 ENVIRON 拿到
 awk '{
-    line = $0
-    for (k in ENVIRON)
-        if (substr(k, 1, 3) == "MP_") {
-            ph = "{" k "}"
-            while ((p = index(line, ph)) > 0)
-                line = substr(line, 1, p-1) ENVIRON[k] substr(line, p+length(ph))
-        }
-    print line
+    out = ""
+    while (match($0, /\{MP_[A-Za-z0-9_]+\}/)) {
+        ph  = substr($0, RSTART, RLENGTH)
+        key = substr(ph, 2, RLENGTH - 2)
+        repl = (key in ENVIRON) ? ENVIRON[key] : ph
+        out = out substr($0, 1, RSTART - 1) repl
+        $0 = substr($0, RSTART + RLENGTH)
+    }
+    print out $0
 }' "$MP_CORE_DIR/config.new" > "$MP_CORE_DIR/config.tmp" \
     && mv "$MP_CORE_DIR/config.tmp" "$MP_CORE_DIR/config.new"
 
