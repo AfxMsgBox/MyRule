@@ -66,13 +66,18 @@ _yaml_extract_keys() {
     ' "$1"
 }
 
-# 自更新：MP_AUTOUPDATE=true/1/yes 时把 env.conf + common.sh + caller 自身刷到最新，
-# 然后 exec 重启已更新的脚本。命令行 --autoupdate=true|false 覆盖 env 中的值；
-# 父脚本调子脚本时传 --autoupdate=false 防 exec 后无限重入。
+# 自更新：MP_AUTOUPDATE=true/1/yes 触发；
+#   - env.conf / common.sh：进程树只下一次，用 export MP_DEPS_UPDATED=1 标记，
+#     子进程通过环境继承自动跳过
+#   - 当前脚本（url_self）：每个 script 各自下一次，下完后 exec 重启时附 --skip-self-update
+#     防自身陷入无限重入；该 flag 不会传给子脚本，所以子脚本能正常更新自己
+# 命令行 --autoupdate=true|false 覆盖 env 中 MP_AUTOUPDATE 的值
+_skip_self=0
 for arg in "$@"; do
     case "$arg" in
-        --autoupdate=*) MP_AUTOUPDATE="${arg#*=}" ;;
-        --autoupdate)   MP_AUTOUPDATE=true ;;
+        --autoupdate=*)     MP_AUTOUPDATE="${arg#*=}" ;;
+        --autoupdate)       MP_AUTOUPDATE=true ;;
+        --skip-self-update) _skip_self=1 ;;
     esac
 done
 case "$0" in *common.sh) url_self="${url_self:-$MP_URL_COMMON_SH}" ;; esac
@@ -80,17 +85,20 @@ case "$0" in *common.sh) url_self="${url_self:-$MP_URL_COMMON_SH}" ;; esac
 case "$MP_AUTOUPDATE" in
     1|true|yes)
         if [ -n "$url_self" ]; then
-            download_file "$MP_URL_ENV_CONF"  "$dir_self/env.conf"  >/dev/null 2>&1
-            download_file "$MP_URL_COMMON_SH" "$dir_self/common.sh" >/dev/null 2>&1
-            if download_file "$url_self" "$path_self"; then
-                echo_log "self-update OK: $path_self"
-                exec sh "$path_self" "$@" --autoupdate=false
+            # env.conf + common.sh 全进程树只下一次
+            if [ "$MP_DEPS_UPDATED" != "1" ]; then
+                download_file "$MP_URL_ENV_CONF"  "$dir_self/env.conf"  >/dev/null 2>&1
+                download_file "$MP_URL_COMMON_SH" "$dir_self/common.sh" >/dev/null 2>&1
+                export MP_DEPS_UPDATED=1
             fi
-            echo_log "self-update FAILED: $path_self"
+            # 当前脚本只下一次（exec 重启后 _skip_self=1 跳过这段）
+            if [ "$_skip_self" = "0" ]; then
+                if download_file "$url_self" "$path_self"; then
+                    echo_log "self-update OK: $path_self"
+                    exec sh "$path_self" "$@" --skip-self-update
+                fi
+                echo_log "self-update FAILED: $path_self"
+            fi
         fi
         ;;
 esac
-# 走过本段就把 MP_AUTOUPDATE 标记为已处理，子进程（如父→子调度）继承后自动跳过，
-# 不会重复下载 env.conf / common.sh。MP_AUTOUPDATE 已被 env.conf 的 set -a 导出，
-# 这里再赋值会更新到同一份导出环境中，exec / sh 子进程都看得到。
-MP_AUTOUPDATE=false
