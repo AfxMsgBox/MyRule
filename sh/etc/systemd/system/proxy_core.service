@@ -14,7 +14,7 @@ StartLimitBurst=5
 [Service]
 Type=simple
 # 用 sh -c 引导以便 source env.conf；systemd 的 EnvironmentFile 解析不了变量引用
-ExecStart=/bin/sh -c '. /etc/proxy/sh/env.conf; [ -f /etc/proxy/sh/env.local.conf ] && . /etc/proxy/sh/env.local.conf; exec "$MP_CORE_BIN" -d "$MP_CORE_DIR"'
+ExecStart=/bin/sh -c '. /etc/proxy/sh/env.conf; exec "$MP_CORE_BIN" -d "$MP_CORE_DIR"'
 # 等 mihomo 起好后修正 fake-ip 路由；sleep 5 给 TUN 创建与 /30 出现留时间
 ExecStartPost=/bin/sh -c 'sleep 5 && /etc/proxy/sh/setup-fake-ip-route.sh || true'
 

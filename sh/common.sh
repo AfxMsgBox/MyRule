@@ -24,12 +24,11 @@ for d in "$dir_self" /etc/proxy/sh; do
     fi
 done
 [ -n "$env_dir" ] || { echo "缺少 env.conf（试过 $dir_self 与 /etc/proxy/sh）" >&2; exit 1; }
-# 加载全局变量
+# 让 env.conf 末尾的 env.local.conf 自动加载逻辑找到正确目录
+MP_ENV_DIR="$env_dir"
+# 加载全局变量（env.conf 末尾会自动 source 同目录的 env.local.conf）
 # shellcheck disable=SC1091
 . "$env_dir/env.conf"
-# 本地覆盖（可选）
-# shellcheck disable=SC1091
-[ -f "$env_dir/env.local.conf" ] && . "$env_dir/env.local.conf"
 
 # ----------------------------------------------------------------------
 # 日志：同时打到终端和系统 log（logread / journalctl 都能查到）

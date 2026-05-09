@@ -7,12 +7,11 @@
 dir_self=$(dirname "$(readlink -f "$0")")
 # env.conf 是硬性依赖
 [ -f "$dir_self/env.conf" ] || { echo "缺少 $dir_self/env.conf" >&2; exit 1; }
-# 加载全局变量
+# 让 env.conf 末尾的 env.local.conf 自动加载逻辑找到正确目录
+MP_ENV_DIR="$dir_self"
+# 加载全局变量（env.conf 末尾会自动 source 同目录的 env.local.conf）
 # shellcheck disable=SC1091
 . "$dir_self/env.conf"
-# 本地覆盖（可选）
-# shellcheck disable=SC1091
-[ -f "$dir_self/env.local.conf" ] && . "$dir_self/env.local.conf"
 
 # 来自 hotplug 时只对 add 事件响应；其他调用方不传 ACTION，视为 add
 [ "${ACTION:-add}" = "add" ] || exit 0

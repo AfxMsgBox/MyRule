@@ -12,7 +12,7 @@ StartLimitBurst=5
 [Service]
 Type=simple
 # 用 sh -c 引导以便 source env.conf 与可选的 env.local.conf
-ExecStart=/bin/sh -c '. /etc/proxy/sh/env.conf; [ -f /etc/proxy/sh/env.local.conf ] && . /etc/proxy/sh/env.local.conf; exec "$MP_AGH_BIN" -c "$MP_AGH_DIR/agh.yaml" -w "$MP_AGH_DIR" --no-check-update'
+ExecStart=/bin/sh -c '. /etc/proxy/sh/env.conf; exec "$MP_AGH_BIN" -c "$MP_AGH_DIR/agh.yaml" -w "$MP_AGH_DIR" --no-check-update'
 
 # 进程崩溃自动重启
 Restart=on-failure

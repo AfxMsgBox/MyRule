@@ -6,12 +6,11 @@
 dir_self=$(dirname "$(readlink -f "$0")")
 # env.conf 是硬性依赖
 [ -f "$dir_self/env.conf" ] || { echo "缺少 $dir_self/env.conf" >&2; exit 1; }
-# 加载全局变量
+# 让 env.conf 末尾的 env.local.conf 自动加载逻辑找到正确目录
+MP_ENV_DIR="$dir_self"
+# 加载全局变量（env.conf 末尾会自动 source 同目录的 env.local.conf）
 # shellcheck disable=SC1091
 . "$dir_self/env.conf"
-# 本地覆盖（可选）
-# shellcheck disable=SC1091
-[ -f "$dir_self/env.local.conf" ] && . "$dir_self/env.local.conf"
 
 # 探测 google：HEAD 请求即可，5 秒超时，失败静默
 curl --silent --max-time 5 --proxy "$MP_PROXY_HTTP" -I https://www.google.com >/dev/null 2>&1

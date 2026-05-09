@@ -5,14 +5,10 @@
 # 仅对 add 事件响应
 [ "$ACTION" = "add" ] || exit 0
 
-# env.conf 是硬性依赖（部署后约定在 /etc/proxy/sh/）
+# env.conf 是硬性依赖（部署后约定在 /etc/proxy/sh/）；末尾会自动加载 env.local.conf
 [ -f /etc/proxy/sh/env.conf ] || { logger -t MyProxy "缺少 /etc/proxy/sh/env.conf"; exit 1; }
-# 加载全局变量
 # shellcheck disable=SC1091
 . /etc/proxy/sh/env.conf
-# 本地覆盖（可选）
-# shellcheck disable=SC1091
-[ -f /etc/proxy/sh/env.local.conf ] && . /etc/proxy/sh/env.local.conf
 
 # $INTERFACE 必须命中 MP_TUN_IFACES，否则不动
 match=0
