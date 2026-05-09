@@ -64,14 +64,6 @@ dns:
   nameserver-policy:
     'cp.paeadiy.com': '47.116.209.9:39053'
 
-proxies:
-  - name: "sshSOS"
-    type: ssh
-    server: {MP_SSHSOS_SERVER}
-    port: {MP_SSHSOS_PORT}
-    username: {MP_SSHSOS_USER}
-    password: {MP_SSHSOS_PASSWORD}
-
 proxy-providers:
   HongKong:
     type: http
@@ -159,7 +151,6 @@ proxy-groups:
       - fastTaiWan
       - fastSingapore
       - fastUSA
-      - sshSOS
 
   - name: gptProxy
     type: select
@@ -168,7 +159,6 @@ proxy-groups:
       - fastTaiWan
       - fastHongKong
       - fastUSA
-      - sshSOS
 
 rule-providers:
   rule_gpt:
