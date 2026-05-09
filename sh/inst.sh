@@ -93,7 +93,8 @@ esac
 
 # === 第 4 步：刷新配置（子脚本继承 MP_AUTOUPDATE=false，不会再触发自更新） ===
 echo_log ">>> 刷新 AGH dns.conf 与 core/config.yaml"
-sh "$DIR_SH/update-all-configs.sh --autoupdate=false" || echo_log "（部分步骤失败，详见上方日志）"
+sh "$DIR_SH/update-agh-configs.sh --autoupdate=false" || echo_log "（部分步骤失败，详见上方日志）"
+sh "$DIR_SH/update-core-configs.sh --autoupdate=false" || echo_log "（部分步骤失败，详见上方日志）"
 
 # === 第 5 步：启用并启动服务（任一步失败仅警告，不中断 inst） ===
 echo_log ">>> 启用并启动服务"
