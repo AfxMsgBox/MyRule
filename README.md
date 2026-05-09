@@ -93,7 +93,7 @@ update-all-configs(-restart-services).sh
 要点：
 
 - **脚本自更新**：所有 `update-*.sh` 顶部都设置 `URL_SCRIPT` 指向自己的 GitHub raw URL，`source common.sh` 会用 `download_file` 把当前脚本替换到最新版后 `exec sh "$0" "$@" --noupdate`，**保留**原始命令行参数。
-- **占位符 + local.conf**：仓库里只放可公开的模板（含 `{SUBSCRIBE_URL}`、`{sshSOS_*}` 等）；`local.conf` 放 `key=value` 形式的敏感值，**不进仓库**。`common.sh:replace_strings_from_config` 用 `awk` 严格按第一个 `=` 切分键值，避免正则注入和 `=` 出现在 value 中导致的漂移。
+- **占位符 + env.local.conf**：仓库里只放可公开的模板（含 `{MP_SUBSCRIBE_URL}`、`{MP_SSHSOS_*}` 等）；敏感值写到 `env.local.conf` 里的 `MP_SUBSCRIBE_URL=...` 这类赋值，**不进仓库**。`update-core-config.sh` 用 awk 通过 `ENVIRON` 自动拿到所有 `MP_*` 替换占位符；env.conf 顶部 `set -a` 让所有变量自动 export 给子进程。
 - **稳健下载**：`download_file` 默认走本地 HTTP 代理；若代理失败自动**降级直连**重试一次。临时文件用 `mktemp`，写入后做大小校验再原子替换目标。
 - **集中配置**：所有硬编码的端口 / 路径 / URL 收敛到 `sh/env.conf`，被 `common.sh` 与各 `init.d` / `hotplug` 脚本共同 `source`。本地覆盖放 `sh/env.local.conf`（`.gitignore` 已忽略）。
 - **失败不重启**：`update-all-configs.sh` 会汇总每一步的 exit code；只有全部成功时 `update-all-configs-restart-services.sh` 才执行 `service agh restart && service proxy_core restart`。
@@ -131,8 +131,7 @@ update-all-configs(-restart-services).sh
 │   ├── myupstream.txt                           # 自定义上游 DNS（域名→指定 DNS）
 │   └── myfilter.txt                             # 自定义过滤 / hosts 条目
 ├── core/
-│   ├── config.yaml                              # 代理内核主配置模板（含 {占位符}）
-│   └── local.conf                               # 本地敏感参数示例（key=value）
+│   └── config.yaml                              # 代理内核主配置模板（含 {MP_*} 占位符）
 └── domain/
     ├── myproxylist.txt                          # 常用代理域名（payload 列表）
     └── gpt.txt                                  # AI / Google 等专用分流域名
@@ -205,7 +204,7 @@ dir_self=$(dirname "$(readlink -f "$0")")  # 本脚本目录
    - OpenWrt（`/etc/openwrt_release` 或 `/etc/os-release` 含 `ID=openwrt`）→ `init.d/{proxy_core,agh}` + `hotplug.d/net/99-meta-route`；
    - systemd（有 `systemctl` 且 `/etc/systemd/system` 存在）→ `proxy_core.service` + `agh.service`，并 `systemctl daemon-reload`；
    - 都识别不出 → 报错并提示通过 `OS_TYPE=openwrt|systemd sh inst.sh` 强制指定。
-3. 调用 `update-all-configs.sh` 生成 `dns.conf` 与 `core/config.yaml`（缺 `local.conf` 时优雅跳过 yaml 生成）；
+3. 调用 `update-all-configs.sh` 生成 `dns.conf` 与 `core/config.yaml`（敏感参数缺失时 yaml 校验失败但 inst 继续）；
 4. `enable` 并 `start` 两个服务（任一失败仅警告，不中断 inst）。
 
 之所以 inst 内仍然用 `wget` 而不是 `common.sh` 的 `download_file`：首次安装时 `common.sh` 自身也还没就位，必须用 BusyBox / GNU `wget` 引导。这也是仓库内**唯一**允许在脚本里硬编码 `MP_REPO_RAW_URL` 默认值的地方。
@@ -230,10 +229,10 @@ dir_self=$(dirname "$(readlink -f "$0")")  # 本脚本目录
 
 ### sh/update-core-config.sh
 
-下载最新 `core/config.yaml` 模板 → `replace_strings_from_config` 用 `core/local.conf` 替换占位符 → 校验：
+下载最新 `core/config.yaml` 模板 → 用 awk 读 `ENVIRON` 把 `{MP_*}` 占位符替换成 env 中的对应值 → 校验：
 
 - 必须含 `proxies:`、`proxy-providers:`、`rules:` 三个顶层段；
-- 不能残留 `{占位符}`（残留意味着 `local.conf` 缺键）。
+- 不能残留 `{MP_*}`（残留意味着 `env.local.conf` 缺值）。
 
 校验通过才把旧 `config.yaml` 移成 `.bak` 并替换；不通过则保留旧配置不动，并把残留的占位符行打印出来便于排查。
 
@@ -299,7 +298,7 @@ systemd 单元文件。要点：
 
 ### core/config.yaml
 
-Mihomo 主配置模板，关键字段（占位符列入 `core/local.conf`）：
+Mihomo 主配置模板，关键字段（占位符 `{MP_*}` 由 env 渲染）：
 
 - 端口：`mixed-port: 7890`、`tproxy-port: 7893`、`external-controller: :3721`；
 - 长连接：`keep-alive-idle: 1800`、`keep-alive-interval: 60`、`disable-keep-alive: true`，配合 `keeplive.sh`；
@@ -311,15 +310,19 @@ Mihomo 主配置模板，关键字段（占位符列入 `core/local.conf`）：
 - rule-providers：`rule_gpt` 远程拉取本仓库 `domain/gpt.txt`；
 - rules：仅两条 —— `RULE-SET,rule_gpt,gptProxy` 与 `MATCH,defaultProxy`。
 
-### core/local.conf（示例）
+### sh/env.local.conf（示例：敏感参数 + 自更新开关）
 
 ```
-SUBSCRIBE_URL=https://api.subcsub.com/sub?target=clash&url=
-sshSOS_password=pass
-sshSOS_user=user
-sshSOS_server=8.8.8.8
-sshSOS_port=22
+MP_SUBSCRIBE_URL=https://api.subcsub.com/sub?target=clash&url=<URL-encoded>
+MP_SSHSOS_PASSWORD=...
+MP_SSHSOS_USER=...
+MP_SSHSOS_SERVER=...
+MP_SSHSOS_PORT=22
+# 让 cron 自动同步最新脚本：
+MP_NOUPDATE=false
 ```
+
+env.local.conf 中任何 `MP_*` 都会覆盖 env.conf 中的同名默认值；不在仓库内（`.gitignore` 已忽略）。
 
 ### agh/myupstream.txt
 
@@ -345,7 +348,7 @@ Clash payload YAML 域名清单。**修复**：
 
 ```
 /etc/proxy/sh/      所有脚本与 env.conf
-/etc/proxy/core/    mihomo 二进制与 config.yaml / local.conf
+/etc/proxy/core/    mihomo 二进制与 config.yaml（敏感参数从 env.local.conf 注入）
 /etc/proxy/agh/     AdGuardHome 工作目录
 ```
 
@@ -392,19 +395,16 @@ MP_REPO_RAW_URL=https://my.fork.example/raw \
 
 ### 配置本地敏感参数（首次部署必须）
 
-`/etc/proxy/core/local.conf` 写入订阅 URL 与节点参数：
+`/etc/proxy/sh/env.local.conf` 写入订阅 URL、节点参数、可选的端口/路径覆盖：
 
 ```
-SUBSCRIBE_URL=https://api.subcsub.com/sub?target=clash&url=<URL-encoded>
-sshSOS_password=...
-sshSOS_user=...
-sshSOS_server=...
-sshSOS_port=22
-```
+MP_SUBSCRIBE_URL=https://api.subcsub.com/sub?target=clash&url=<URL-encoded>
+MP_SSHSOS_PASSWORD=...
+MP_SSHSOS_USER=...
+MP_SSHSOS_SERVER=...
+MP_SSHSOS_PORT=22
 
-如需覆盖默认端口/路径，可建 `/etc/proxy/sh/env.local.conf`：
-
-```
+# 可选覆盖
 MP_PROXY_HTTP=http://127.0.0.1:17890
 MP_CORE_BIN=/etc/proxy/core/sing-box-clash
 MP_NOUPDATE=false   # 让 cron 自动同步最新脚本
@@ -465,7 +465,8 @@ mihomo 启动 TUN 后会把 fake-ip 路由错加成 `/30`。OpenWrt 由 `99-meta
 /etc/init.d/clash_meta stop
 /etc/init.d/clash_meta disable
 
-# 2. 迁移工作目录（保留你的 local.conf 与 proxy/ 缓存）
+# 2. 迁移工作目录（保留 proxy/ 缓存）；旧的 core/local.conf 不再被读取，
+#    把里面的字段加 MP_ 前缀大写化后挪到 /etc/proxy/sh/env.local.conf
 mv /etc/proxy/meta /etc/proxy/core
 
 # 3. 重新拉取脚本与 init 文件

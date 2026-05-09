@@ -1,21 +1,12 @@
 #!/bin/sh
-# OpenWrt hotplug 入口：仅当 MP_TUN_IFACES 列表中之一的接口 add 时，调用统一脚本。
-# 其他接口（USB 网卡、WiFi roam、wg 隧道等）的 add 事件直接忽略。
-
-# 仅对 add 事件响应
+# OpenWrt hotplug：仅当 MP_TUN_IFACES 中之一的接口 add 时调用统一脚本
 [ "$ACTION" = "add" ] || exit 0
-
-# env.conf 是硬性依赖（部署后约定在 /etc/proxy/sh/）；末尾会自动加载 env.local.conf
-[ -f /etc/proxy/sh/env.conf ] || { logger -t MyProxy "缺少 /etc/proxy/sh/env.conf"; exit 1; }
-# shellcheck disable=SC1091
 . /etc/proxy/sh/env.conf
 
-# $INTERFACE 必须命中 MP_TUN_IFACES，否则不动
 match=0
 for i in $MP_TUN_IFACES; do
     [ "$INTERFACE" = "$i" ] && match=1 && break
 done
 [ "$match" = "1" ] || exit 0
 
-# 命中则交给统一脚本处理（hotplug 触发时 TUN 与 /30 都已就绪）
 exec /etc/proxy/sh/setup-fake-ip-route.sh

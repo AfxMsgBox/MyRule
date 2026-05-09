@@ -37,8 +37,7 @@ mkdir -p "$DIR_SH"
 wget -q -O "$DIR_SH/env.conf"  "$MP_REPO_RAW_URL/sh/env.conf"  || { echo "下载 env.conf 失败"  >&2; exit 1; }
 wget -q -O "$DIR_SH/common.sh" "$MP_REPO_RAW_URL/sh/common.sh" || { echo "下载 common.sh 失败" >&2; exit 1; }
 
-# 加载 env + 公共函数；不设 url_self，common.sh 会自动跳过自更新
-# shellcheck disable=SC1091
+# 加载 env + 公共函数；不设 url_self，common.sh 自动跳过自更新
 . "$DIR_SH/common.sh"
 
 # === 第 2 步：用 download_file 拉其它公共脚本（享受代理回退 / --fail / 重试） ===
@@ -79,7 +78,7 @@ case "$OS_TYPE" in
         ;;
 esac
 
-# === 第 4 步：刷新配置（缺 local.conf 时 update-core-config.sh 会优雅跳过） ===
+# === 第 4 步：刷新配置（敏感参数缺失时 update-core-config.sh 会校验失败但 inst 继续） ===
 echo_log ">>> 刷新 AGH dns.conf 与 core/config.yaml"
 sh "$DIR_SH/update-all-configs.sh" --noupdate || echo_log "（部分步骤失败，详见上方日志）"
 
@@ -100,10 +99,13 @@ esac
 echo
 echo "============ 安装完成 ============"
 echo "  脚本目录：$DIR_SH"
-echo "  本地覆盖：$DIR_SH/env.local.conf（按需创建）"
-echo "  内核敏感参数：\$MP_CORE_DIR/local.conf（默认 /etc/proxy/core/local.conf）"
-echo "                 首次部署需要写入订阅 URL 与节点参数后重跑："
-echo "                 sh $DIR_SH/update-all-configs-restart-services.sh"
+echo "  首次部署在 $DIR_SH/env.local.conf 写入敏感参数后重跑："
+echo "    MP_SUBSCRIBE_URL=https://...&url=<URL-encoded>"
+echo "    MP_SSHSOS_USER=..."
+echo "    MP_SSHSOS_PASSWORD=..."
+echo "    MP_SSHSOS_SERVER=..."
+echo "    MP_SSHSOS_PORT=22"
+echo "    sh $DIR_SH/update-all-configs-restart-services.sh"
 case "$OS_TYPE" in
     openwrt) echo "  日志：logread -e MyProxy -f" ;;
     systemd) echo "  日志：journalctl -t MyProxy -f" ;;
