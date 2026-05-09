@@ -3,18 +3,19 @@
 # 前提：本机已按默认路径装好 mihomo（/etc/proxy/core/mihomo）
 #       与 AdGuardHome（/usr/bin/AdGuardHome）；如不一致请改 env.local.conf。
 #
-# 用法（需 root，DIR_SH 必填，约定 /etc/proxy/sh）：
-#   DIR_SH=/etc/proxy/sh \
-#       wget -O- https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/inst.sh | sh
+# 用法（需 root，安装目录作为第一个参数，约定 /etc/proxy/sh）：
+#   sh inst.sh /etc/proxy/sh
+# wget|sh 管道时用 sh -s -- 传位置参数：
+#   wget -O- https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/inst.sh | sh -s -- /etc/proxy/sh
 # 自托管 / 分支调试：
-#   MP_REPO_RAW_URL=https://my.fork.example/raw DIR_SH=/etc/proxy/sh \
-#       wget -O- https://my.fork.example/raw/sh/inst.sh | sh
+#   MP_REPO_RAW_URL=https://my.fork.example/raw \
+#       wget -O- https://my.fork.example/raw/sh/inst.sh | sh -s -- /etc/proxy/sh
 
 # 必须 root 才能写 /etc/init.d、/etc/systemd/system 等
 [ "$(id -u)" = "0" ] || { echo "需要 root 权限运行（Debian/Ubuntu 请加 sudo）" >&2; exit 1; }
 
-# 安装目录由用户显式指定，不给默认避免误装
-DIR_SH="${DIR_SH:?需要设置 DIR_SH 环境变量指明安装目录，例如：DIR_SH=/etc/proxy/sh wget -O- ... | sh}"
+# 安装目录由用户显式指定为第一个参数，不给默认避免误装
+DIR_SH="${1:?需要给安装目录作为第一个参数，例如：sh inst.sh /etc/proxy/sh}"
 
 # 引导阶段先尝试加载本地已有的 env.local.conf（开发场景下用户可在此预置
 # MP_REPO_RAW_URL=https://...branch 让 inst 直接拉分支版本）

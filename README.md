@@ -371,21 +371,21 @@ sudo sysctl --system
 
 ### 一键安装（OpenWrt 与 Debian/Ubuntu 通用）
 
-`DIR_SH` 必填（约定 `/etc/proxy/sh`，但 `inst.sh` 不写死默认值，让用户有意识地选择）：
+安装目录作为第一个位置参数（约定 `/etc/proxy/sh`，`inst.sh` 不写死默认值，让用户有意识地选择）：
 
 ```sh
 # OpenWrt（默认 root）
-DIR_SH=/etc/proxy/sh \
-    wget -O- https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/inst.sh | sh
+wget -O- https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/inst.sh | sh -s -- /etc/proxy/sh
 
 # Debian / Ubuntu
-sudo sh -c 'DIR_SH=/etc/proxy/sh \
-    wget -O- https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/inst.sh | sh'
+sudo sh -c 'wget -O- https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/inst.sh | sh -s -- /etc/proxy/sh'
 ```
+
+`sh -s -- /etc/proxy/sh` 让 `sh` 从 stdin 读脚本，`--` 之后的位置参数传给脚本作为 `$1`。
 
 `inst.sh` 自动完成：
 
-1. 下载 `sh/*` 公共脚本到 `$DIR_SH`；
+1. 下载 `sh/*` 公共脚本到 `$1`；
 2. 按 OS 装服务文件：OpenWrt → `init.d/{proxy_core,agh}` + `hotplug.d/net/99-meta-route`；systemd → `/etc/systemd/system/{proxy_core,agh}.service`；
 3. 调用 `update-all-configs.sh` 生成 `dns.conf` 与 `core/config.yaml`；
 4. `enable` + `start` 两个服务。
@@ -393,8 +393,8 @@ sudo sh -c 'DIR_SH=/etc/proxy/sh \
 自托管 / 分支调试：
 
 ```sh
-MP_REPO_RAW_URL=https://my.fork.example/raw DIR_SH=/etc/proxy/sh \
-    wget -O- https://my.fork.example/raw/sh/inst.sh | sh
+MP_REPO_RAW_URL=https://my.fork.example/raw \
+    wget -O- https://my.fork.example/raw/sh/inst.sh | sh -s -- /etc/proxy/sh
 ```
 
 ### 配置本地敏感参数（首次部署必须）
