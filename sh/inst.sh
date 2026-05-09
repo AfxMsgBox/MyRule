@@ -114,10 +114,6 @@ echo "============ 安装完成 ============"
 echo "  脚本目录：$DIR_SH"
 echo "  首次部署在 $DIR_SH/env.local.conf 写入敏感参数后重跑："
 echo "    MP_SUBSCRIBE_URL=https://...&url=<URL-encoded>"
-echo "    MP_SSHSOS_USER=..."
-echo "    MP_SSHSOS_PASSWORD=..."
-echo "    MP_SSHSOS_SERVER=..."
-echo "    MP_SSHSOS_PORT=22"
 echo "    sh $DIR_SH/update-all-configs-restart-services.sh"
 case "$OS_TYPE" in
     openwrt) echo "  日志：logread -e MyProxy -f" ;;
