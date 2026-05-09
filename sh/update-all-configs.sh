@@ -8,12 +8,14 @@ flock -n 9 2>/dev/null || { echo_log "另一个 update 实例在跑，退出"; e
 
 echo_log "============ update all configs ============"
 rc=0
+# 子脚本通过环境变量 MP_AUTOUPDATE=false（common.sh 已设）继承"已处理"状态，
+# 不需要再显式传 --autoupdate=false
 echo_log ">>> AGH dns.conf"
-sh "$dir_self/update-agh-config.sh" --autoupdate=false || rc=$?
+sh "$dir_self/update-agh-config.sh" || rc=$?
 echo_log ">>> core config.yaml"
-sh "$dir_self/update-core-config.sh" --autoupdate=false || rc=$?
+sh "$dir_self/update-core-config.sh" || rc=$?
 echo_log ">>> 订阅与规则集"
-sh "$dir_self/update-proxy-rule.sh" --autoupdate=false || rc=$?
+sh "$dir_self/update-proxy-rule.sh" || rc=$?
 
 [ "$rc" -eq 0 ] && echo_log "============ all done ============" \
                 || echo_log "============ done with errors (rc=$rc) ============"

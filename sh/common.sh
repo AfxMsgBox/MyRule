@@ -90,3 +90,7 @@ case "$MP_AUTOUPDATE" in
         fi
         ;;
 esac
+# 走过本段就把 MP_AUTOUPDATE 标记为已处理，子进程（如父→子调度）继承后自动跳过，
+# 不会重复下载 env.conf / common.sh。MP_AUTOUPDATE 已被 env.conf 的 set -a 导出，
+# 这里再赋值会更新到同一份导出环境中，exec / sh 子进程都看得到。
+MP_AUTOUPDATE=false
