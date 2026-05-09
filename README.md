@@ -371,21 +371,22 @@ sudo sysctl --system
 
 ### 一键安装（OpenWrt 与 Debian/Ubuntu 通用）
 
-安装目录作为第一个位置参数（约定 `/etc/proxy/sh`，`inst.sh` 不写死默认值，让用户有意识地选择）：
+安装目录作为第一个位置参数；省略时默认 `/etc/proxy/sh`：
 
 ```sh
-# OpenWrt（默认 root）
-wget -O- https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/inst.sh | sh -s -- /etc/proxy/sh
+# OpenWrt（默认 root）—— 装到默认 /etc/proxy/sh
+wget -O- https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/inst.sh | sh
+
+# 自定义目录（用 sh -s -- 把位置参数传给被管道的脚本）
+wget -O- https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/inst.sh | sh -s -- /opt/myproxy/sh
 
 # Debian / Ubuntu
-sudo sh -c 'wget -O- https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/inst.sh | sh -s -- /etc/proxy/sh'
+sudo sh -c 'wget -O- https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/inst.sh | sh'
 ```
-
-`sh -s -- /etc/proxy/sh` 让 `sh` 从 stdin 读脚本，`--` 之后的位置参数传给脚本作为 `$1`。
 
 `inst.sh` 自动完成：
 
-1. 下载 `sh/*` 公共脚本到 `$1`；
+1. 下载 `sh/*` 公共脚本到 `$1`（缺省 `/etc/proxy/sh`）；
 2. 按 OS 装服务文件：OpenWrt → `init.d/{proxy_core,agh}` + `hotplug.d/net/99-meta-route`；systemd → `/etc/systemd/system/{proxy_core,agh}.service`；
 3. 调用 `update-all-configs.sh` 生成 `dns.conf` 与 `core/config.yaml`；
 4. `enable` + `start` 两个服务。
@@ -394,7 +395,7 @@ sudo sh -c 'wget -O- https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/
 
 ```sh
 MP_REPO_RAW_URL=https://my.fork.example/raw \
-    wget -O- https://my.fork.example/raw/sh/inst.sh | sh -s -- /etc/proxy/sh
+    wget -O- https://my.fork.example/raw/sh/inst.sh | sh
 ```
 
 ### 配置本地敏感参数（首次部署必须）
