@@ -5,7 +5,7 @@ url_self="$MP_URL_UPDATE_CORE_CONFIG_SH"
 echo_log "更新代理内核 config.yaml"
 
 # 拉取模板
-download_file "$MP_URL_CORE_CONFIG" "$MP_CORE_DIR/config.new" 1 \
+download_file "$MP_URL_CORE_CONFIG" "$MP_CORE_DIR/config.new" \
     || { echo_log "下载 config.yaml 失败"; exit 1; }
 
 # 替换 {MP_*} 占位符；MP_* 已被 env.conf 的 set -a 自动 export，awk 通过 ENVIRON 拿到

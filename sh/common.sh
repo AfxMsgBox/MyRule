@@ -25,10 +25,11 @@ get_file_size() {
     [ -f "$1" ] && wc -c < "$1" | tr -d ' \n' || echo 0
 }
 
-# download_file <url> <dst> [use_proxy=1] [min_size=8]
+# download_file <url> <dst> [use_proxy] [min_size=8]
+# use_proxy 缺省取 $MP_USE_PROXY；显式传 0/1 可覆盖（如 inst.sh 的 bootstrap 阶段强制直连）。
 # 走代理失败自动回退直连；--fail 让 4xx/5xx 不被当成功；mktemp + mv 原子替换。
 download_file() {
-    url="$1"; dst="$2"; use_proxy="${3:-1}"; min_size="${4:-8}"
+    url="$1"; dst="$2"; use_proxy="${3:-$MP_USE_PROXY}"; min_size="${4:-8}"
     case "$use_proxy" in 1|true|yes) proxy_arg="--proxy $MP_PROXY_HTTP" ;; *) proxy_arg="" ;; esac
     tmp=$(mktemp)
     curl --silent --show-error --fail --connect-timeout 10 --max-time 60 \

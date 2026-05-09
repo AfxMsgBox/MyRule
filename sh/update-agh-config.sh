@@ -23,7 +23,7 @@ fi
 
 # 自定义上游（[/domain/]server 格式）：整段直接 cat
 echo_log ">>> 拉取 myupstream"
-if download_file "$MP_URL_AGH_MYUPSTREAM" "$MP_AGH_DIR/download/myupstream.txt" 1; then
+if download_file "$MP_URL_AGH_MYUPSTREAM" "$MP_AGH_DIR/download/myupstream.txt"; then
     printf '\n# My Up Stream\n' >> "$agh_dns"
     cat "$MP_AGH_DIR/download/myupstream.txt" >> "$agh_dns"
 else
@@ -32,7 +32,7 @@ fi
 
 # 自家代理域名清单
 echo_log ">>> 拉取 myproxylist"
-if download_file "$MP_URL_DOMAIN_MYPROXYLIST" "$MP_AGH_DIR/download/myproxylist.txt" 1; then
+if download_file "$MP_URL_DOMAIN_MYPROXYLIST" "$MP_AGH_DIR/download/myproxylist.txt"; then
     append_payload "$MP_AGH_DIR/download/myproxylist.txt" "My Proxy List"
 else
     echo_log "myproxylist 失败，跳过"
@@ -40,7 +40,7 @@ fi
 
 # GPT / Google
 echo_log ">>> 拉取 gpt"
-if download_file "$MP_URL_DOMAIN_GPT" "$MP_AGH_DIR/download/gpt.txt" 1; then
+if download_file "$MP_URL_DOMAIN_GPT" "$MP_AGH_DIR/download/gpt.txt"; then
     append_payload "$MP_AGH_DIR/download/gpt.txt" "GPT List"
 else
     echo_log "gpt 失败，跳过"
@@ -48,7 +48,7 @@ fi
 
 # 非中国域名：tld-not-cn 把 .bj 误算非中国 TLD，删掉避免本地 .bj 被劫持
 echo_log ">>> 拉取 not-cn"
-if download_file "$MP_URL_NOTCN" "$MP_AGH_DIR/download/notcn.txt" 1; then
+if download_file "$MP_URL_NOTCN" "$MP_AGH_DIR/download/notcn.txt"; then
     append_payload "$MP_AGH_DIR/download/notcn.txt" "Not China Domain"
     if [ -n "$MP_EXCLUDE_TLDS" ]; then
         pat=$(echo "$MP_EXCLUDE_TLDS" | tr ' ' '|')
@@ -60,7 +60,7 @@ fi
 
 # GFW 清单
 echo_log ">>> 拉取 gfwlist"
-if download_file "$MP_URL_GFWLIST" "$MP_AGH_DIR/download/gfwlist.txt" 1; then
+if download_file "$MP_URL_GFWLIST" "$MP_AGH_DIR/download/gfwlist.txt"; then
     append_payload "$MP_AGH_DIR/download/gfwlist.txt" "GFW List"
 else
     echo_log "gfwlist 失败，跳过"
