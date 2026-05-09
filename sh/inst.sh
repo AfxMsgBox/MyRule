@@ -12,10 +12,14 @@
 # 必须 root 才能写 /etc/init.d、/etc/systemd/system、/etc/proxy 等
 [ "$(id -u)" = "0" ] || { echo "需要 root 权限运行（Debian/Ubuntu 请加 sudo）" >&2; exit 1; }
 
-# 仓库 raw 根；inst 是引导阶段，env.conf 还没下来，唯一允许在脚本里硬编码这个常量的地方
-MP_REPO_RAW_URL="${MP_REPO_RAW_URL:-https://raw.githubusercontent.com/AfxMsgBox/MyRule/main}"
+
 # 脚本安装目标目录
 DIR_SH="${DIR_SH:-/etc/proxy/sh}"
+[ -f "$DIR_SH/env.local.conf" ] && . "$DIR_SH/env.local.conf"
+
+# 仓库 raw 根；inst 是引导阶段，env.conf 还没下来，唯一允许在脚本里硬编码这个常量的地方
+MP_REPO_RAW_URL="${MP_REPO_RAW_URL:-https://raw.githubusercontent.com/AfxMsgBox/MyRule/main}"
+
 
 # 识别 OS：openwrt | systemd，可通过 OS_TYPE 环境变量强制
 if [ -n "$OS_TYPE" ]; then
