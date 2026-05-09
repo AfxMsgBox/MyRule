@@ -11,7 +11,7 @@
 #   wget -O- https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/inst.sh | sh -s -- /opt/myproxy/sh
 # 自托管 / 分支调试：
 #   MP_REPO_RAW_URL=https://my.fork.example/raw \
-#       wget -O- https://my.fork.example/raw/sh/inst.sh | sh
+#       wget -O- $MP_REPO_RAW_URL/sh/inst.sh | sh
 
 # 必须 root 才能写 /etc/init.d、/etc/systemd/system 等
 [ "$(id -u)" = "0" ] || { echo "需要 root 权限运行（Debian/Ubuntu 请加 sudo）" >&2; exit 1; }
