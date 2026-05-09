@@ -25,25 +25,31 @@ get_file_size() {
     [ -f "$1" ] && wc -c < "$1" | tr -d ' \n' || echo 0
 }
 
-# download_file <url> <dst> [use_proxy] [min_size=8]
-# use_proxy 缺省取 $MP_USE_PROXY；显式传 0/1 可覆盖（如 inst.sh 的 bootstrap 阶段强制直连）。
+# download_file <url> <dst> [verbose=true] [use_proxy] [min_size=8]
+# verbose=true 时输出 url、完成时的字节数与耗时；false 完全静默
+# use_proxy 缺省取 $MP_USE_PROXY；显式传 0/1 可覆盖（如 inst.sh 的 bootstrap 阶段强制直连）
 # 走代理失败自动回退直连；--fail 让 4xx/5xx 不被当成功；mktemp + mv 原子替换。
 download_file() {
-    url="$1"; dst="$2"; use_proxy="${3:-$MP_USE_PROXY}"; min_size="${4:-8}"
+    url="$1"; dst="$2"; verbose="${3:-true}"; use_proxy="${4:-$MP_USE_PROXY}"; min_size="${5:-8}"
     case "$use_proxy" in 1|true|yes) proxy_arg="--proxy $MP_PROXY_HTTP" ;; *) proxy_arg="" ;; esac
+    [ "$verbose" = "true" ] && echo_log "下载 $url"
+    t0=$(date +%s)
     tmp=$(mktemp)
     curl --silent --show-error --fail --connect-timeout 10 --max-time 60 \
          --retry 2 --retry-delay 1 $proxy_arg "$url" -o "$tmp" >/dev/null 2>&1
     rc=$?
     if [ "$rc" -ne 0 ] && [ -n "$proxy_arg" ]; then
-        echo_log "下载经代理失败，回退直连：$url"
+        [ "$verbose" = "true" ] && echo_log "代理失败，回退直连"
         curl --silent --show-error --fail --connect-timeout 10 --max-time 60 \
              --retry 2 --retry-delay 1 "$url" -o "$tmp" >/dev/null 2>&1
         rc=$?
     fi
     if [ "$rc" -ne 0 ] || [ "$(get_file_size "$tmp")" -le "$min_size" ]; then
-        rm -f "$tmp"; return 1
+        rm -f "$tmp"
+        [ "$verbose" = "true" ] && echo_log "下载失败"
+        return 1
     fi
+    [ "$verbose" = "true" ] && echo_log "完成：$(get_file_size "$tmp") 字节 / $(($(date +%s) - t0))s"
     mv "$tmp" "$dst"
 }
 
@@ -87,8 +93,8 @@ case "$MP_AUTOUPDATE" in
         if [ -n "$url_self" ]; then
             # env.conf + common.sh 全进程树只下一次
             if [ "$_DEPS_UPDATED" != "1" ]; then
-                download_file "$MP_URL_ENV_CONF"  "$dir_self/env.conf"  >/dev/null 2>&1
-                download_file "$MP_URL_COMMON_SH" "$dir_self/common.sh" >/dev/null 2>&1
+                download_file "$MP_URL_ENV_CONF"  "$dir_self/env.conf"
+                download_file "$MP_URL_COMMON_SH" "$dir_self/common.sh"
                 export _DEPS_UPDATED=1
             fi
             # 当前脚本只下一次（exec 重启后 _skip_self=1 跳过这段）

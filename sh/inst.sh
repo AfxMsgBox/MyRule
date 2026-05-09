@@ -59,7 +59,7 @@ for name in keeplive.sh setup-fake-ip-route.sh \
             update-agh-config.sh update-all-configs.sh \
             update-all-configs-restart-services.sh \
             update-core-config.sh update-proxy-rule.sh inst.sh; do
-    download_file "$MP_REPO_RAW_URL/sh/$name" "$DIR_SH/$name" 0 \
+    download_file "$MP_REPO_RAW_URL/sh/$name" "$DIR_SH/$name" true 0 \
         || { echo_log "下载 $name 失败"; exit 1; }
 done
 chmod +x "$DIR_SH"/*.sh
@@ -69,22 +69,22 @@ echo_log ">>> 安装平台服务文件"
 case "$OS_TYPE" in
     openwrt)
         # 代理内核 procd 服务
-        download_file "$MP_REPO_RAW_URL/sh/etc/init.d/proxy_core" /etc/init.d/proxy_core 0 \
+        download_file "$MP_REPO_RAW_URL/sh/etc/init.d/proxy_core" /etc/init.d/proxy_core true 0 \
             || { echo_log "下载 init.d/proxy_core 失败"; exit 1; }
         # AdGuardHome procd 服务
-        download_file "$MP_REPO_RAW_URL/sh/etc/init.d/agh" /etc/init.d/agh 0 \
+        download_file "$MP_REPO_RAW_URL/sh/etc/init.d/agh" /etc/init.d/agh true 0 \
             || { echo_log "下载 init.d/agh 失败"; exit 1; }
         # TUN 路由热插拔处理器
-        download_file "$MP_REPO_RAW_URL/sh/etc/hotplug.d/net/99-meta-route" /etc/hotplug.d/net/99-meta-route 0 \
+        download_file "$MP_REPO_RAW_URL/sh/etc/hotplug.d/net/99-meta-route" /etc/hotplug.d/net/99-meta-route true 0 \
             || { echo_log "下载 99-meta-route 失败"; exit 1; }
         chmod +x /etc/init.d/proxy_core /etc/init.d/agh /etc/hotplug.d/net/99-meta-route
         ;;
     systemd)
         # 代理内核 systemd 单元
-        download_file "$MP_REPO_RAW_URL/sh/etc/systemd/system/proxy_core.service" /etc/systemd/system/proxy_core.service 0 \
+        download_file "$MP_REPO_RAW_URL/sh/etc/systemd/system/proxy_core.service" /etc/systemd/system/proxy_core.service true 0 \
             || { echo_log "下载 proxy_core.service 失败"; exit 1; }
         # AdGuardHome systemd 单元
-        download_file "$MP_REPO_RAW_URL/sh/etc/systemd/system/agh.service" /etc/systemd/system/agh.service 0 \
+        download_file "$MP_REPO_RAW_URL/sh/etc/systemd/system/agh.service" /etc/systemd/system/agh.service true 0 \
             || { echo_log "下载 agh.service 失败"; exit 1; }
         # 让 systemd 重新加载 unit 列表
         systemctl daemon-reload
