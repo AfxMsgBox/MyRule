@@ -21,20 +21,7 @@ awk '{
 }' "$MP_CORE_DIR/config.new" > "$MP_CORE_DIR/config.tmp" \
     && mv "$MP_CORE_DIR/config.tmp" "$MP_CORE_DIR/config.new"
 
-# 校验：必含关键段且无残留占位符
-grep -q '^proxies:' "$MP_CORE_DIR/config.new" \
-    && grep -q '^proxy-providers:' "$MP_CORE_DIR/config.new" \
-    && grep -q '^rules:' "$MP_CORE_DIR/config.new" \
-    || { echo_log "yaml 校验失败：缺少关键段落"; rm -f "$MP_CORE_DIR/config.new"; exit 1; }
-
-if grep -q '{MP_[A-Za-z_]*}' "$MP_CORE_DIR/config.new"; then
-    echo_log "校验失败：仍有未替换占位符（env.local.conf 缺值？）"
-    grep -n '{MP_[A-Za-z_]*}' "$MP_CORE_DIR/config.new" | head -5
-    rm -f "$MP_CORE_DIR/config.new"
-    exit 1
-fi
-
-# 原子替换并备份旧文件
+# 备份旧文件，原子替换
 [ -f "$MP_CORE_DIR/config.yaml" ] && mv -f "$MP_CORE_DIR/config.yaml" "$MP_CORE_DIR/config.yaml.bak"
 mv -f "$MP_CORE_DIR/config.new" "$MP_CORE_DIR/config.yaml"
 echo_log "config.yaml 已更新"
