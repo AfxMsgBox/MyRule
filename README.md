@@ -371,25 +371,29 @@ sudo sysctl --system
 
 ### 一键安装（OpenWrt 与 Debian/Ubuntu 通用）
 
+`DIR_SH` 必填（约定 `/etc/proxy/sh`，但 `inst.sh` 不写死默认值，让用户有意识地选择）：
+
 ```sh
 # OpenWrt（默认 root）
-wget -O- https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/inst.sh | sh
+DIR_SH=/etc/proxy/sh \
+    wget -O- https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/inst.sh | sh
 
 # Debian / Ubuntu
-sudo sh -c 'wget -O- https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/inst.sh | sh'
+sudo sh -c 'DIR_SH=/etc/proxy/sh \
+    wget -O- https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/inst.sh | sh'
 ```
 
 `inst.sh` 自动完成：
 
-1. 下载 `sh/*` 公共脚本到 `/etc/proxy/sh/`；
+1. 下载 `sh/*` 公共脚本到 `$DIR_SH`；
 2. 按 OS 装服务文件：OpenWrt → `init.d/{proxy_core,agh}` + `hotplug.d/net/99-meta-route`；systemd → `/etc/systemd/system/{proxy_core,agh}.service`；
 3. 调用 `update-all-configs.sh` 生成 `dns.conf` 与 `core/config.yaml`；
 4. `enable` + `start` 两个服务。
 
-自托管或 fork：
+自托管 / 分支调试：
 
 ```sh
-MP_REPO_RAW_URL=https://my.fork.example/raw \
+MP_REPO_RAW_URL=https://my.fork.example/raw DIR_SH=/etc/proxy/sh \
     wget -O- https://my.fork.example/raw/sh/inst.sh | sh
 ```
 
