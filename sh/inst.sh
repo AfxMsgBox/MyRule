@@ -47,7 +47,9 @@ wget -q -O "$DIR_SH/env.conf"  "$MP_REPO_RAW_URL/sh/env.conf"  || { echo "下载
 wget -q -O "$DIR_SH/common.sh" "$MP_REPO_RAW_URL/sh/common.sh" || { echo "下载 common.sh 失败" >&2; exit 1; }
 
 # inst.sh 已经用 wget 下载了 env.conf 与 common.sh，告诉后续脚本不必再下
-export MP_DEPS_UPDATED=1
+# （_DEPS_UPDATED 是 common.sh 内部约定的运行时标记，不是 env.conf 配置项，
+# 所以不带 MP_ 前缀）
+export _DEPS_UPDATED=1
 # 加载 env + 公共函数；不设 url_self，common.sh 自动跳过自更新
 . "$DIR_SH/common.sh"
 

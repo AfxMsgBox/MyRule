@@ -67,7 +67,7 @@ _yaml_extract_keys() {
 }
 
 # 自更新：MP_AUTOUPDATE=true/1/yes 触发；
-#   - env.conf / common.sh：进程树只下一次，用 export MP_DEPS_UPDATED=1 标记，
+#   - env.conf / common.sh：进程树只下一次，用 export _DEPS_UPDATED=1 标记，
 #     子进程通过环境继承自动跳过
 #   - 当前脚本（url_self）：每个 script 各自下一次，下完后 exec 重启时附 --skip-self-update
 #     防自身陷入无限重入；该 flag 不会传给子脚本，所以子脚本能正常更新自己
@@ -86,10 +86,10 @@ case "$MP_AUTOUPDATE" in
     1|true|yes)
         if [ -n "$url_self" ]; then
             # env.conf + common.sh 全进程树只下一次
-            if [ "$MP_DEPS_UPDATED" != "1" ]; then
+            if [ "$_DEPS_UPDATED" != "1" ]; then
                 download_file "$MP_URL_ENV_CONF"  "$dir_self/env.conf"  >/dev/null 2>&1
                 download_file "$MP_URL_COMMON_SH" "$dir_self/common.sh" >/dev/null 2>&1
-                export MP_DEPS_UPDATED=1
+                export _DEPS_UPDATED=1
             fi
             # 当前脚本只下一次（exec 重启后 _skip_self=1 跳过这段）
             if [ "$_skip_self" = "0" ]; then
