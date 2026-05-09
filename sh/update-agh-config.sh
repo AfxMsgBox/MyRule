@@ -14,11 +14,13 @@ append_payload() {
 echo_log "生成 $agh_dns"
 echo "# Generated at $(date '+%F %T')" > "$agh_dns"
 
-# 默认上游：优先 local.dns.conf，否则系统默认网关
-if [ -f "$MP_AGH_DIR/local.dns.conf" ]; then
-    cat "$MP_AGH_DIR/local.dns.conf" >> "$agh_dns"
+# 默认上游：MP_LOCAL_DNS（env.conf 配置，空格分隔）；为空时从 /etc/resolv.conf 取 nameserver
+if [ -n "$MP_LOCAL_DNS" ]; then
+    for ns in $MP_LOCAL_DNS; do
+        echo "$ns" >> "$agh_dns"
+    done
 else
-    ip route | awk '/^default/ {print $3; exit}' >> "$agh_dns"
+    awk '/^nameserver/ {print $2}' /etc/resolv.conf >> "$agh_dns"
 fi
 
 # 自定义上游（[/domain/]server 格式）：整段直接 cat
