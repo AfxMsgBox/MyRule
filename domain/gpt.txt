@@ -24,13 +24,13 @@ payload:
   - '+.openaicom.imgix.net'
 
 #Google
-  - '.goog'
+  - '+.goog'
+  - '+.google'
   - '+.android.com'
   - '+.deepmind.com'
   - '+.ggpht.com'
   - '+.gmail.com'
   - '+.google.cn'
-  - '+.google'
   - '+.googleapis.cn'
   - '+.google.com.hk'
   - '+.google.com.sg'
