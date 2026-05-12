@@ -24,6 +24,7 @@ payload:
   - '+.openaicom.imgix.net'
 
 #Google
+  - '.goog'
   - '+.android.com'
   - '+.deepmind.com'
   - '+.ggpht.com'
