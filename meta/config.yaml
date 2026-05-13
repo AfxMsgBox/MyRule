@@ -171,6 +171,7 @@ proxy-groups:
       - fastSingapore
       - fastTaiWan
       - fastUSA
+      - selectProxy
 #-------------------------
   - name: gptProxy
     type: select
@@ -179,7 +180,17 @@ proxy-groups:
       - fastSingapore
       - fastTaiWan
       - fastUSA
-
+      - selectProxy
+#-------------------------
+  - name: selectProxy
+    type: select
+    use:
+      - USA
+      - HongKong
+      - Taiwan
+      - Japan
+      - Singapore
+  
 rule-providers:
   rule_gpt:
     behavior: domain
