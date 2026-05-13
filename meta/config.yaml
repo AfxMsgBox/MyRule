@@ -167,7 +167,7 @@ proxy-groups:
     type: select
     proxies:
       - fastHongKong
-      - fastJapane
+      - fastJapan
       - fastSingapore
       - fastTaiWan
       - fastUSA
@@ -175,7 +175,7 @@ proxy-groups:
   - name: gptProxy
     type: select
     proxies:
-      - fastJapane
+      - fastJapan
       - fastSingapore
       - fastTaiWan
       - fastUSA
