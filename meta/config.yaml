@@ -64,14 +64,6 @@ dns:
   nameserver-policy:
     'cp.paeadiy.com': '47.116.209.9:39053'
 
-proxies:
-  - name: "sshSOS"
-    type: ssh
-    server: {sshSOS_server}
-    port: {sshSOS_port}
-    username: {sshSOS_user}
-    password: {sshSOS_password}
-
 proxy-providers:
   HongKong:
     type: http
@@ -83,7 +75,27 @@ proxy-providers:
       url: http://www.gstatic.com/generate_204
       expected-status: 204
       interval: 1800
-
+#-------------------------
+  Japan:
+    type: http
+    path: ./proxy/Japan.yaml
+    interval: 86400
+    url: {SUBSCRIBE_URL}&insert=false&exclude=%E8%AF%95%E7%94%A8&include=%E6%97%A5%E6%9C%AC&append_type=true&emoji=true&list=true&tfo=false&scv=true&fdn=true&sort=true&new_name=true
+    health-check:
+      enable: true
+      url: http://www.gstatic.com/generate_204
+      interval: 1800
+#-------------------------
+  Singapore:
+    type: http
+    path: ./proxy/Singapore.yaml
+    interval: 86400
+    url: {SUBSCRIBE_URL}&insert=false&exclude=%E8%AF%95%E7%94%A8&include=%E6%96%B0%E5%8A%A0%E5%9D%A1&append_type=true&emoji=true&list=true&tfo=false&scv=true&fdn=true&sort=true&new_name=true
+    health-check:
+      enable: true
+      url: http://www.gstatic.com/generate_204
+      interval: 1800
+#-------------------------
   TaiWan:
     type: http
     path: ./proxy/TaiWan.yaml
@@ -94,17 +106,7 @@ proxy-providers:
       url: http://www.gstatic.com/generate_204
       expected-status: 204
       interval: 1800
-
-  Singapore:
-    type: http
-    path: ./proxy/Singapore.yaml
-    interval: 86400
-    url: {SUBSCRIBE_URL}&insert=false&exclude=%E8%AF%95%E7%94%A8&include=%E6%96%B0%E5%8A%A0%E5%9D%A1&append_type=true&emoji=true&list=true&tfo=false&scv=true&fdn=true&sort=true&new_name=true
-    health-check:
-      enable: true
-      url: http://www.gstatic.com/generate_204
-      interval: 1800
-
+#-------------------------
   USA:
     type: http
     path: ./proxy/USA.yaml
@@ -124,16 +126,16 @@ proxy-groups:
     url: 'http://www.gstatic.com/generate_204'
     use:
       - HongKong
-
-  - name: fastTaiWan
+#-------------------------
+  - name: fastJapan
     type: url-test
     interval: 600
-    tolerance: 30
+    tolerance: 50
     lazy: true
     url: 'http://www.gstatic.com/generate_204'
     use:
-      - TaiWan
-
+      - Japan
+#-------------------------
   - name: fastSingapore
     type: url-test
     interval: 600
@@ -142,7 +144,16 @@ proxy-groups:
     url: 'http://www.gstatic.com/generate_204'
     use:
       - Singapore
-
+#-------------------------
+  - name: fastTaiWan
+    type: url-test
+    interval: 600
+    tolerance: 30
+    lazy: true
+    url: 'http://www.gstatic.com/generate_204'
+    use:
+      - TaiWan
+#-------------------------
   - name: fastUSA
     type: url-test
     interval: 600
@@ -151,24 +162,23 @@ proxy-groups:
     url: 'http://www.gstatic.com/generate_204'
     use:
       - USA
-
+#-------------------------
   - name: defaultProxy
     type: select
     proxies:
       - fastHongKong
-      - fastTaiWan
+      - fastJapane
       - fastSingapore
+      - fastTaiWan
       - fastUSA
-      - sshSOS
-
+#-------------------------
   - name: gptProxy
     type: select
     proxies:
+      - fastJapane
       - fastSingapore
       - fastTaiWan
-      - fastHongKong
       - fastUSA
-      - sshSOS
 
 rule-providers:
   rule_gpt:
