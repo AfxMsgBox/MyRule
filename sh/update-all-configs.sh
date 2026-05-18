@@ -10,11 +10,11 @@ echo_log "============ update all configs ============"
 rc=0
 # 子脚本通过继承环境变量 _DEPS_UPDATED=1 跳过重复下载 env.conf / common.sh
 echo_log ">>> AGH dns.conf"
-sh "$dir_self/update-agh-config.sh"    || rc=$((rc+1))
+sh "$MP_SH_DIR/update-agh-config.sh"    || rc=$((rc+1))
 echo_log ">>> core config.yaml"
-sh "$dir_self/update-core-config.sh"   || rc=$((rc+1))
+sh "$MP_SH_DIR/update-core-config.sh"   || rc=$((rc+1))
 echo_log ">>> 订阅与规则集"
-sh "$dir_self/update-proxy-rule.sh"    || rc=$((rc+1))
+sh "$MP_SH_DIR/update-proxy-rule.sh"    || rc=$((rc+1))
 
 [ "$rc" -eq 0 ] && echo_log "============ all done ============" \
                 || echo_log "============ done with errors (rc=$rc) ============"

@@ -45,6 +45,8 @@ echo ">>> 引导下载 env.conf / common.sh"
 mkdir -p "$DIR_SH"
 wget -q -O "$DIR_SH/env.conf"  "$MP_REPO_RAW_URL/sh/env.conf"  || { echo "下载 env.conf 失败"  >&2; exit 1; }
 wget -q -O "$DIR_SH/common.sh" "$MP_REPO_RAW_URL/sh/common.sh" || { echo "下载 common.sh 失败" >&2; exit 1; }
+# 把实际安装目录写入 env.conf，使 MP_SH_DIR 默认值与安装位置一致
+sed -i "s|MP_SH_DIR:-/etc/proxy/sh|MP_SH_DIR:-$DIR_SH|g" "$DIR_SH/env.conf"
 
 # inst.sh 已经用 wget 下载了 env.conf 与 common.sh，告诉后续脚本不必再下
 # （_DEPS_UPDATED 是 common.sh 内部约定的运行时标记，不是 env.conf 配置项，
@@ -91,10 +93,9 @@ case "$OS_TYPE" in
         ;;
 esac
 
-# === 第 4 步：刷新配置（子脚本继承 MP_AUTOUPDATE=false，不会再触发自更新） ===
+# === 第 4 步：刷新配置 ===
 echo_log ">>> 刷新 AGH dns.conf 与 core/config.yaml"
-sh "$DIR_SH/update-agh-config.sh --autoupdate=false" || echo_log "（部分步骤失败，详见上方日志）"
-sh "$DIR_SH/update-core-config.sh --autoupdate=false" || echo_log "（部分步骤失败，详见上方日志）"
+sh "$DIR_SH/update-all-configs.sh" || echo_log "（部分步骤失败，详见上方日志）"
 
 # === 第 5 步：启用并启动服务（任一步失败仅警告，不中断 inst） ===
 echo_log ">>> 启用并启动服务"

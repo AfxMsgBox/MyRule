@@ -93,8 +93,8 @@ case "$MP_AUTOUPDATE" in
         if [ -n "$url_self" ]; then
             # env.conf + common.sh 全进程树只下一次
             if [ "$_DEPS_UPDATED" != "1" ]; then
-                download_file "$MP_URL_ENV_CONF"  "$dir_self/env.conf"
-                download_file "$MP_URL_COMMON_SH" "$dir_self/common.sh"
+                download_file "$MP_URL_ENV_CONF"  "$MP_SH_DIR/env.conf"
+                download_file "$MP_URL_COMMON_SH" "$MP_SH_DIR/common.sh"
                 export _DEPS_UPDATED=1
             fi
             # 当前脚本只下一次（exec 重启后 _skip_self=1 跳过这段）
