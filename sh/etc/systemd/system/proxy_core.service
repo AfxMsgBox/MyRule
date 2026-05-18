@@ -31,9 +31,10 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=MyProxy
 
-# 简单的进程隔离
+# 进程隔离：strict 只读全局，再显式放开 core 目录（provider/ruleset 写入需要）
 PrivateTmp=true
-ProtectSystem=full
+ProtectSystem=strict
+ReadWritePaths=/etc/proxy/core
 NoNewPrivileges=true
 
 [Install]

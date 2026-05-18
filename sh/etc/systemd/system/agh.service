@@ -27,5 +27,7 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=MyProxy
 
+PrivateTmp=true
+
 [Install]
 WantedBy=multi-user.target
