@@ -45,8 +45,6 @@ echo ">>> 引导下载 env.conf / common.sh"
 mkdir -p "$DIR_SH"
 wget -q -O "$DIR_SH/env.conf"  "$MP_REPO_RAW_URL/sh/env.conf"  || { echo "下载 env.conf 失败"  >&2; exit 1; }
 wget -q -O "$DIR_SH/common.sh" "$MP_REPO_RAW_URL/sh/common.sh" || { echo "下载 common.sh 失败" >&2; exit 1; }
-# 把实际安装目录写入 env.conf，使 MP_SH_DIR 默认值与安装位置一致
-sed -i "s|MP_SH_DIR:-/etc/proxy/sh|MP_SH_DIR:-$DIR_SH|g" "$DIR_SH/env.conf"
 
 # inst.sh 已经用 wget 下载了 env.conf 与 common.sh，告诉后续脚本不必再下
 # （_DEPS_UPDATED 是 common.sh 内部约定的运行时标记，不是 env.conf 配置项，
@@ -110,7 +108,18 @@ case "$OS_TYPE" in
         ;;
 esac
 
-# === 完成提示 ===
+# === 完成：把安装目录与仓库分支写入 env.local.conf（不动 env.conf） ===
+# upsert_conf <key> <value> <file>：已存在则替换，否则追加
+upsert_conf() {
+    if grep -q "^$1=" "$3" 2>/dev/null; then
+        sed -i "s|^$1=.*|$1=\"$2\"|" "$3"
+    else
+        echo "$1=\"$2\"" >> "$3"
+    fi
+}
+upsert_conf MP_SH_DIR       "$DIR_SH"          "$DIR_SH/env.local.conf"
+upsert_conf MP_REPO_RAW_URL "$MP_REPO_RAW_URL"  "$DIR_SH/env.local.conf"
+
 echo
 echo "============ 安装完成 ============"
 echo "  脚本目录：$DIR_SH"

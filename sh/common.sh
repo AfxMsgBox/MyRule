@@ -5,9 +5,13 @@
 # 当前脚本路径（自更新覆写自身用）
 path_self=$(readlink -f "$0" 2>/dev/null || echo "$0")
 
-# 加载 env.conf：先 caller 目录，回退 /etc/proxy/sh
-if [ -f "$(dirname "$path_self")/env.conf" ]; then
-    . "$(dirname "$path_self")/env.conf"
+# 在加载 env.conf 前先把 MP_SH_DIR 设为脚本所在目录；
+# env.conf 里 ${MP_SH_DIR:-/etc/proxy/sh} 会保留此值，
+# 后续 env.local.conf 才能从正确目录加载（解决 init.d/$0 不可靠的问题）
+MP_SH_DIR="${MP_SH_DIR:-$(dirname "$path_self")}"
+
+if [ -f "$MP_SH_DIR/env.conf" ]; then
+    . "$MP_SH_DIR/env.conf"
 elif [ -f /etc/proxy/sh/env.conf ]; then
     . /etc/proxy/sh/env.conf
 else
