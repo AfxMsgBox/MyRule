@@ -50,6 +50,10 @@ wget -q -O "$DIR_SH/common.sh" "$MP_REPO_RAW_URL/sh/common.sh" || { echo "下载
 # （_DEPS_UPDATED 是 common.sh 内部约定的运行时标记，不是 env.conf 配置项，
 # 所以不带 MP_ 前缀）
 export _DEPS_UPDATED=1
+# 显式声明安装目录：inst.sh 本身可能在 /tmp 或经 wget|sh 运行（$0 不可靠），
+# 必须在 source common.sh 前把 MP_SH_DIR 定死为 DIR_SH，否则 common.sh 会
+# 按 inst.sh 的 $0 推导出错误目录并 export 给所有子脚本
+export MP_SH_DIR="$DIR_SH"
 # 加载 env + 公共函数；不设 url_self，common.sh 自动跳过自更新
 . "$DIR_SH/common.sh"
 
