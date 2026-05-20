@@ -10,7 +10,7 @@
 #   wget -O- https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/inst.sh | sh
 #   wget -O- https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/inst.sh | sh -s -- /opt/myproxy/sh
 # 自托管 / 分支调试：
-#   MP_REPO_RAW_URL=https://my.fork.example/raw \
+#   MP_REPO_RAW_URL=https://raw.githubusercontent.com/AfxMsgBox/MyRule/refs/heads/claude/update-readme-overview-pU5D3 \
 #       wget -O- $MP_REPO_RAW_URL/sh/inst.sh | sh
 
 # 必须 root 才能写 /etc/init.d、/etc/systemd/system 等
