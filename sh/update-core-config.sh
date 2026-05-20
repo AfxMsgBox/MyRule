@@ -3,6 +3,7 @@ url_self="$MP_URL_UPDATE_CORE_CONFIG_SH"
 . "$(dirname "$(readlink -f "$0")")/common.sh"
 
 echo_log "更新代理内核 config.yaml"
+mkdir -p "$MP_CORE_DIR"
 
 # 拉取模板
 download_file "$MP_URL_CORE_CONFIG" "$MP_CORE_DIR/config.new" \
