@@ -26,11 +26,11 @@ profile:
   store-fake-ip: true
 #
 
-tunnels:
-- network: [tcp, udp]
-  address: 0.0.0.0:853
-  target: 8.8.8.8:53
-  proxy: defaultProxy
+#tunnels:
+#- network: [tcp, udp]
+#  address: 0.0.0.0:853
+#  target: 8.8.8.8:53
+#  proxy: defaultProxy
 
 tun:
   enable: true
@@ -50,17 +50,17 @@ dns:
   fake-ip-range: 172.16.0.1/12
   # 用于解析 nameserver，fallback 以及其他 DNS 服务器配置的，DNS 服务域名
   # 只能使用纯 IP 地址，可使用加密 DNS
-  default-nameserver:
-    - 223.5.5.5
+#  default-nameserver:
+#    - 223.5.5.5
   # 这部分为主要 DNS 配置，影响所有直连，确保使用对大陆解析精准的 DNS  
-  nameserver:
-    - 223.5.5.5
-    - 114.114.114.114
+#  nameserver:
+#    - 223.5.5.5
+#    - 114.114.114.114
   # 当配置 fallback 时，会查询 nameserver 中返回的 IP 是否为 CN，非必要配置
   # 当不是 CN，则使用 fallback 中的 DNS 查询结果
   # 确保配置 fallback 时能够正常查询
-  fallback:
-    - 8.8.8.8
+#  fallback:
+#    - 8.8.8.8
   nameserver-policy:
     'cp.paeadiy.com': '47.116.209.9:39053'
 
@@ -75,7 +75,27 @@ proxy-providers:
       url: http://www.gstatic.com/generate_204
       expected-status: 204
       interval: 1800
-
+#-------------------------
+  Japan:
+    type: http
+    path: ./proxy/Japan.yaml
+    interval: 86400
+    url: {MP_SUBSCRIBE_URL}&insert=false&exclude=%E8%AF%95%E7%94%A8&include=%E6%97%A5%E6%9C%AC&append_type=true&emoji=true&list=true&tfo=false&scv=true&fdn=true&sort=true&new_name=true
+    health-check:
+      enable: true
+      url: http://www.gstatic.com/generate_204
+      interval: 1800
+#-------------------------
+  Singapore:
+    type: http
+    path: ./proxy/Singapore.yaml
+    interval: 86400
+    url: {MP_SUBSCRIBE_URL}&insert=false&exclude=%E8%AF%95%E7%94%A8&include=%E6%96%B0%E5%8A%A0%E5%9D%A1&append_type=true&emoji=true&list=true&tfo=false&scv=true&fdn=true&sort=true&new_name=true
+    health-check:
+      enable: true
+      url: http://www.gstatic.com/generate_204
+      interval: 1800
+#-------------------------
   TaiWan:
     type: http
     path: ./proxy/TaiWan.yaml
@@ -86,17 +106,7 @@ proxy-providers:
       url: http://www.gstatic.com/generate_204
       expected-status: 204
       interval: 1800
-
-  Singapore:
-    type: http
-    path: ./proxy/Singapore.yaml
-    interval: 86400
-    url: {MP_SUBSCRIBE_URL}&insert=false&exclude=%E8%AF%95%E7%94%A8&include=%E6%96%B0%E5%8A%A0%E5%9D%A1&append_type=true&emoji=true&list=true&tfo=false&scv=true&fdn=true&sort=true&new_name=true
-    health-check:
-      enable: true
-      url: http://www.gstatic.com/generate_204
-      interval: 1800
-
+#-------------------------
   USA:
     type: http
     path: ./proxy/USA.yaml
@@ -116,16 +126,16 @@ proxy-groups:
     url: 'http://www.gstatic.com/generate_204'
     use:
       - HongKong
-
-  - name: fastTaiWan
+#-------------------------
+  - name: fastJapan
     type: url-test
     interval: 600
-    tolerance: 30
+    tolerance: 50
     lazy: true
     url: 'http://www.gstatic.com/generate_204'
     use:
-      - TaiWan
-
+      - Japan
+#-------------------------
   - name: fastSingapore
     type: url-test
     interval: 600
@@ -134,7 +144,16 @@ proxy-groups:
     url: 'http://www.gstatic.com/generate_204'
     use:
       - Singapore
-
+#-------------------------
+  - name: fastTaiWan
+    type: url-test
+    interval: 600
+    tolerance: 30
+    lazy: true
+    url: 'http://www.gstatic.com/generate_204'
+    use:
+      - TaiWan
+#-------------------------
   - name: fastUSA
     type: url-test
     interval: 600
@@ -143,23 +162,35 @@ proxy-groups:
     url: 'http://www.gstatic.com/generate_204'
     use:
       - USA
-
+#-------------------------
   - name: defaultProxy
     type: select
     proxies:
       - fastHongKong
-      - fastTaiWan
+      - fastJapan
       - fastSingapore
+      - fastTaiWan
       - fastUSA
-
+      - selectProxy
+#-------------------------
   - name: gptProxy
     type: select
     proxies:
+      - fastJapan
       - fastSingapore
       - fastTaiWan
-      - fastHongKong
       - fastUSA
-
+      - selectProxy
+#-------------------------
+  - name: selectProxy
+    type: select
+    use:
+      - USA
+      - HongKong
+      - TaiWan
+      - Japan
+      - Singapore
+  
 rule-providers:
   rule_gpt:
     behavior: domain
