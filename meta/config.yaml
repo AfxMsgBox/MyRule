@@ -42,7 +42,7 @@ tun:
   auto-detect-interface: false
 
 dns:
-  enable: true
+  enable: true    
   ipv6: false
   enhanced-mode: fake-ip
   listen: :253
@@ -61,6 +61,9 @@ dns:
   # 确保配置 fallback 时能够正常查询
 #  fallback:
 #    - 8.8.8.8
+  nameserver:
+    - 119.29.29.29
+    - 223.5.5.5
   nameserver-policy:
     'cp.paeadiy.com': '47.116.209.9:39053'
 
