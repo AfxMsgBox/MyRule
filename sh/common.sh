@@ -5,13 +5,13 @@
 # 当前脚本路径（自更新覆写自身用）
 path_self=$(readlink -f "$0" 2>/dev/null || echo "$0")
 
-# 在加载 env.conf 前先把 MP_SH_DIR 设为脚本所在目录；
-# env.conf 里 ${MP_SH_DIR:-/etc/proxy/sh} 会保留此值，
+# 在加载 env.conf 前先把 MP_INST_DIR 设为脚本所在目录的父目录（脚本约定在 sh/ 子目录）；
+# env.conf 里 ${MP_INST_DIR:-/etc/proxy} 会保留此值，
 # 后续 env.local.conf 才能从正确目录加载（解决 init.d/$0 不可靠的问题）
-MP_SH_DIR="${MP_SH_DIR:-$(dirname "$path_self")}"
+MP_INST_DIR="${MP_INST_DIR:-$(dirname "$(dirname "$path_self")")}"
 
-if [ -f "$MP_SH_DIR/env.conf" ]; then
-    . "$MP_SH_DIR/env.conf"
+if [ -f "$MP_INST_DIR/sh/env.conf" ]; then
+    . "$MP_INST_DIR/sh/env.conf"
 elif [ -f /etc/proxy/sh/env.conf ]; then
     . /etc/proxy/sh/env.conf
 else
@@ -100,8 +100,8 @@ case "$MP_AUTOUPDATE" in
         if [ -n "$url_self" ]; then
             # env.conf + common.sh 全进程树只下一次
             if [ "$_DEPS_UPDATED" != "1" ]; then
-                download_file "$MP_URL_ENV_CONF"  "$MP_SH_DIR/env.conf"
-                download_file "$MP_URL_COMMON_SH" "$MP_SH_DIR/common.sh"
+                download_file "$MP_URL_ENV_CONF"  "$MP_INST_DIR/sh/env.conf"
+                download_file "$MP_URL_COMMON_SH" "$MP_INST_DIR/sh/common.sh"
                 export _DEPS_UPDATED=1
             fi
             # 当前脚本只下一次（exec 重启后 _skip_self=1 跳过这段）

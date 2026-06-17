@@ -1,5 +1,5 @@
 #!/bin/sh /etc/rc.common
-# OpenWrt procd：启动 mihomo（或同协议替代品；MP_CORE_BIN 决定二进制）
+# OpenWrt procd：启动 mihomo
 START=98
 STOP=2
 USE_PROCD=1
@@ -7,9 +7,9 @@ USE_PROCD=1
 . /etc/proxy/sh/env.conf
 
 start_service() {
-    [ -x "$MP_CORE_BIN" ] || { logger -t "$MP_LOG_TAG" "代理内核不存在或不可执行：$MP_CORE_BIN"; return 1; }
+    [ -x "$MP_CORE_DIR/mihomo" ] || { logger -t "$MP_LOG_TAG" "代理内核不存在或不可执行：$MP_CORE_DIR/mihomo"; return 1; }
     procd_open_instance
-    procd_set_param command "$MP_CORE_BIN" -d "$MP_CORE_DIR"
+    procd_set_param command "$MP_CORE_DIR/mihomo" -d "$MP_CORE_DIR"
     procd_set_param respawn 3600 5 5
     procd_set_param stdout 1
     procd_set_param stderr 1
