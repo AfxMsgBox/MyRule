@@ -59,29 +59,34 @@ inst.sh 自动识别 OpenWrt / systemd 并分发对应服务文件，最后启�
   - `MP_REPO_RAW_URL` —— 当次安装使用的仓库 URL（默认 main，分支安装会写入分支 URL）
 - 重复运行 inst.sh 时上述两项会被更新（不会重复追加）；用户加的其它行不动。
 
-**典型内容**：
+**必填项**（缺一不可，否则代理无法工作）：
+
+| 变量 | 说明 |
+|---|---|
+| `MP_SUBSCRIBE_URL` | 节点订阅 URL（`core/config.yaml` 的 `{MP_SUBSCRIBE_URL}` 占位符引用） |
+
+**条件必填**（与默认值不同时才填）：
+
+| 变量 | 默认值 | 何时需要填 |
+|---|---|---|
+| `MP_CORE_BIN` | `$MP_CORE_DIR/mihomo` | mihomo 二进制不在 `core` 目录下 |
+| `MP_AGH_BIN` | `/usr/bin/AdGuardHome` | AdGuardHome 不在系统默认路径 |
+| `MP_LOCAL_DNS` | `"223.5.5.5 114.114.114.114"` | 想用别的上游；置空则读 `/etc/resolv.conf` |
+
+**inst.sh 自动写入**（不要手动改）：
+
+| 变量 | 说明 |
+|---|---|
+| `MP_SH_DIR` | 实际安装路径，init.d / systemd 服务靠它定位 env.local.conf |
+| `MP_REPO_RAW_URL` | 当次安装使用的仓库 URL（含分支） |
+
+**示例**（最小化，单机 + 默认路径）：
 
 ```sh
-# 订阅与节点（必填）
 MP_SUBSCRIBE_URL="https://api.subcsub.com/sub?target=clash&url=<URL-encoded>"
-MP_SSHSOS_USER="..."
-MP_SSHSOS_PASSWORD="..."
-MP_SSHSOS_SERVER="..."
-MP_SSHSOS_PORT="22"
-
-# 二进制路径不同时覆盖
-MP_CORE_BIN="/usr/local/bin/mihomo"
-MP_AGH_BIN="/usr/local/bin/AdGuardHome"
-
-# AGH 上游 DNS（默认 223.5.5.5 + 114.114.114.114；置空则用 /etc/resolv.conf）
-MP_LOCAL_DNS="1.1.1.1 8.8.8.8"
-
-# 开发调试：阻止脚本被远程版本覆盖
-MP_AUTOUPDATE="false"
-
-# 安装期自动写入，正常不需要手动改：
-# MP_SH_DIR="/opt/myproxy/sh"
-# MP_REPO_RAW_URL="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main"
+# 下面两行由 inst.sh 自动写入：
+MP_SH_DIR="/etc/proxy/sh"
+MP_REPO_RAW_URL="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main"
 ```
 
 可覆盖的完整变量清单见 `sh/env.conf`。
