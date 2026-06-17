@@ -34,28 +34,30 @@ get_file_size() {
 # use_proxy 缺省取 $MP_USE_PROXY；显式传 0/1 可覆盖（如 inst.sh 的 bootstrap 阶段强制直连）
 # 走代理失败自动回退直连；--fail 让 4xx/5xx 不被当成功；mktemp + mv 原子替换。
 download_file() {
-    url="$1"; dst="$2"; verbose="${3:-true}"; use_proxy="${4:-$MP_USE_PROXY}"; min_size="${5:-8}"
-    case "$use_proxy" in 1|true|yes) proxy_arg="--proxy $MP_PROXY_HTTP" ;; *) proxy_arg="" ;; esac
-    [ "$verbose" = "true" ] && echo_log "下载 $url"
-    t0=$(date +%s)
-    tmp=$(mktemp)
+    # 所有内部变量加 _df_ 前缀，避免污染调用方同名变量（POSIX sh 无 local）
+    _df_url="$1"; _df_dst="$2"; _df_verbose="${3:-true}"
+    _df_use_proxy="${4:-$MP_USE_PROXY}"; _df_min_size="${5:-8}"
+    case "$_df_use_proxy" in 1|true|yes) _df_proxy="--proxy $MP_PROXY_HTTP" ;; *) _df_proxy="" ;; esac
+    [ "$_df_verbose" = "true" ] && echo_log "下载 $_df_url"
+    _df_t0=$(date +%s)
+    _df_tmp=$(mktemp)
     # -L 跟进 302（GitHub releases 等都重定向到 S3），--max-time 放宽给大二进制
     curl --silent --show-error --fail -L --connect-timeout 10 --max-time 300 \
-         --retry 2 --retry-delay 1 $proxy_arg "$url" -o "$tmp" >/dev/null 2>&1
-    rc=$?
-    if [ "$rc" -ne 0 ] && [ -n "$proxy_arg" ]; then
-        [ "$verbose" = "true" ] && echo_log "代理失败，回退直连"
+         --retry 2 --retry-delay 1 $_df_proxy "$_df_url" -o "$_df_tmp" >/dev/null 2>&1
+    _df_rc=$?
+    if [ "$_df_rc" -ne 0 ] && [ -n "$_df_proxy" ]; then
+        [ "$_df_verbose" = "true" ] && echo_log "代理失败，回退直连"
         curl --silent --show-error --fail -L --connect-timeout 10 --max-time 300 \
-             --retry 2 --retry-delay 1 "$url" -o "$tmp" >/dev/null 2>&1
-        rc=$?
+             --retry 2 --retry-delay 1 "$_df_url" -o "$_df_tmp" >/dev/null 2>&1
+        _df_rc=$?
     fi
-    if [ "$rc" -ne 0 ] || [ "$(get_file_size "$tmp")" -le "$min_size" ]; then
-        rm -f "$tmp"
-        [ "$verbose" = "true" ] && echo_log "下载失败"
+    if [ "$_df_rc" -ne 0 ] || [ "$(get_file_size "$_df_tmp")" -le "$_df_min_size" ]; then
+        rm -f "$_df_tmp"
+        [ "$_df_verbose" = "true" ] && echo_log "下载失败"
         return 1
     fi
-    [ "$verbose" = "true" ] && echo_log "完成：$(get_file_size "$tmp") 字节 / $(($(date +%s) - t0))s"
-    mv "$tmp" "$dst"
+    [ "$_df_verbose" = "true" ] && echo_log "完成：$(get_file_size "$_df_tmp") 字节 / $(($(date +%s) - _df_t0))s"
+    mv "$_df_tmp" "$_df_dst"
 }
 
 # 从缩进式 yaml 取顶层 map 下的子 key 列表
