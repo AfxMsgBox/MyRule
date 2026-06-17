@@ -1,6 +1,5 @@
 #!/bin/sh
 # 拉取 core/config.yaml 模板，把 {MP_*} 占位符按当前环境替换后原子覆盖。
-url_self="$MP_URL_UPDATE_CORE_CONFIG_SH"
 . "$(dirname "$(readlink -f "$0")")/common.sh"
 
 echo_log "更新代理内核 config.yaml"

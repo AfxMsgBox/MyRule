@@ -1,6 +1,5 @@
 #!/bin/sh
 # 生成 AGH dns.conf：默认上游 + myupstream 原样段 + 各域名清单转发到 mihomo:$MP_CORE_DNS_PORT
-url_self="$MP_URL_UPDATE_AGH_CONFIG_SH"
 . "$(dirname "$(readlink -f "$0")")/common.sh"
 
 agh_dns="$MP_AGH_DIR/dns.conf"

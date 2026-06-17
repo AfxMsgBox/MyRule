@@ -4,7 +4,6 @@
 # 单跑升级用法：
 #   sh /etc/proxy/sh/update-bin.sh
 #   sh /etc/proxy/sh/update-bin.sh && systemctl restart proxy_core agh   # 升级后需重启
-url_self="$MP_URL_UPDATE_BIN_SH"
 . "$(dirname "$(readlink -f "$0")")/common.sh"
 
 mkdir -p "$MP_CORE_DIR" "$MP_AGH_DIR"

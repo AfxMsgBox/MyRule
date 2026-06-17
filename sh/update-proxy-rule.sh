@@ -1,6 +1,5 @@
 #!/bin/sh
 # 触发 mihomo 增量刷新所有 proxy-providers 与 rule-providers（PUT /providers/...）
-url_self="$MP_URL_UPDATE_PROXY_RULE_SH"
 . "$(dirname "$(readlink -f "$0")")/common.sh"
 
 config_yaml="$MP_CORE_DIR/config.yaml"

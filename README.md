@@ -21,13 +21,13 @@
 
 ## 安装
 
-`inst.sh` 第一个位置参数指定**安装根目录**；`sh/`、`core/`、`agh/`、`sys/` 都会落在它下面。省略时用 `$PWD`。
+`inst.sh` 第一个位置参数指定**安装根目录**；`sh/`、`core/`、`agh/` 都会落在它下面。省略时用 `$PWD`。服务文件副本（已替换路径占位）放在 `sh/etc/` 下，结构与仓库 `sh/etc/` 一致。
 
 启动后会**交互式向导**让你填 6 项：仓库分支、节点订阅 URL、AGH 用户名、AGH 密码（bcrypt 哈希）、AGH 上游 DNS、是否立即启用自启动。重装时方括号显示当前值，回车保留。无 tty 时（cron）跳过向导，要求 `env.local.conf` 已具备必填项；自启动询问无 tty 时默认走"启用"分支。
 
 最后一步**自启动询问**：
-- **Y（默认）**：把 `sys/` 下的服务文件复制到 `/etc/init.d`（OpenWrt）或 `/etc/systemd/system`（Debian），并 `enable + start`。
-- **n**：跳过，文件留在 `$MP_INST_DIR/sys/` 并同目录生成 `README.md`，照里面命令手动装即可。
+- **Y（默认）**：把 `sh/etc/` 下的服务文件复制到 `/etc/init.d`（OpenWrt）或 `/etc/systemd/system`（Debian），并 `enable + start`。后续 `update-scripts.sh` 也会同步覆盖这些 `/etc` 副本。
+- **n**：不动 `/etc`，服务文件留在 `$MP_INST_DIR/sh/etc/`。`inst.sh` 结尾会打印对应的手动安装命令（也可以以后重跑 `inst.sh` 选 Y）。
 
 随后按 `uname -m` 识别架构（amd64 / arm64 / armv5-7 / 386 / mips(le)(_softfloat) / mips64(le) / riscv64），从 GitHub Releases 下载最新版 mihomo 与 AdGuardHome 到 `core/` 与 `agh/`（**每次都覆盖**，不做版本比较；如需单独升级二进制见 `update-bin.sh`）。
 
@@ -108,35 +108,73 @@ sh $MP_INST_DIR/sh/update-all-configs-restart-services.sh
 
 ## 日常运维
 
-下表用 `/etc/proxy` 作示例路径；若装在别处，把 `/etc/proxy` 换成你的 `$MP_INST_DIR`。
+下表用 `/etc/proxy` 作示例路径；装在别处把 `/etc/proxy` 换成你的 `$MP_INST_DIR`。
+
+**核心设计**：刷新分**三种**，互不交叉——脚本只更新脚本，配置只更新配置，二进制只更新二进制。除了 `update-scripts.sh`，**其它脚本都不会动脚本自身**，行为可控。
+
+### ① 刷新脚本（唯一入口）
 
 | 操作 | 命令 |
 |---|---|
-| 全量刷新 + 重启 | `sh /etc/proxy/sh/update-all-configs-restart-services.sh` |
-| 仅刷新规则不重启 | `sh /etc/proxy/sh/update-all-configs.sh` |
-| 仅刷新订阅与规则集 | `sh /etc/proxy/sh/update-proxy-rule.sh` |
-| 升级 mihomo / AGH 二进制 | `sh /etc/proxy/sh/update-bin.sh && systemctl restart proxy_core agh` |
-| 跳过自更新 | 任一脚本加 `--autoupdate=false` |
+| 刷新所有脚本（含 env.conf / common.sh / sh/etc/* / 自身） | `sh /etc/proxy/sh/update-scripts.sh` |
+
+`update-scripts.sh` 会重新下载 `sh/*.sh` 与 `sh/etc/*`；当初 inst 选了自启动（`/etc` 下已有副本），还会同步覆盖到 `/etc` 并 `systemctl daemon-reload`（systemd 时）。
+
+### ② 刷新配置
+
+| 操作 | 命令 |
+|---|---|
+| 全部配置（AGH dns.conf + core config.yaml + 订阅规则集 PUT） | `sh /etc/proxy/sh/update-all-configs.sh` |
+| 全部配置 + 重启 agh / proxy_core | `sh /etc/proxy/sh/update-all-configs-restart-services.sh` |
+| 仅 AGH dns.conf | `sh /etc/proxy/sh/update-agh-config.sh` |
+| 仅 core config.yaml | `sh /etc/proxy/sh/update-core-config.sh` |
+| 仅订阅与规则集（PUT mihomo providers） | `sh /etc/proxy/sh/update-proxy-rule.sh` |
+
+新增 / 修改分流规则：编辑 `domain/*.txt` push 到 `main`，下次 cron 触发或手动 `update-agh-config.sh` / `update-all-configs.sh` 即可同步。
+
+### ③ 刷新二进制
+
+| 操作 | 命令 |
+|---|---|
+| 升级 mihomo + AdGuardHome | `sh /etc/proxy/sh/update-bin.sh` |
+| 升级后重启服务 | `sh /etc/proxy/sh/update-bin.sh && systemctl restart proxy_core agh` |
+
+### 其它
+
+| 操作 | 命令 |
+|---|---|
 | 看日志 (OpenWrt) | `logread -e MyProxy -f` |
 | 看日志 (Debian) | `journalctl -t MyProxy -f` |
 | 清 fake-ip 缓存 | `curl -X POST $MP_CORE_API/cache/fakeip/flush` |
 
-新增 / 修改分流规则：直接编辑 `domain/*.txt` push 到 `main`，下次 cron 触发或手动 `update-all-configs.sh` 即可同步。
-
 ### 推荐 cron
 
 ```cron
-*/5 * * * * sh /etc/proxy/sh/keeplive.sh
-0   3 * * * sh /etc/proxy/sh/update-proxy-rule.sh
-0   4 * * * sh /etc/proxy/sh/update-all-configs-restart-services.sh
+*/5 * * * *  sh /etc/proxy/sh/keeplive.sh
+0   3 * * 0  sh /etc/proxy/sh/update-scripts.sh
+0   4 * * *  sh /etc/proxy/sh/update-all-configs-restart-services.sh
+0   5 1 * *  sh /etc/proxy/sh/update-bin.sh && systemctl restart proxy_core agh
 ```
+
+每周一次刷脚本、每天一次刷配置 + 重启、每月一次升级二进制 + 重启。频率按需调整。
 
 ---
 
 ## 仓库结构
 
 ```
-sh/             脚本（env.conf / common.sh / inst.sh / update-*.sh / keeplive.sh ...）
+sh/             脚本与模板
+  inst.sh                      首次安装
+  update-scripts.sh            刷新所有脚本（含 env.conf / common.sh / sh/etc/* / 自身）
+  update-bin.sh                刷新 mihomo / AdGuardHome 二进制
+  update-all-configs.sh        刷新所有配置
+  update-all-configs-restart-services.sh  上面 + 重启服务
+  update-agh-config.sh         仅 AGH dns.conf
+  update-core-config.sh        仅 core config.yaml
+  update-proxy-rule.sh         仅订阅与规则集（PUT mihomo providers）
+  keeplive.sh                  保活
+  setup-fake-ip-route.sh       fake-ip 路由修正（hotplug / ExecStartPost）
+  env.conf / common.sh         全局变量 / 公共函数
   etc/init.d/                  OpenWrt procd 服务（原始模板）
   etc/hotplug.d/net/           OpenWrt hotplug
   etc/systemd/system/          Debian systemd unit（原始模板）
@@ -146,11 +184,6 @@ agh/myupstream.txt             AGH 自定义上游
 domain/                        分流域名清单（Clash payload 格式）
 ```
 
-安装后还会在安装根下生成：
-
-```
-$MP_INST_DIR/sys/              已替换路径的服务文件 + 手动安装 README
-                               （inst.sh 选 Y 时也会复制到 /etc 对应位置）
-```
+安装后在 `$MP_INST_DIR/sh/etc/` 下会有一份**已替换路径占位**的服务文件副本，结构与仓库 `sh/etc/` 一致。`update-scripts.sh` 维护这份副本，并在用户当初选了自启动（`/etc` 下已存在）时同步覆盖。
 
 各文件顶部都有简短说明，详细行为见脚本内注释。
