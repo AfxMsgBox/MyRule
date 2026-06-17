@@ -1,23 +1,24 @@
 #!/bin/sh
 # MyProxy 一键安装：下载所有脚本与服务文件，刷新配置，启用并启动服务。
-# 前提：本机已按默认路径装好 mihomo（/etc/proxy/core/mihomo）
-#       与 AdGuardHome（/usr/bin/AdGuardHome）；如不一致请改 env.local.conf。
+# 前提：本机已装好 mihomo 与 AdGuardHome；路径与默认不同时在 env.local.conf
+#       用 MP_CORE_BIN / MP_AGH_BIN 覆盖。
 #
-# 用法（需 root；安装目录作为第一个参数，省略则默认 /etc/proxy/sh）：
-#   sh inst.sh                    # 装到 /etc/proxy/sh
-#   sh inst.sh /opt/myproxy/sh    # 装到自定义目录
+# 用法（需 root；安装目录作为第一个参数，省略则用 $PWD 作为 sh 目录，
+# core / agh 会被推导为 sh 的兄弟目录）：
+#   mkdir -p /opt/myproxy/sh && cd $_ && sh inst.sh   # 装到 /opt/myproxy/{sh,core,agh}
+#   sh inst.sh /etc/proxy/sh                           # 显式指定，装到 /etc/proxy/{sh,core,agh}
 # wget|sh 管道时用 sh -s -- 传位置参数：
-#   wget -O- https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/inst.sh | sh
-#   wget -O- https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/inst.sh | sh -s -- /opt/myproxy/sh
+#   wget -O- https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/inst.sh | sh -s -- /etc/proxy/sh
 # 自托管 / 分支调试：
-#   MP_REPO_RAW_URL=https://raw.githubusercontent.com/AfxMsgBox/MyRule/refs/heads/claude/update-readme-overview-pU5D3 \
-#       wget -O- $MP_REPO_RAW_URL/sh/inst.sh | sh
+#   MP_REPO_RAW_URL=https://raw.githubusercontent.com/AfxMsgBox/MyRule/refs/heads/<branch> \
+#       wget -O- "$MP_REPO_RAW_URL/sh/inst.sh" | sh
 
 # 必须 root 才能写 /etc/init.d、/etc/systemd/system 等
 [ "$(id -u)" = "0" ] || { echo "需要 root 权限运行（Debian/Ubuntu 请加 sudo）" >&2; exit 1; }
 
-# 安装目录：第一个位置参数 > 默认 /etc/proxy/sh
-DIR_SH="${1:-/etc/proxy/sh}"
+# 安装目录：第一个位置参数 > 默认当前目录（$PWD 作为 sh 目录）
+# 不给参数时，建议先 cd 到一个有意义的位置（如 mkdir -p /opt/myproxy/sh && cd $_）
+DIR_SH="${1:-$PWD}"
 
 # 引导阶段先尝试加载本地已有的 env.local.conf（开发场景下用户可在此预置
 # MP_REPO_RAW_URL=https://...branch 让 inst 直接拉分支版本）
@@ -69,28 +70,24 @@ done
 chmod +x "$DIR_SH"/*.sh
 
 # === 第 3 步：按 OS 装服务文件 ===
+# 仓库里的服务文件用 /etc/proxy/sh 占位，装到 $DIR_SH 时统一 sed 替换
 echo_log ">>> 安装平台服务文件"
+patch_paths() { sed -i "s|/etc/proxy/sh|$DIR_SH|g" "$1"; }
 case "$OS_TYPE" in
     openwrt)
-        # 代理内核 procd 服务
-        download_file "$MP_REPO_RAW_URL/sh/etc/init.d/proxy_core" /etc/init.d/proxy_core true 0 \
-            || { echo_log "下载 init.d/proxy_core 失败"; exit 1; }
-        # AdGuardHome procd 服务
-        download_file "$MP_REPO_RAW_URL/sh/etc/init.d/agh" /etc/init.d/agh true 0 \
-            || { echo_log "下载 init.d/agh 失败"; exit 1; }
-        # TUN 路由热插拔处理器
-        download_file "$MP_REPO_RAW_URL/sh/etc/hotplug.d/net/99-meta-route" /etc/hotplug.d/net/99-meta-route true 0 \
-            || { echo_log "下载 99-meta-route 失败"; exit 1; }
-        chmod +x /etc/init.d/proxy_core /etc/init.d/agh /etc/hotplug.d/net/99-meta-route
+        for f in init.d/proxy_core init.d/agh hotplug.d/net/99-meta-route; do
+            download_file "$MP_REPO_RAW_URL/sh/etc/$f" "/etc/$f" true 0 \
+                || { echo_log "下载 $f 失败"; exit 1; }
+            patch_paths "/etc/$f"
+            chmod +x "/etc/$f"
+        done
         ;;
     systemd)
-        # 代理内核 systemd 单元
-        download_file "$MP_REPO_RAW_URL/sh/etc/systemd/system/proxy_core.service" /etc/systemd/system/proxy_core.service true 0 \
-            || { echo_log "下载 proxy_core.service 失败"; exit 1; }
-        # AdGuardHome systemd 单元
-        download_file "$MP_REPO_RAW_URL/sh/etc/systemd/system/agh.service" /etc/systemd/system/agh.service true 0 \
-            || { echo_log "下载 agh.service 失败"; exit 1; }
-        # 让 systemd 重新加载 unit 列表
+        for f in proxy_core.service agh.service; do
+            download_file "$MP_REPO_RAW_URL/sh/etc/systemd/system/$f" "/etc/systemd/system/$f" true 0 \
+                || { echo_log "下载 $f 失败"; exit 1; }
+            patch_paths "/etc/systemd/system/$f"
+        done
         systemctl daemon-reload
         ;;
 esac

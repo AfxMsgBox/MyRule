@@ -21,24 +21,25 @@
 
 ## 安装
 
-需要先按默认路径装好二进制：
-- `mihomo` → `/etc/proxy/core/mihomo`
-- `AdGuardHome` → `/usr/bin/AdGuardHome`
+需要先装好 mihomo 与 AdGuardHome；路径与默认不同时在 `env.local.conf` 用 `MP_CORE_BIN` / `MP_AGH_BIN` 覆盖。
 
-路径不同时在 `env.local.conf` 用 `MP_CORE_BIN` / `MP_AGH_BIN` 覆盖。
+inst.sh 第一个位置参数指定 sh 目录；省略时用 `$PWD`。`core` 和 `agh` 自动作为 sh 目录的兄弟目录派生（即 `dirname(sh)/core` 与 `dirname(sh)/agh`）。
 
 ### 一键安装
 
 ```sh
-# 装到默认目录 /etc/proxy/sh
+# 推荐：在新建目录里运行，sh/core/agh 自动落在该目录下
+mkdir -p /opt/myproxy/sh && cd $_
 wget -O- https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/inst.sh | sh
+#  → 装到 /opt/myproxy/{sh,core,agh}
 
-# 装到自定义目录
-wget -O- https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/inst.sh | sh -s -- /opt/myproxy/sh
+# 显式指定 sh 路径（兼容老的 /etc/proxy/ 布局）
+wget -O- https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/inst.sh | sh -s -- /etc/proxy/sh
+#  → 装到 /etc/proxy/{sh,core,agh}
 
 # 装分支版本（开发调试）
 MP_REPO_RAW_URL=https://raw.githubusercontent.com/AfxMsgBox/MyRule/refs/heads/<branch> \
-    wget -O- "$MP_REPO_RAW_URL/sh/inst.sh" | sh
+    wget -O- "$MP_REPO_RAW_URL/sh/inst.sh" | sh -s -- /etc/proxy/sh
 ```
 
 inst.sh 自动识别 OpenWrt / systemd 并分发对应服务文件，最后启用并启动服务。安装目录与仓库分支会写入 `env.local.conf`。
