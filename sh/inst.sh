@@ -92,11 +92,73 @@ case "$OS_TYPE" in
         ;;
 esac
 
-# === 第 4 步：刷新配置 ===
+# === 第 4 步：按 CPU 架构下载缺失的内核二进制 ===
+# 已存在时跳过；想强制重装请先 rm "$MP_CORE_BIN" / "$MP_AGH_BIN"
+echo_log ">>> 检查内核二进制"
+case "$(uname -m)" in
+    x86_64)         mihomo_arch=amd64;            agh_arch=amd64 ;;
+    aarch64)        mihomo_arch=arm64;            agh_arch=arm64 ;;
+    armv7l)         mihomo_arch=armv7;            agh_arch=armv7 ;;
+    armv6l)         mihomo_arch=armv6;            agh_arch=armv6 ;;
+    armv5*)         mihomo_arch=armv5;            agh_arch=armv5 ;;
+    i386|i686)      mihomo_arch=386;              agh_arch=386 ;;
+    mips)           mihomo_arch=mips-softfloat;   agh_arch=mips_softfloat ;;
+    mipsel)         mihomo_arch=mipsle-softfloat; agh_arch=mipsle_softfloat ;;
+    mips64)         mihomo_arch=mips64;           agh_arch=mips64 ;;
+    mips64el)       mihomo_arch=mips64le;         agh_arch=mips64le ;;
+    riscv64)        mihomo_arch=riscv64;          agh_arch= ;;
+    *) mihomo_arch=; agh_arch= ;;
+esac
+[ -z "$mihomo_arch$agh_arch" ] && echo_log "未识别架构 $(uname -m)，全部跳过"
+
+# mihomo：版本号在文件名里，先从 /releases/latest 的 Location 头取最新版本
+if [ ! -x "$MP_CORE_BIN" ] && [ -n "$mihomo_arch" ]; then
+    ver=$(curl -sI --connect-timeout 10 --max-time 30 \
+            https://github.com/MetaCubeX/mihomo/releases/latest \
+          | sed -n 's|.*[Ll]ocation:[[:space:]]*.*tag/\([^[:space:]]*\).*|\1|p' \
+          | head -1 | tr -d '\r')
+    if [ -n "$ver" ]; then
+        mkdir -p "$(dirname "$MP_CORE_BIN")"
+        gz=$(mktemp)
+        url="https://github.com/MetaCubeX/mihomo/releases/download/$ver/mihomo-linux-$mihomo_arch-$ver.gz"
+        if download_file "$url" "$gz" true 0 \
+           && gunzip -c "$gz" > "$MP_CORE_BIN.tmp" \
+           && [ -s "$MP_CORE_BIN.tmp" ]; then
+            mv "$MP_CORE_BIN.tmp" "$MP_CORE_BIN"
+            chmod +x "$MP_CORE_BIN"
+            echo_log "mihomo $ver / linux-$mihomo_arch 已就位：$MP_CORE_BIN"
+        else
+            echo_log "mihomo 下载或解压失败"
+            rm -f "$MP_CORE_BIN.tmp"
+        fi
+        rm -f "$gz"
+    else
+        echo_log "获取 mihomo 最新版本失败"
+    fi
+fi
+
+# AdGuardHome：/releases/latest/download/ 直接给到最新 tar.gz
+if [ ! -x "$MP_AGH_BIN" ] && [ -n "$agh_arch" ]; then
+    mkdir -p "$(dirname "$MP_AGH_BIN")" "$MP_AGH_DIR"
+    tmp=$(mktemp -d)
+    url="https://github.com/AdguardTeam/AdGuardHome/releases/latest/download/AdGuardHome_linux_${agh_arch}.tar.gz"
+    if download_file "$url" "$tmp/agh.tar.gz" true 0 \
+       && tar -xzf "$tmp/agh.tar.gz" -C "$tmp" \
+       && [ -x "$tmp/AdGuardHome/AdGuardHome" ]; then
+        mv "$tmp/AdGuardHome/AdGuardHome" "$MP_AGH_BIN"
+        chmod +x "$MP_AGH_BIN"
+        echo_log "AdGuardHome / linux-$agh_arch 已就位：$MP_AGH_BIN"
+    else
+        echo_log "AdGuardHome 下载或解压失败"
+    fi
+    rm -rf "$tmp"
+fi
+
+# === 第 5 步：刷新配置 ===
 echo_log ">>> 刷新 AGH dns.conf 与 core/config.yaml"
 sh "$DIR_SH/update-all-configs.sh" || echo_log "（部分步骤失败，详见上方日志）"
 
-# === 第 5 步：启用并启动服务（任一步失败仅警告，不中断 inst） ===
+# === 第 6 步：启用并启动服务（任一步失败仅警告，不中断 inst） ===
 echo_log ">>> 启用并启动服务"
 case "$OS_TYPE" in
     openwrt)

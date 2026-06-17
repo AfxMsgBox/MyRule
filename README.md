@@ -21,7 +21,7 @@
 
 ## 安装
 
-需要先装好 mihomo 与 AdGuardHome；路径与默认不同时在 `env.local.conf` 用 `MP_CORE_BIN` / `MP_AGH_BIN` 覆盖。
+`inst.sh` 会自动按 `uname -m` 识别 CPU 架构（amd64 / arm64 / armv5-7 / 386 / mips(le)(_softfloat) / mips64(le) / riscv64），从 GitHub Releases 下载最新版 mihomo 与 AdGuardHome 到 `core/` 与 `agh/` 目录。已有二进制（`MP_CORE_BIN` / `MP_AGH_BIN` 路径存在且可执行）则跳过下载。
 
 inst.sh 第一个位置参数指定 sh 目录；省略时用 `$PWD`。`core` 和 `agh` 自动作为 sh 目录的兄弟目录派生（即 `dirname(sh)/core` 与 `dirname(sh)/agh`）。
 
@@ -69,8 +69,8 @@ inst.sh 自动识别 OpenWrt / systemd 并分发对应服务文件，最后启�
 
 | 变量 | 默认值 | 何时需要填 |
 |---|---|---|
-| `MP_CORE_BIN` | `$MP_CORE_DIR/mihomo` | mihomo 二进制不在 `core` 目录下 |
-| `MP_AGH_BIN` | `/usr/bin/AdGuardHome` | AdGuardHome 不在系统默认路径 |
+| `MP_CORE_BIN` | `$MP_CORE_DIR/mihomo` | mihomo 二进制不在 `core` 目录下（inst.sh 自动下载到此默认路径） |
+| `MP_AGH_BIN` | `$MP_AGH_DIR/AdGuardHome` | AdGuardHome 不在 `agh` 目录下（inst.sh 自动下载到此默认路径） |
 | `MP_LOCAL_DNS` | `"223.5.5.5 114.114.114.114"` | 想用别的上游；置空则读 `/etc/resolv.conf` |
 
 **inst.sh 自动写入**（不要手动改）：
