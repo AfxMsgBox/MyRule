@@ -1,71 +1,57 @@
 #!/bin/sh
+# 生成 AGH dns.conf：默认上游 + myupstream 原样段 + 各域名清单转发到 mihomo:$MP_CORE_DNS_PORT
 url_self="$MP_URL_UPDATE_AGH_CONFIG_SH"
 . "$(dirname "$(readlink -f "$0")")/common.sh"
 
 agh_dns="$MP_AGH_DIR/dns.conf"
-mkdir -p "$MP_AGH_DIR/download"
+dl_dir="$MP_AGH_DIR/download"
+mkdir -p "$dl_dir"
 
-# 把 Clash payload 行写成 AGH 转发规则；$1=源文件 $2=段头注释
-append_payload() {
-    printf '\n# %s\n' "$2" >> "$agh_dns"
-    sed -En "s|^[ \t]*- '(\+\.)?([^']+)'[ \t]*$|[/\2/]127.0.0.1:$MP_CORE_DNS_PORT|p" "$1" >> "$agh_dns"
+# 把 Clash payload（含 - 'domain' 或 - '+.domain'）转成 AGH 的 [/domain/]server
+payload_to_agh() {
+    sed -En "s|^[ \t]*- '(\+\.)?([^']+)'[ \t]*$|[/\2/]127.0.0.1:$MP_CORE_DNS_PORT|p" "$1"
+}
+
+# fetch_payload <basename> <url> <section-header>
+# 下载 → 追加段头 → 转 payload 写入 dns.conf；失败 echo_log 并返回 1
+fetch_payload() {
+    _bn=$1; _url=$2; _hdr=$3
+    echo_log ">>> 拉取 $_bn"
+    if ! download_file "$_url" "$dl_dir/$_bn"; then
+        echo_log "$_bn 失败，跳过"; return 1
+    fi
+    printf '\n# %s\n' "$_hdr" >> "$agh_dns"
+    payload_to_agh "$dl_dir/$_bn" >> "$agh_dns"
 }
 
 echo_log "生成 $agh_dns"
 echo "# Generated at $(date '+%F %T')" > "$agh_dns"
 
-# 默认上游：MP_LOCAL_DNS（env.conf 配置，空格分隔）；为空时从 /etc/resolv.conf 取 nameserver
+# 默认上游：MP_LOCAL_DNS 空时退化为 /etc/resolv.conf 的 nameserver
 if [ -n "$MP_LOCAL_DNS" ]; then
-    for ns in $MP_LOCAL_DNS; do
-        echo "$ns" >> "$agh_dns"
-    done
+    for ns in $MP_LOCAL_DNS; do echo "$ns" >> "$agh_dns"; done
 else
     awk '/^nameserver/ {print $2}' /etc/resolv.conf >> "$agh_dns"
 fi
 
-# 自定义上游（[/domain/]server 格式）：整段直接 cat
+# myupstream.txt 已是 [/domain/]server 格式，整段直接 cat
 echo_log ">>> 拉取 myupstream"
-if download_file "$MP_URL_AGH_MYUPSTREAM" "$MP_AGH_DIR/download/myupstream.txt"; then
+if download_file "$MP_URL_AGH_MYUPSTREAM" "$dl_dir/myupstream.txt"; then
     printf '\n# My Up Stream\n' >> "$agh_dns"
-    cat "$MP_AGH_DIR/download/myupstream.txt" >> "$agh_dns"
+    cat "$dl_dir/myupstream.txt" >> "$agh_dns"
 else
     echo_log "myupstream 失败，跳过"
 fi
 
-# 自家代理域名清单
-echo_log ">>> 拉取 myproxylist"
-if download_file "$MP_URL_DOMAIN_MYPROXYLIST" "$MP_AGH_DIR/download/myproxylist.txt"; then
-    append_payload "$MP_AGH_DIR/download/myproxylist.txt" "My Proxy List"
-else
-    echo_log "myproxylist 失败，跳过"
+fetch_payload myproxylist.txt "$MP_URL_DOMAIN_MYPROXYLIST" "My Proxy List"
+fetch_payload gpt.txt         "$MP_URL_DOMAIN_GPT"         "GPT List"
+
+# not-cn 列表把 .bj 误算非中国 TLD：用 MP_EXCLUDE_TLDS 过滤
+if fetch_payload notcn.txt "$MP_URL_NOTCN" "Not China Domain" && [ -n "$MP_EXCLUDE_TLDS" ]; then
+    pat=$(echo "$MP_EXCLUDE_TLDS" | tr ' ' '|')
+    sed -i -E "/^\[\/(${pat})\/\]/d" "$agh_dns"
 fi
 
-# GPT / Google
-echo_log ">>> 拉取 gpt"
-if download_file "$MP_URL_DOMAIN_GPT" "$MP_AGH_DIR/download/gpt.txt"; then
-    append_payload "$MP_AGH_DIR/download/gpt.txt" "GPT List"
-else
-    echo_log "gpt 失败，跳过"
-fi
-
-# 非中国域名：tld-not-cn 把 .bj 误算非中国 TLD，删掉避免本地 .bj 被劫持
-echo_log ">>> 拉取 not-cn"
-if download_file "$MP_URL_NOTCN" "$MP_AGH_DIR/download/notcn.txt"; then
-    append_payload "$MP_AGH_DIR/download/notcn.txt" "Not China Domain"
-    if [ -n "$MP_EXCLUDE_TLDS" ]; then
-        pat=$(echo "$MP_EXCLUDE_TLDS" | tr ' ' '|')
-        sed -i -E "/^\[\/(${pat})\/\]/d" "$agh_dns"
-    fi
-else
-    echo_log "not-cn 失败，跳过"
-fi
-
-# GFW 清单
-echo_log ">>> 拉取 gfwlist"
-if download_file "$MP_URL_GFWLIST" "$MP_AGH_DIR/download/gfwlist.txt"; then
-    append_payload "$MP_AGH_DIR/download/gfwlist.txt" "GFW List"
-else
-    echo_log "gfwlist 失败，跳过"
-fi
+fetch_payload gfwlist.txt "$MP_URL_GFWLIST" "GFW List"
 
 echo_log "生成完成：$(wc -l < "$agh_dns") 行"

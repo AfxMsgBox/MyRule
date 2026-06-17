@@ -60,6 +60,53 @@ download_file() {
     mv "$_df_tmp" "$_df_dst"
 }
 
+# OS 探测：MP_OS_TYPE 已设则尊重；探测后导出供子进程复用
+mp_detect_os() {
+    [ -n "$MP_OS_TYPE" ] && return 0
+    if [ -f /etc/openwrt_release ] || grep -qs '^ID=.*openwrt' /etc/os-release; then
+        MP_OS_TYPE=openwrt
+    elif command -v systemctl >/dev/null 2>&1 && [ -d /etc/systemd/system ]; then
+        MP_OS_TYPE=systemd
+    else
+        return 1
+    fi
+    export MP_OS_TYPE
+}
+
+# mp_service_op <op> <svc...>   op: enable_start | restart | stop
+# 按 MP_OS_TYPE 派发到 service / systemctl；逐个执行，失败仅 echo_log
+mp_service_op() {
+    mp_detect_os || { echo_log "未知 OS_TYPE，跳过 $*"; return 1; }
+    _op=$1; shift
+    for _svc in "$@"; do
+        case "$MP_OS_TYPE-$_op" in
+            openwrt-enable_start) service "$_svc" enable && service "$_svc" start ;;
+            openwrt-restart)      service "$_svc" restart ;;
+            openwrt-stop)         service "$_svc" stop ;;
+            systemd-enable_start) systemctl enable --now "$_svc.service" ;;
+            systemd-restart)      systemctl restart "$_svc.service" ;;
+            systemd-stop)         systemctl stop "$_svc.service" ;;
+            *) echo_log "未支持的操作 $MP_OS_TYPE-$_op"; return 1 ;;
+        esac || echo_log "$_op $_svc 失败"
+    done
+}
+
+# 模板渲染：用环境里同名 MP_* 变量替换文件中的 {MP_xxx} 占位符；原子替换
+# mp_render_template <src> <dst>
+mp_render_template() {
+    awk '{
+        out = ""
+        while (match($0, /\{MP_[A-Za-z0-9_]+\}/)) {
+            ph  = substr($0, RSTART, RLENGTH)
+            key = substr(ph, 2, RLENGTH - 2)
+            repl = (key in ENVIRON) ? ENVIRON[key] : ph
+            out = out substr($0, 1, RSTART - 1) repl
+            $0 = substr($0, RSTART + RLENGTH)
+        }
+        print out $0
+    }' "$1" > "$2.tmp" && mv "$2.tmp" "$2"
+}
+
 # 从缩进式 yaml 取顶层 map 下的子 key 列表
 _yaml_extract_keys() {
     [ -f "$1" ] || return 1
@@ -93,8 +140,6 @@ for arg in "$@"; do
         --skip-self-update) _skip_self=1 ;;
     esac
 done
-case "$0" in *common.sh) url_self="${url_self:-$MP_URL_COMMON_SH}" ;; esac
-
 case "$MP_AUTOUPDATE" in
     1|true|yes)
         if [ -n "$url_self" ]; then

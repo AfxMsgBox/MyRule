@@ -21,9 +21,13 @@
 
 ## 安装
 
-`inst.sh` 第一个位置参数指定**安装根目录**；`sh/`、`core/`、`agh/` 都会落在它下面。省略时用 `$PWD`。
+`inst.sh` 第一个位置参数指定**安装根目录**；`sh/`、`core/`、`agh/`、`sys/` 都会落在它下面。省略时用 `$PWD`。
 
-启动后会**交互式向导**让你填 5 项：仓库分支、节点订阅 URL、AGH 用户名、AGH 密码（bcrypt 哈希）、AGH 上游 DNS。重装时方括号显示当前值，回车保留。无 tty 时（cron）跳过向导，要求 `env.local.conf` 已具备必填项。
+启动后会**交互式向导**让你填 6 项：仓库分支、节点订阅 URL、AGH 用户名、AGH 密码（bcrypt 哈希）、AGH 上游 DNS、是否立即启用自启动。重装时方括号显示当前值，回车保留。无 tty 时（cron）跳过向导，要求 `env.local.conf` 已具备必填项；自启动询问无 tty 时默认走"启用"分支。
+
+最后一步**自启动询问**：
+- **Y（默认）**：把 `sys/` 下的服务文件复制到 `/etc/init.d`（OpenWrt）或 `/etc/systemd/system`（Debian），并 `enable + start`。
+- **n**：跳过，文件留在 `$MP_INST_DIR/sys/` 并同目录生成 `README.md`，照里面命令手动装即可。
 
 随后按 `uname -m` 识别架构（amd64 / arm64 / armv5-7 / 386 / mips(le)(_softfloat) / mips64(le) / riscv64），从 GitHub Releases 下载最新版 mihomo 与 AdGuardHome 到 `core/` 与 `agh/`（**每次都覆盖**，不做版本比较；如需单独升级二进制见 `update-bin.sh`）。
 
@@ -133,13 +137,20 @@ sh $MP_INST_DIR/sh/update-all-configs-restart-services.sh
 
 ```
 sh/             脚本（env.conf / common.sh / inst.sh / update-*.sh / keeplive.sh ...）
-  etc/init.d/                  OpenWrt procd 服务
+  etc/init.d/                  OpenWrt procd 服务（原始模板）
   etc/hotplug.d/net/           OpenWrt hotplug
-  etc/systemd/system/          Debian systemd unit
+  etc/systemd/system/          Debian systemd unit（原始模板）
 core/config.yaml               Mihomo 主配置模板（含 {MP_*} 占位符）
 agh/agh.yaml                   AdGuardHome 配置模板（含 {MP_*} 占位符）
 agh/myupstream.txt             AGH 自定义上游
 domain/                        分流域名清单（Clash payload 格式）
+```
+
+安装后还会在安装根下生成：
+
+```
+$MP_INST_DIR/sys/              已替换路径的服务文件 + 手动安装 README
+                               （inst.sh 选 Y 时也会复制到 /etc 对应位置）
 ```
 
 各文件顶部都有简短说明，详细行为见脚本内注释。
