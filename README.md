@@ -44,24 +44,53 @@ MP_REPO_RAW_URL=https://raw.githubusercontent.com/AfxMsgBox/MyRule/refs/heads/<b
 
 inst.sh 自动识别 OpenWrt / systemd 并分发对应服务文件，最后启用并启动服务。安装目录与仓库分支会写入 `env.local.conf`。
 
-### 填敏感参数
+### env.local.conf
 
-`/etc/proxy/sh/env.local.conf` 是本地配置（不入库），填订阅 URL 等：
+本机配置文件，**不入库**（`.gitignore` 已忽略），位置固定为 `$MP_SH_DIR/env.local.conf`。
+
+**规则**：
+
+- 纯 shell 语法，被 `env.conf` `source` 读取。每行 `KEY="value"`，值有空格 / 特殊字符必须加引号。
+- 可覆盖 `env.conf` 里任意 `MP_*` 变量。
+- 优先级（高 → 低）：**系统环境变量 > env.local.conf > env.conf 默认值**
+  - 临时调试用 `MP_FOO=xxx sh script.sh` 即可压过 env.local.conf。
+- `inst.sh` 安装结束时会自动写入两项：
+  - `MP_SH_DIR` —— 实际安装路径（让 init.d / systemd 服务定位 env.local.conf）
+  - `MP_REPO_RAW_URL` —— 当次安装使用的仓库 URL（默认 main，分支安装会写入分支 URL）
+- 重复运行 inst.sh 时上述两项会被更新（不会重复追加）；用户加的其它行不动。
+
+**典型内容**：
 
 ```sh
+# 订阅与节点（必填）
 MP_SUBSCRIBE_URL="https://api.subcsub.com/sub?target=clash&url=<URL-encoded>"
 MP_SSHSOS_USER="..."
 MP_SSHSOS_PASSWORD="..."
 MP_SSHSOS_SERVER="..."
+MP_SSHSOS_PORT="22"
+
+# 二进制路径不同时覆盖
+MP_CORE_BIN="/usr/local/bin/mihomo"
+MP_AGH_BIN="/usr/local/bin/AdGuardHome"
+
+# AGH 上游 DNS（默认 223.5.5.5 + 114.114.114.114；置空则用 /etc/resolv.conf）
+MP_LOCAL_DNS="1.1.1.1 8.8.8.8"
+
+# 开发调试：阻止脚本被远程版本覆盖
+MP_AUTOUPDATE="false"
+
+# 安装期自动写入，正常不需要手动改：
+# MP_SH_DIR="/opt/myproxy/sh"
+# MP_REPO_RAW_URL="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main"
 ```
+
+可覆盖的完整变量清单见 `sh/env.conf`。
 
 填好后刷新配置 + 重启服务：
 
 ```sh
-sh /etc/proxy/sh/update-all-configs-restart-services.sh
+sh $MP_SH_DIR/update-all-configs-restart-services.sh
 ```
-
-可覆盖的所有 `MP_*` 变量见 `sh/env.conf`。优先级：**系统环境变量 > env.local.conf > env.conf 默认值**。
 
 ---
 
