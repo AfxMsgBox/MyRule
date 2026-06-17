@@ -39,12 +39,13 @@ download_file() {
     [ "$verbose" = "true" ] && echo_log "下载 $url"
     t0=$(date +%s)
     tmp=$(mktemp)
-    curl --silent --show-error --fail --connect-timeout 10 --max-time 60 \
+    # -L 跟进 302（GitHub releases 等都重定向到 S3），--max-time 放宽给大二进制
+    curl --silent --show-error --fail -L --connect-timeout 10 --max-time 300 \
          --retry 2 --retry-delay 1 $proxy_arg "$url" -o "$tmp" >/dev/null 2>&1
     rc=$?
     if [ "$rc" -ne 0 ] && [ -n "$proxy_arg" ]; then
         [ "$verbose" = "true" ] && echo_log "代理失败，回退直连"
-        curl --silent --show-error --fail --connect-timeout 10 --max-time 60 \
+        curl --silent --show-error --fail -L --connect-timeout 10 --max-time 300 \
              --retry 2 --retry-delay 1 "$url" -o "$tmp" >/dev/null 2>&1
         rc=$?
     fi
