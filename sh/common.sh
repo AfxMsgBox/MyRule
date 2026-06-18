@@ -89,6 +89,46 @@ mp_service_op() {
     done
 }
 
+# 当前 OS 下 sh/etc/ 与 /etc/ 共用的相对路径清单；服务文件结构变了改这里一处
+mp_etc_rels() {
+    mp_detect_os || return 1
+    case "$MP_OS_TYPE" in
+        openwrt) echo "init.d/proxy_core init.d/agh hotplug.d/net/99-meta-route" ;;
+        systemd) echo "systemd/system/proxy_core.service systemd/system/agh.service" ;;
+    esac
+}
+
+# mp_fetch_repo_sh <dst-sh-dir>
+# 从 MP_REPO_RAW_URL 派生 owner/repo + 分支，拉 GitHub codeload tarball，
+# 仅把 sh/ 子树覆盖到 <dst-sh-dir>。env.local.conf 不在 tarball 里所以不会被动。
+# 故意不解压 core/ agh/ domain/——这些有渲染后状态或独立刷新流程。
+mp_fetch_repo_sh() {
+    _mfr_dst="$1"
+    _mfr_owner_repo=$(echo "$MP_REPO_RAW_URL" \
+        | sed -E 's|^https?://raw\.githubusercontent\.com/([^/]+/[^/]+)/.*|\1|')
+    case "$MP_REPO_RAW_URL" in
+        */refs/heads/*) _mfr_branch="${MP_REPO_RAW_URL##*/refs/heads/}" ;;
+        *)              _mfr_branch="main" ;;
+    esac
+    _mfr_url="https://codeload.github.com/$_mfr_owner_repo/tar.gz/refs/heads/$_mfr_branch"
+
+    _mfr_tmp=$(mktemp -d) || return 1
+    if ! download_file "$_mfr_url" "$_mfr_tmp/repo.tar.gz" true 0; then
+        rm -rf "$_mfr_tmp"; return 1
+    fi
+    if ! tar -xzf "$_mfr_tmp/repo.tar.gz" -C "$_mfr_tmp" 2>/dev/null; then
+        echo_log "tar 解压失败"; rm -rf "$_mfr_tmp"; return 1
+    fi
+    # tarball 顶层目录形如 <repo>-<branch>/（分支名里的 / 在目录名里变 -）
+    _mfr_src=$(echo "$_mfr_tmp"/*/sh)
+    [ -d "$_mfr_src" ] || { echo_log "tarball 结构异常：找不到 sh/"; rm -rf "$_mfr_tmp"; return 1; }
+
+    mkdir -p "$_mfr_dst"
+    cp -rf "$_mfr_src/." "$_mfr_dst/"
+    chmod +x "$_mfr_dst"/*.sh 2>/dev/null
+    rm -rf "$_mfr_tmp"
+}
+
 # 模板渲染：用环境里同名 MP_* 变量替换文件中的 {MP_xxx} 占位符；原子替换
 # mp_render_template <src> <dst>
 mp_render_template() {

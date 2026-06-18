@@ -1,56 +1,37 @@
 #!/bin/sh
-# 唯一负责"更新脚本"的入口：
-#   - env.conf / common.sh
-#   - sh/ 下所有 *.sh（含本脚本自身、inst.sh、各 update-*.sh、keeplive 等）
-#   - sh/etc/ 下所有服务/hotplug 文件（含路径占位替换）
-#   - 若 /etc/{init.d,systemd/system,hotplug.d/net} 已存在对应文件（当初 inst 选了自启动），
-#     则同步覆盖一份，systemd 自动 daemon-reload
+# 唯一负责"更新脚本"的入口：拉仓库 tarball，只覆盖 sh/ 子树（含 env.conf /
+# common.sh / 各 update-* / 自身 / sh/etc/* 等），然后 sed-patch sh/etc 路径占位，
+# 并把"当初 inst 选了自启动 → /etc 下已有副本"的服务文件同步覆盖一份。
 #
-# 其余 update-* 脚本（配置 / 二进制）不再做任何脚本自更新——更可控。
+# 流程：
+#   阶段 1（_MP_REEXEC 未设）：mp_fetch_repo_sh → exec 新版本
+#   阶段 2（_MP_REEXEC=1）   ：sed-patch sh/etc + 同步 /etc（如存在）
 #
-# 用法：
-#   sh /etc/proxy/sh/update-scripts.sh
+# 自更新安全性：tarball 已 mktemp + mv 落地后再 exec；新进程从干净状态跑阶段 2，
+# 即便旧进程的 shell 缓冲对自身脚本有任何疑虑，exec 后都不再相关。
 . "$(dirname "$(readlink -f "$0")")/common.sh"
 
 dir_sh="$MP_INST_DIR/sh"
-mkdir -p "$dir_sh/etc"
 
-echo_log "============ update scripts ============"
+if [ -z "$_MP_REEXEC" ]; then
+    echo_log "============ self-update via tarball ============"
+    mp_fetch_repo_sh "$dir_sh" || { echo_log "tarball 自更新失败，中止"; exit 1; }
+    echo_log "self-update OK，exec 新版本继续"
+    export _MP_REEXEC=1
+    exec sh "$dir_sh/update-scripts.sh"
+fi
 
-# 1) env.conf + common.sh
-rc=0
-download_file "$MP_REPO_RAW_URL/sh/env.conf"  "$dir_sh/env.conf"  || { echo_log "env.conf 更新失败";  rc=$((rc+1)); }
-download_file "$MP_REPO_RAW_URL/sh/common.sh" "$dir_sh/common.sh" || { echo_log "common.sh 更新失败"; rc=$((rc+1)); }
-
-# 2) sh/*.sh（含 inst.sh、本脚本自身）
-for name in inst.sh keeplive.sh setup-fake-ip-route.sh \
-            update-scripts.sh update-bin.sh \
-            update-all-configs.sh update-all-configs-restart-services.sh \
-            update-agh-config.sh update-core-config.sh update-proxy-rule.sh; do
-    if download_file "$MP_REPO_RAW_URL/sh/$name" "$dir_sh/$name"; then
-        chmod +x "$dir_sh/$name"
-    else
-        echo_log "$name 更新失败"; rc=$((rc+1))
-    fi
-done
-
-# 3) sh/etc/* 服务文件：先按 OS 选清单，下载到本地后 sed 替换路径占位
-mp_detect_os || { echo_log "未识别 OS，跳过 sh/etc 更新"; exit "$rc"; }
-case "$MP_OS_TYPE" in
-    openwrt) etc_rels="init.d/proxy_core init.d/agh hotplug.d/net/99-meta-route" ;;
-    systemd) etc_rels="systemd/system/proxy_core.service systemd/system/agh.service" ;;
-esac
+# === 阶段 2：新版本已 exec 起来，做 sh/etc 路径替换与 /etc 同步 ===
+echo_log "============ patch sh/etc & sync /etc ============"
+mp_detect_os || { echo_log "未识别 OS，跳过 sh/etc 处理"; exit 0; }
 
 systemd_changed=0
-for rel in $etc_rels; do
+for rel in $(mp_etc_rels); do
     local_path="$dir_sh/etc/$rel"
-    mkdir -p "$(dirname "$local_path")"
-    if ! download_file "$MP_REPO_RAW_URL/sh/etc/$rel" "$local_path"; then
-        echo_log "$rel 更新失败"; rc=$((rc+1)); continue
-    fi
+    [ -f "$local_path" ] || { echo_log "$rel 不在 tarball 里？跳过"; continue; }
     sed -i "s|/etc/proxy|$MP_INST_DIR|g" "$local_path"
     chmod +x "$local_path" 2>/dev/null || true
-    # 当初 inst 选了自启动，/etc 下有对应文件 → 同步覆盖
+    # per-file 判断：用户当初没选自启动 → /etc 下没文件 → 跳过（绝不创建）
     if [ -e "/etc/$rel" ]; then
         cp "$local_path" "/etc/$rel" && chmod +x "/etc/$rel" 2>/dev/null
         echo_log "同步 /etc/$rel"
@@ -60,6 +41,4 @@ done
 
 [ "$systemd_changed" = "1" ] && systemctl daemon-reload
 
-[ "$rc" -eq 0 ] && echo_log "============ scripts done ============" \
-                || echo_log "============ scripts done with errors (rc=$rc) ============"
-exit "$rc"
+echo_log "============ done ============"

@@ -141,38 +141,24 @@ for kv_key in MP_INST_DIR MP_REPO_RAW_URL MP_SUBSCRIBE_URL MP_AGH_USER_NAME MP_A
     upsert_conf "$kv_key" "$kv_val" "$DIR_SH/env.local.conf"
 done
 
-# === Bootstrap：先按选定 MP_REPO_RAW_URL 下 env.conf / common.sh ===
-echo ">>> 引导下载 env.conf / common.sh"
+# === Bootstrap：先 wget 拿到 env.conf + common.sh，足以 source 后用 mp_fetch_repo_sh ===
+echo ">>> bootstrap env.conf / common.sh"
 wget -q -O "$DIR_SH/env.conf"  "$MP_REPO_RAW_URL/sh/env.conf"  || { echo "下载 env.conf 失败"  >&2; exit 1; }
 wget -q -O "$DIR_SH/common.sh" "$MP_REPO_RAW_URL/sh/common.sh" || { echo "下载 common.sh 失败" >&2; exit 1; }
 
 export MP_INST_DIR="$DIR_INST"            # 显式声明根（init.d/$0 不可靠）
 . "$DIR_SH/common.sh"                     # 加载公共函数
 
-# === 下载其余公共脚本（含 update-scripts.sh：以后刷新脚本就靠它） ===
-echo_log ">>> 下载脚本到 $DIR_SH"
-for name in keeplive.sh setup-fake-ip-route.sh \
-            update-scripts.sh update-bin.sh \
-            update-all-configs.sh update-all-configs-restart-services.sh \
-            update-agh-config.sh update-core-config.sh update-proxy-rule.sh \
-            inst.sh; do
-    download_file "$MP_REPO_RAW_URL/sh/$name" "$DIR_SH/$name" true 0 \
-        || { echo_log "下载 $name 失败"; exit 1; }
-done
-chmod +x "$DIR_SH"/*.sh
+# === 用 tarball 一次拉齐 sh/ 整树（含 env.conf / common.sh / 所有 *.sh / sh/etc/*）===
+# 覆盖刚 bootstrap 的 2 个文件无害；env.local.conf 不在 tarball 里所以不会动
+echo_log ">>> 拉取仓库 sh/ 整树"
+mp_fetch_repo_sh "$DIR_SH" || { echo_log "tarball 下载失败"; exit 1; }
 
-# === 下载服务文件到 $DIR_SH/etc/（先把 /etc/proxy 占位换成实际 $DIR_INST） ===
-# 注：以后 update-scripts.sh 也会同时刷新这里的副本；若已选过自启动，会同步覆盖 /etc 下副本
-case "$MP_OS_TYPE" in
-    openwrt) etc_rels="init.d/proxy_core init.d/agh hotplug.d/net/99-meta-route" ;;
-    systemd) etc_rels="systemd/system/proxy_core.service systemd/system/agh.service" ;;
-esac
-echo_log ">>> 下载服务文件到 $DIR_SH/etc（路径替换 /etc/proxy → $DIR_INST）"
+# === sh/etc 路径占位替换（先只 sed-patch，是否 cp 到 /etc 由后面 autostart 决定） ===
+etc_rels=$(mp_etc_rels)
+echo_log ">>> sh/etc 路径替换 /etc/proxy → $DIR_INST"
 for rel in $etc_rels; do
-    mkdir -p "$DIR_SH/etc/$(dirname "$rel")"
-    download_file "$MP_REPO_RAW_URL/sh/etc/$rel" "$DIR_SH/etc/$rel" true 0 \
-        || { echo_log "下载 $rel 失败"; exit 1; }
-    sed -i "s|/etc/proxy|$DIR_INST|g" "$DIR_SH/etc/$rel"
+    [ -f "$DIR_SH/etc/$rel" ] && sed -i "s|/etc/proxy|$DIR_INST|g" "$DIR_SH/etc/$rel"
     chmod +x "$DIR_SH/etc/$rel" 2>/dev/null || true
 done
 
