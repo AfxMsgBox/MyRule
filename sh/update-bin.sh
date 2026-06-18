@@ -56,14 +56,16 @@ fi
 
 # metacubexd UI：mihomo 的 Web 控制面板。架构无关的静态站点；
 # core/config.yaml 里 external-ui: ui 已指向 $MP_CORE_DIR/ui
-ui_tmp=$(mktemp -d)
+# tarball 内容直接在顶层（./index.html ./_nuxt/...），没有 dist/ 包一层；
+# 故解压到子目录避免和 ui.tgz 同位
+ui_tmp=$(mktemp -d); mkdir -p "$ui_tmp/extract"
 ui_url="https://github.com/MetaCubeX/metacubexd/releases/latest/download/compressed-dist.tgz"
 if download_file "$ui_url" "$ui_tmp/ui.tgz" true 0 \
-   && tar -xzf "$ui_tmp/ui.tgz" -C "$ui_tmp" 2>/dev/null \
-   && [ -f "$ui_tmp/dist/index.html" ]; then
+   && tar -xzf "$ui_tmp/ui.tgz" -C "$ui_tmp/extract" 2>/dev/null \
+   && [ -f "$ui_tmp/extract/index.html" ]; then
     rm -rf "$MP_CORE_DIR/ui"
     mkdir -p "$MP_CORE_DIR/ui"
-    cp -rf "$ui_tmp/dist/." "$MP_CORE_DIR/ui/"
+    cp -rf "$ui_tmp/extract/." "$MP_CORE_DIR/ui/"
     echo_log "metacubexd UI 已就位：$MP_CORE_DIR/ui"
 else
     echo_log "metacubexd UI 下载或解压失败"
