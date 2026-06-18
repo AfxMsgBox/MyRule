@@ -54,6 +54,23 @@ if [ -n "$mihomo_arch" ]; then
     fi
 fi
 
+# metacubexd UI：mihomo 的 Web 控制面板。架构无关的静态站点；
+# core/config.yaml 里 external-ui: ui 已指向 $MP_CORE_DIR/ui
+ui_tmp=$(mktemp -d)
+ui_url="https://github.com/MetaCubeX/metacubexd/releases/latest/download/compressed-dist.tgz"
+if download_file "$ui_url" "$ui_tmp/ui.tgz" true 0 \
+   && tar -xzf "$ui_tmp/ui.tgz" -C "$ui_tmp" 2>/dev/null \
+   && [ -f "$ui_tmp/dist/index.html" ]; then
+    rm -rf "$MP_CORE_DIR/ui"
+    mkdir -p "$MP_CORE_DIR/ui"
+    cp -rf "$ui_tmp/dist/." "$MP_CORE_DIR/ui/"
+    echo_log "metacubexd UI 已就位：$MP_CORE_DIR/ui"
+else
+    echo_log "metacubexd UI 下载或解压失败"
+    rc=$((rc+1))
+fi
+rm -rf "$ui_tmp"
+
 # AdGuardHome：/releases/latest/download/ 直接给到最新 tar.gz
 if [ -n "$agh_arch" ]; then
     tmp=$(mktemp -d)
