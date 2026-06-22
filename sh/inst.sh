@@ -138,7 +138,7 @@ if [ "$HAVE_TTY" = "1" ]; then
         esac
     done
 
-    : "${MP_LOCAL_DNS:=223.5.5.5 114.114.114.114}"
+    : "${MP_LOCAL_DNS:=223.5.5.5 119.29.29.29}"
     prompt_to MP_LOCAL_DNS "$MP_LOCAL_DNS" "[6/7] AGH 上游 DNS / MP_LOCAL_DNS"
 else
     # 非交互：env.local.conf 必须已具备必填项

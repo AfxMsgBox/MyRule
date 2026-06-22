@@ -82,7 +82,7 @@ python3 -c "import bcrypt;print(bcrypt.hashpw(b'明文',bcrypt.gensalt(10)).deco
 | `MP_SUBSCRIBE_URL` | 空 | ✔ | 节点订阅 URL（`core/config.yaml` 的 `{MP_SUBSCRIBE_URL}` 引用） |
 | `MP_AGH_USER_NAME` | 空 | ✔ | AGH Web UI 用户名 |
 | `MP_AGH_PASSWORD` | 空 | ✔ | AGH Web UI 密码（**bcrypt 哈希**，生成方法见上节） |
-| `MP_LOCAL_DNS` | `223.5.5.5 114.114.114.114` | | AGH 上游 DNS（空格分隔多个；置空读 `/etc/resolv.conf`） |
+| `MP_LOCAL_DNS` | `223.5.5.5 119.29.29.29` | | AGH 上游 DNS（空格分隔多个；置空读 `/etc/resolv.conf`） |
 | `MP_INST_DIR` | 由 inst.sh 自动写入 | | 安装根目录，init.d / systemd 服务靠它定位 env.local.conf |
 
 **示例**（最小化，单机 + 默认路径）：
@@ -93,7 +93,7 @@ MP_REPO_RAW_URL="https://raw.githubusercontent.com/AfxMsgBox/MyRule/main"
 MP_SUBSCRIBE_URL="https://api.subcsub.com/sub?target=clash&url=<URL-encoded>"
 MP_AGH_USER_NAME="admin"
 MP_AGH_PASSWORD="$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy"
-MP_LOCAL_DNS="223.5.5.5 114.114.114.114"
+MP_LOCAL_DNS="223.5.5.5 119.29.29.29"
 ```
 
 可覆盖的完整变量清单见 `sh/env.conf`。
