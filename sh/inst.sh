@@ -8,8 +8,8 @@
 #   mkdir -p /opt/myproxy && cd $_
 #   wget -O- https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/inst.sh | sh
 # 自托管 / 分支调试：
-#   MP_REPO_RAW_URL=https://raw.githubusercontent.com/AfxMsgBox/MyRule/refs/heads/<branch> \
-#       wget -O- "$MP_REPO_RAW_URL/sh/inst.sh" | sh
+#   export MP_REPO_RAW_URL=https://raw.githubusercontent.com/AfxMsgBox/MyRule/refs/heads/<branch>
+#   wget -O- "$MP_REPO_RAW_URL/sh/inst.sh" | sh
 
 [ "$(id -u)" = "0" ] || { echo "需要 root 权限运行（Debian/Ubuntu 请加 sudo）" >&2; exit 1; }
 
@@ -103,20 +103,33 @@ if [ "$HAVE_TTY" = "1" ]; then
         "完整 URL: https://raw.githubusercontent.com/owner/repo/refs/heads/dev"
     MP_REPO_RAW_URL=$(expand_branch "$in_branch")
 
-    # 代理选择：1=直连  2=127.0.0.1:7890  3=自定义 HTTP 代理
+    # 代理选择：HTTP / SOCKS5 均由 curl --proxy 处理
     # 持久化到 env.local.conf，影响后续 cron 跑 update-* 与 keeplive.sh
     while :; do
-        : "${cur_proxy_choice:=1}"
-        prompt_to in_proxy "$cur_proxy_choice" "[2/7] 下载是否走 HTTP 代理？" \
+        if [ -z "$cur_proxy_choice" ]; then
+            case "${MP_USE_PROXY:-0}:$MP_PROXY_HTTP" in
+                1:http://127.0.0.1:7890|true:http://127.0.0.1:7890|yes:http://127.0.0.1:7890) cur_proxy_choice=2 ;;
+                1:socks5h://127.0.0.1:1080|true:socks5h://127.0.0.1:1080|yes:socks5h://127.0.0.1:1080) cur_proxy_choice=3 ;;
+                1:*|true:*|yes:*) cur_proxy_choice=4 ;;
+                *) cur_proxy_choice=1 ;;
+            esac
+        fi
+        prompt_to in_proxy "$cur_proxy_choice" "[2/7] 下载是否走代理？" \
             "1) 直连（推荐；首次安装时核心还没起，代理多半不可用）" \
-            "2) http://127.0.0.1:7890（本机代理已运行时）" \
-            "3) 自定义（接下来输入完整 URL，如 http://192.168.1.1:7890）"
+            "2) HTTP:   http://127.0.0.1:7890" \
+            "3) SOCKS5: socks5h://127.0.0.1:1080（域名由代理解析）" \
+            "4) 自定义代理 URL"
         case "$in_proxy" in
             1) MP_USE_PROXY=0; MP_PROXY_HTTP="http://127.0.0.1:7890"; break ;;
             2) MP_USE_PROXY=1; MP_PROXY_HTTP="http://127.0.0.1:7890"; break ;;
-            3) prompt_to MP_PROXY_HTTP "${MP_PROXY_HTTP:-http://127.0.0.1:7890}" "      自定义 HTTP 代理 URL"
-               MP_USE_PROXY=1; break ;;
-            *) say_err "      请输入 1 / 2 / 3" ;;
+            3) MP_USE_PROXY=1; MP_PROXY_HTTP="socks5h://127.0.0.1:1080"; break ;;
+            4) prompt_to MP_PROXY_HTTP "${MP_PROXY_HTTP:-http://127.0.0.1:7890}" \
+                   "      自定义代理 URL（http://、https://、socks5:// 或 socks5h://）"
+               case "$MP_PROXY_HTTP" in
+                   http://*|https://*|socks5://*|socks5h://*) MP_USE_PROXY=1; break ;;
+                   *) say_err "      不支持的代理 URL" ;;
+               esac ;;
+            *) say_err "      请输入 1 / 2 / 3 / 4" ;;
         esac
     done
     export MP_USE_PROXY MP_PROXY_HTTP
@@ -180,11 +193,30 @@ for kv_key in $kv_keys; do
     upsert_conf "$kv_key" "$kv_val" "$DIR_SH/env.local.conf"
 done
 
-# === Bootstrap：先 wget 拿到 env.conf + common.sh，足以 source 后用 mp_fetch_repo_sh ===
+# === Bootstrap：先拿到 env.conf + common.sh，足以 source 后用 mp_fetch_repo_sh ===
+bootstrap_download() {
+    _bd_url=$1; _bd_dst=$2; _bd_tmp="$_bd_dst.tmp"
+    case "$MP_USE_PROXY" in 1|true|yes) _bd_proxy="--proxy $MP_PROXY_HTTP" ;; *) _bd_proxy="" ;; esac
+    while :; do
+        rm -f "$_bd_tmp"
+        if curl --progress-bar --show-error --fail -L --connect-timeout 10 --max-time 300 \
+                $_bd_proxy "$_bd_url" -o "$_bd_tmp" \
+           && [ -s "$_bd_tmp" ]; then
+            mv "$_bd_tmp" "$_bd_dst"
+            return 0
+        fi
+        rm -f "$_bd_tmp"
+        [ "$HAVE_TTY" = "1" ] || return 1
+        printf '下载失败，是否重试？[Y/n] ' >/dev/tty
+        IFS= read -r _bd_retry </dev/tty || _bd_retry=n
+        case "$_bd_retry" in n|N|no|NO|No) return 1 ;; esac
+    done
+}
+
 say_section "Bootstrap"
 say_step "下载 env.conf / common.sh"
-wget -q -O "$DIR_SH/env.conf"  "$MP_REPO_RAW_URL/sh/env.conf"  || { say_err "下载 env.conf 失败"  >&2; exit 1; }
-wget -q -O "$DIR_SH/common.sh" "$MP_REPO_RAW_URL/sh/common.sh" || { say_err "下载 common.sh 失败" >&2; exit 1; }
+bootstrap_download "$MP_REPO_RAW_URL/sh/env.conf"  "$DIR_SH/env.conf"  || { say_err "下载 env.conf 失败"  >&2; exit 1; }
+bootstrap_download "$MP_REPO_RAW_URL/sh/common.sh" "$DIR_SH/common.sh" || { say_err "下载 common.sh 失败" >&2; exit 1; }
 
 export MP_INST_DIR="$DIR_INST"            # 显式声明根（init.d/$0 不可靠）
 . "$DIR_SH/common.sh"                     # 加载公共函数

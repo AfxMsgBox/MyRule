@@ -26,17 +26,24 @@ esac
 [ -z "$mihomo_arch$agh_arch" ] && { echo_log "未识别架构 $(uname -m)，跳过"; exit 1; }
 
 rc=0
+case "$MP_USE_PROXY" in 1|true|yes) curl_proxy="--proxy $MP_PROXY_HTTP" ;; *) curl_proxy="" ;; esac
 
 # mihomo：版本号在文件名里，先从 /releases/latest 的 Location 头取最新版本
 if [ -n "$mihomo_arch" ]; then
-    ver=$(curl -sI --connect-timeout 10 --max-time 30 \
-            https://github.com/MetaCubeX/mihomo/releases/latest \
-          | sed -n 's|.*[Ll]ocation:[[:space:]]*.*tag/\([^[:space:]]*\).*|\1|p' \
-          | head -1 | tr -d '\r')
+    while :; do
+        ver=$(curl --silent --show-error --fail -I --connect-timeout 10 --max-time 30 \
+                $curl_proxy \
+                https://github.com/MetaCubeX/mihomo/releases/latest \
+              | sed -n 's|.*[Ll]ocation:[[:space:]]*.*tag/\([^[:space:]]*\).*|\1|p' \
+              | head -1 | tr -d '\r')
+        [ -n "$ver" ] && break
+        echo_log "获取 mihomo 最新版本失败"
+        download_retry_prompt || break
+    done
     if [ -n "$ver" ]; then
         gz=$(mktemp)
         url="https://github.com/MetaCubeX/mihomo/releases/download/$ver/mihomo-linux-$mihomo_arch-$ver.gz"
-        if download_file "$url" "$gz" true 0 \
+        if download_file "$url" "$gz" true \
            && gunzip -c "$gz" > "$MP_CORE_DIR/mihomo.tmp" \
            && [ -s "$MP_CORE_DIR/mihomo.tmp" ]; then
             mv "$MP_CORE_DIR/mihomo.tmp" "$MP_CORE_DIR/mihomo"
@@ -48,10 +55,7 @@ if [ -n "$mihomo_arch" ]; then
             rc=$((rc+1))
         fi
         rm -f "$gz"
-    else
-        echo_log "获取 mihomo 最新版本失败"
-        rc=$((rc+1))
-    fi
+    else rc=$((rc+1)); fi
 fi
 
 # metacubexd UI：mihomo 的 Web 控制面板。架构无关的静态站点；
@@ -60,7 +64,7 @@ fi
 # 故解压到子目录避免和 ui.tgz 同位
 ui_tmp=$(mktemp -d); mkdir -p "$ui_tmp/extract"
 ui_url="https://github.com/MetaCubeX/metacubexd/releases/latest/download/compressed-dist.tgz"
-if download_file "$ui_url" "$ui_tmp/ui.tgz" true 0 \
+if download_file "$ui_url" "$ui_tmp/ui.tgz" true \
    && tar -xzf "$ui_tmp/ui.tgz" -C "$ui_tmp/extract" 2>/dev/null \
    && [ -f "$ui_tmp/extract/index.html" ]; then
     rm -rf "$MP_CORE_DIR/ui"
@@ -77,7 +81,7 @@ rm -rf "$ui_tmp"
 if [ -n "$agh_arch" ]; then
     tmp=$(mktemp -d)
     url="https://github.com/AdguardTeam/AdGuardHome/releases/latest/download/AdGuardHome_linux_${agh_arch}.tar.gz"
-    if download_file "$url" "$tmp/agh.tar.gz" true 0 \
+    if download_file "$url" "$tmp/agh.tar.gz" true \
        && tar -xzf "$tmp/agh.tar.gz" -C "$tmp" \
        && [ -x "$tmp/AdGuardHome/AdGuardHome" ]; then
         mv "$tmp/AdGuardHome/AdGuardHome" "$MP_AGH_DIR/AdGuardHome"

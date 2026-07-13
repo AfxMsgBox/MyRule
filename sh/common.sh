@@ -27,33 +27,43 @@ get_file_size() {
     [ -f "$1" ] && wc -c < "$1" | tr -d ' \n' || echo 0
 }
 
+# 有交互终端时询问是否重试；回车默认重试。无终端或明确拒绝时返回失败。
+download_retry_prompt() {
+    if { : >/dev/tty; } 2>/dev/null && [ -r /dev/tty ]; then
+        printf '下载失败，是否重试？[Y/n] ' >/dev/tty
+        IFS= read -r _drp_retry </dev/tty || _drp_retry=n
+        case "$_drp_retry" in n|N|no|NO|No) return 1 ;; *) return 0 ;; esac
+    fi
+    return 1
+}
+
 # download_file <url> <dst> [verbose=true] [use_proxy] [min_size=8]
-# verbose=true 时输出 url、完成时的字节数与耗时；false 完全静默
+# verbose=true 时额外输出 url、完成时的字节数与耗时
 # use_proxy 缺省取 $MP_USE_PROXY；显式传 0/1 可覆盖
-# 走代理失败自动回退直连；--fail 让 4xx/5xx 不被当成功；mktemp + mv 原子替换
+# 每次只下载一次；失败时有 tty 则询问是否重试，否则直接返回失败。
+# --fail 让 4xx/5xx 不被当成功；mktemp + mv 原子替换
 download_file() {
     # 所有内部变量加 _df_ 前缀，避免污染调用方同名变量（POSIX sh 无 local）
     _df_url="$1"; _df_dst="$2"; _df_verbose="${3:-true}"
     _df_use_proxy="${4:-$MP_USE_PROXY}"; _df_min_size="${5:-8}"
     case "$_df_use_proxy" in 1|true|yes) _df_proxy="--proxy $MP_PROXY_HTTP" ;; *) _df_proxy="" ;; esac
     [ "$_df_verbose" = "true" ] && echo_log "下载 $_df_url"
-    _df_t0=$(date +%s)
     _df_tmp=$(mktemp)
-    # -L 跟进 302（GitHub releases 等都重定向到 S3），--max-time 放宽给大二进制
-    curl --silent --show-error --fail -L --connect-timeout 10 --max-time 300 \
-         --retry 2 --retry-delay 1 $_df_proxy "$_df_url" -o "$_df_tmp" >/dev/null 2>&1
-    _df_rc=$?
-    if [ "$_df_rc" -ne 0 ] && [ -n "$_df_proxy" ]; then
-        [ "$_df_verbose" = "true" ] && echo_log "代理失败，回退直连"
-        curl --silent --show-error --fail -L --connect-timeout 10 --max-time 300 \
-             --retry 2 --retry-delay 1 "$_df_url" -o "$_df_tmp" >/dev/null 2>&1
+    while :; do
+        _df_t0=$(date +%s)
+        # -L 跟进 302（GitHub releases 等都重定向到 S3），--max-time 放宽给大二进制
+        curl --progress-bar --show-error --fail -L --connect-timeout 10 --max-time 300 \
+             $_df_proxy "$_df_url" -o "$_df_tmp"
         _df_rc=$?
-    fi
-    if [ "$_df_rc" -ne 0 ] || [ "$(get_file_size "$_df_tmp")" -le "$_df_min_size" ]; then
-        rm -f "$_df_tmp"
+        if [ "$_df_rc" -eq 0 ] && [ "$(get_file_size "$_df_tmp")" -gt "$_df_min_size" ]; then
+            break
+        fi
         [ "$_df_verbose" = "true" ] && echo_log "下载失败"
-        return 1
-    fi
+        if ! download_retry_prompt; then
+            rm -f "$_df_tmp"
+            return 1
+        fi
+    done
     [ "$_df_verbose" = "true" ] && echo_log "完成：$(get_file_size "$_df_tmp") 字节 / $(($(date +%s) - _df_t0))s"
     mv "$_df_tmp" "$_df_dst"
 }
@@ -113,7 +123,7 @@ mp_fetch_repo_sh() {
     _mfr_url="https://codeload.github.com/$_mfr_owner_repo/tar.gz/refs/heads/$_mfr_branch"
 
     _mfr_tmp=$(mktemp -d) || return 1
-    if ! download_file "$_mfr_url" "$_mfr_tmp/repo.tar.gz" true 0; then
+    if ! download_file "$_mfr_url" "$_mfr_tmp/repo.tar.gz" true; then
         rm -rf "$_mfr_tmp"; return 1
     fi
     if ! tar -xzf "$_mfr_tmp/repo.tar.gz" -C "$_mfr_tmp" 2>/dev/null; then

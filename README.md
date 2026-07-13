@@ -44,8 +44,15 @@ wget -O- https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/sh/inst.sh | sh
 #  → 装到 /etc/proxy/{sh,core,agh}
 
 # 装分支版本（开发调试）
-MP_REPO_RAW_URL=https://raw.githubusercontent.com/AfxMsgBox/MyRule/refs/heads/claude/update-readme-overview-pU5D3 \
-    wget -O- "$MP_REPO_RAW_URL/sh/inst.sh" | sh -s -- /etc/proxy
+export MP_REPO_RAW_URL=https://raw.githubusercontent.com/AfxMsgBox/MyRule/refs/heads/claude/update-readme-overview-pU5D3
+wget -O- "$MP_REPO_RAW_URL/sh/inst.sh" | sh -s -- /etc/proxy
+
+# 最外层安装器也通过代理下载；HTTP 代理同样适用
+export MP_REPO_RAW_URL=https://raw.githubusercontent.com/AfxMsgBox/MyRule/main
+export MP_USE_PROXY=1
+export MP_PROXY_HTTP=socks5h://127.0.0.1:1080
+curl --fail --location --progress-bar --proxy "$MP_PROXY_HTTP" \
+    "$MP_REPO_RAW_URL/sh/inst.sh" | sh -s -- /etc/proxy
 ```
 
 inst.sh 自动识别 OpenWrt / systemd 并分发对应服务文件，最后启用并启动服务。
@@ -79,6 +86,8 @@ python3 -c "import bcrypt;print(bcrypt.hashpw(b'明文',bcrypt.gensalt(10)).deco
 | 变量 | 默认 | 必填 | 说明 |
 |---|---|---|---|
 | `MP_REPO_RAW_URL` | `.../main` | | 仓库 raw 根 URL；向导输入分支名自动拼成 `.../refs/heads/<branch>` |
+| `MP_USE_PROXY` | `1` | | `1/true/yes` 时所有下载走代理，其它值直连 |
+| `MP_PROXY_HTTP` | `http://127.0.0.1:7890` | | 代理 URL；支持 `http://`、`https://`、`socks5://`、`socks5h://` |
 | `MP_SUBSCRIBE_URL` | 空 | ✔ | 节点订阅 URL（`core/config.yaml` 的 `{MP_SUBSCRIBE_URL}` 引用） |
 | `MP_AGH_USER_NAME` | 空 | ✔ | AGH Web UI 用户名 |
 | `MP_AGH_PASSWORD` | 空 | ✔ | AGH Web UI 密码（**bcrypt 哈希**，生成方法见上节） |
