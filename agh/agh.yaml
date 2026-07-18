@@ -91,10 +91,6 @@ filters:
     name: WindowsSpyBlocker - Hosts spy rules
     id: 1733109083
   - enabled: true
-    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_29.txt
-    name: 'CHN: AdRules DNS List'
-    id: 1733109084
-  - enabled: true
     url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_21.txt
     name: 'CHN: anti-AD'
     id: 1733109085
