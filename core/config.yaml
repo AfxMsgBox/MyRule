@@ -47,7 +47,7 @@ dns:
   enhanced-mode: fake-ip
   listen: :253
   use-hosts: false
-  fake-ip-range: 198.16.0.1/16
+  fake-ip-range: 198.18.0.1/16
   # 用于解析 nameserver，fallback 以及其他 DNS 服务器配置的，DNS 服务域名
   # 只能使用纯 IP 地址，可使用加密 DNS
 #  default-nameserver:
