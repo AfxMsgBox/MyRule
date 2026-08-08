@@ -55,6 +55,31 @@ say_dim "  脚本 → $DIR_SH    (含 sh/etc/ 服务文件副本)"
 say_dim "  core → $DIR_CORE"
 say_dim "  agh  → $DIR_AGH"
 
+# === 开启 IPv4 转发（透明代理网关需要）===
+# 写入通用的 /etc/sysctl.conf 保证重启后仍生效；LXC 权限不足时只警告，不中断安装。
+say_section "启用 IPv4 转发"
+sysctl_conf=/etc/sysctl.conf
+forward_persisted=0
+if grep -Eq '^[[:space:]]*net\.ipv4\.ip_forward[[:space:]]*=' "$sysctl_conf" 2>/dev/null; then
+    sed -i -E 's/^[[:space:]]*net\.ipv4\.ip_forward[[:space:]]*=.*/net.ipv4.ip_forward=1/' "$sysctl_conf" \
+        && forward_persisted=1
+else
+    printf '\nnet.ipv4.ip_forward=1\n' >> "$sysctl_conf" \
+        && forward_persisted=1
+fi
+
+forward_applied=0
+sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 && forward_applied=1
+if [ "$forward_applied" = "1" ] && [ "$forward_persisted" = "1" ]; then
+    say_ok "net.ipv4.ip_forward = 1（已立即生效并持久化）"
+elif [ "$forward_applied" = "1" ]; then
+    say_warn "net.ipv4.ip_forward 已立即生效，但无法写入 $sysctl_conf"
+elif [ "$forward_persisted" = "1" ]; then
+    say_warn "无法立即设置 net.ipv4.ip_forward；已写入 $sysctl_conf，请检查 LXC 权限或宿主机限制"
+else
+    say_warn "无法设置或持久化 net.ipv4.ip_forward，请检查 LXC 权限或宿主机限制"
+fi
+
 # === 预加载已有 env.local.conf（提供重装场景的默认值） ===
 [ -f "$DIR_SH/env.local.conf" ] && . "$DIR_SH/env.local.conf"
 
