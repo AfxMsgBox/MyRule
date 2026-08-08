@@ -256,7 +256,7 @@ etc_rels=$(mp_etc_rels)
 say_step "sh/etc 路径替换 /etc/proxy → $DIR_INST"
 for rel in $etc_rels; do
     [ -f "$DIR_SH/etc/$rel" ] && sed -i "s|/etc/proxy|$DIR_INST|g" "$DIR_SH/etc/$rel"
-    chmod +x "$DIR_SH/etc/$rel" 2>/dev/null || true
+    mp_set_etc_mode "$DIR_SH/etc/$rel" 2>/dev/null || true
 done
 
 # === 下载内核二进制（mihomo / AdGuardHome）===
@@ -280,10 +280,10 @@ say_section "刷新 AGH dns.conf 与 core/config.yaml"
 sh "$DIR_SH/update-agh-config.sh"  || say_warn "（AGH dns.conf 有失败项）"
 sh "$DIR_SH/update-core-config.sh" || say_warn "（core config.yaml 有失败项）"
 
-# === [7/7] 自启动询问 ===
+# === [7/9] 自启动询问 ===
 # Y：把 $DIR_SH/etc 下文件复制到 /etc 对应位置并 enable+start
 # n：不动 /etc；服务文件留在 $DIR_SH/etc，可后续手动 cp 或重跑 inst 选 Y
-prompt_to autostart "Y" "[7/7] 现在启用并启动系统服务？(Y/n)" \
+prompt_to autostart "Y" "[7/9] 现在启用并启动系统服务？(Y/n)" \
     "Y = 把 $DIR_SH/etc 下文件复制到 /etc 对应位置，并 enable + start" \
     "n = 跳过；服务文件留在 $DIR_SH/etc，可后续按下面命令手动装"
 
@@ -312,7 +312,7 @@ case "$autostart" in
         for rel in $etc_rels; do
             mkdir -p "/etc/$(dirname "$rel")"
             cp "$DIR_SH/etc/$rel" "/etc/$rel"
-            chmod +x "/etc/$rel" 2>/dev/null || true
+            mp_set_etc_mode "/etc/$rel" 2>/dev/null || true
         done
         [ "$MP_OS_TYPE" = "systemd" ] && systemctl daemon-reload
         mp_service_op enable_start proxy_core agh
@@ -323,6 +323,71 @@ case "$autostart" in
         sh "$DIR_SH/update-proxy-rule.sh" || say_warn "（订阅/规则集刷新失败，可稍后手动跑 update-proxy-rule.sh）"
         ;;
 esac
+
+# === 定时更新：输入间隔天数，默认 3；输入 n 跳过 ===
+# 使用 root crontab，任务固定在凌晨 3 点执行；重复安装时按 marker 替换旧任务。
+install_cron_job() {
+    _cj_marker=$1; _cj_days=$2; _cj_script=$3
+    _cj_tmp=$(mktemp) || return 1
+    crontab -l > "$_cj_tmp" 2>/dev/null || :
+    awk -v marker="$_cj_marker" 'index($0, marker) == 0 { print }' "$_cj_tmp" > "$_cj_tmp.new"
+    printf "0 3 */%s * * sh '%s' # %s\n" "$_cj_days" "$_cj_script" "$_cj_marker" >> "$_cj_tmp.new"
+    if crontab "$_cj_tmp.new"; then
+        rm -f "$_cj_tmp" "$_cj_tmp.new"
+        return 0
+    fi
+    rm -f "$_cj_tmp" "$_cj_tmp.new"
+    return 1
+}
+
+prompt_cron_days() {
+    _pcd_var=$1; _pcd_label=$2
+    while :; do
+        prompt_to "$_pcd_var" "3" "$_pcd_label" \
+            "输入 1-31 表示每隔多少天执行；默认 3 天" \
+            "输入 n 跳过此定时任务"
+        eval "_pcd_value=\$$_pcd_var"
+        case "$_pcd_value" in
+            n|N|no|NO|No) return 1 ;;
+            ''|*[!0-9]*) say_err "      请输入 1-31，或输入 n 跳过。" ;;
+            *)
+                if [ "$_pcd_value" -ge 1 ] 2>/dev/null && [ "$_pcd_value" -le 31 ]; then
+                    return 0
+                fi
+                say_err "      天数必须在 1-31 之间。"
+                ;;
+        esac
+    done
+}
+
+if [ "$HAVE_TTY" = "1" ]; then
+    say_section "设置定时更新"
+    if ! command -v crontab >/dev/null 2>&1; then
+        say_warn "系统未安装 crontab，跳过定时任务设置"
+    else
+        if prompt_cron_days cron_config_days "[8/9] 定时更新配置文件的间隔天数"; then
+            if install_cron_job "MyProxy:update-configs" "$cron_config_days" \
+                    "$DIR_SH/update-all-configs-restart-services.sh"; then
+                say_ok "配置文件：每 $cron_config_days 天凌晨 3 点更新并重启服务"
+            else
+                say_warn "配置文件定时任务写入失败"
+            fi
+        else
+            say_dim "已跳过配置文件定时更新"
+        fi
+
+        if prompt_cron_days cron_script_days "[9/9] 定时更新脚本的间隔天数"; then
+            if install_cron_job "MyProxy:update-scripts" "$cron_script_days" \
+                    "$DIR_SH/update-scripts.sh"; then
+                say_ok "脚本：每 $cron_script_days 天凌晨 3 点更新"
+            else
+                say_warn "脚本定时任务写入失败"
+            fi
+        else
+            say_dim "已跳过脚本定时更新"
+        fi
+    fi
+fi
 
 say_section "安装完成"
 printf '%s  %s\n' "${C_B}安装目录${C_R}" "$DIR_INST"

@@ -30,10 +30,10 @@ for rel in $(mp_etc_rels); do
     local_path="$dir_sh/etc/$rel"
     [ -f "$local_path" ] || { echo_log "$rel 不在 tarball 里？跳过"; continue; }
     sed -i "s|/etc/proxy|$MP_INST_DIR|g" "$local_path"
-    chmod +x "$local_path" 2>/dev/null || true
+    mp_set_etc_mode "$local_path" 2>/dev/null || true
     # per-file 判断：用户当初没选自启动 → /etc 下没文件 → 跳过（绝不创建）
     if [ -e "/etc/$rel" ]; then
-        cp "$local_path" "/etc/$rel" && chmod +x "/etc/$rel" 2>/dev/null
+        cp "$local_path" "/etc/$rel" && mp_set_etc_mode "/etc/$rel" 2>/dev/null
         echo_log "同步 /etc/$rel"
         [ "$MP_OS_TYPE" = "systemd" ] && systemd_changed=1
     fi

@@ -108,6 +108,15 @@ mp_etc_rels() {
     esac
 }
 
+# mp_set_etc_mode <path>
+# systemd unit 是配置文件，不应带可执行位；OpenWrt init/hotplug 文件需要可执行。
+mp_set_etc_mode() {
+    case "$1" in
+        *.service) chmod 0644 "$1" ;;
+        *)         chmod 0755 "$1" ;;
+    esac
+}
+
 # mp_fetch_repo_sh <dst-sh-dir>
 # 从 MP_REPO_RAW_URL 派生 owner/repo + 分支，拉 GitHub codeload tarball，
 # 仅把 sh/ 子树覆盖到 <dst-sh-dir>。env.local.conf 不在 tarball 里所以不会被动。
