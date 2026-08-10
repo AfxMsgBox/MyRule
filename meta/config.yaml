@@ -19,6 +19,7 @@ geo-auto-update: false
 keep-alive-idle: 60
 keep-alive-interval: 30
 disable-keep-alive: false
+find-process-mode: "off"
 
 #
 profile:
@@ -36,11 +37,13 @@ tun:
   enable: true
   device: utun
   stack: mixed
-  mtu: 1400
+#  mtu: 1400
   auto-route: false
   auto-redir: false
   auto-detect-interface: false
-
+  gso: true
+  gso-max-size: 65536
+  
 dns:
   enable: true    
   ipv6: false
@@ -84,6 +87,7 @@ proxy-providers:
     health-check:
       enable: true
       url: http://www.gstatic.com/generate_204
+      expected-status: 204
       interval: 1800
 #-------------------------
   Singapore:
@@ -94,6 +98,7 @@ proxy-providers:
     health-check:
       enable: true
       url: http://www.gstatic.com/generate_204
+      expected-status: 204
       interval: 1800
 #-------------------------
   TaiWan:
@@ -115,6 +120,7 @@ proxy-providers:
     health-check:
       enable: true
       url: http://www.gstatic.com/generate_204
+      expected-status: 204
       interval: 1800
 
 proxy-groups:
