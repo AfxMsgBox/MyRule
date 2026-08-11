@@ -51,7 +51,7 @@ wget -O- "$MP_REPO_RAW_URL/sh/inst.sh" | sh -s -- /etc/proxy
 # 通过 SSH SOCKS5 / 其它代理安装；HTTP 代理同样适用
 # 同一个外部代理同时用于安装和以后的后备下载
 export MP_REPO_RAW_URL=https://raw.githubusercontent.com/AfxMsgBox/MyRule/main
-export MP_PROXY=socks5h://127.0.0.1:1080
+export MP_PROXY=socks5h://127.0.0.1:7890
 curl --fail --location --progress-bar --proxy "$MP_PROXY" \
     "$MP_REPO_RAW_URL/sh/inst.sh" | sh -s -- /etc/proxy
 ```
