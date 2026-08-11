@@ -20,22 +20,24 @@ case "$(uname -m)" in
     mipsel)         mihomo_arch=mipsle-softfloat; agh_arch=mipsle_softfloat ;;
     mips64)         mihomo_arch=mips64;           agh_arch=mips64 ;;
     mips64el)       mihomo_arch=mips64le;         agh_arch=mips64le ;;
-    riscv64)        mihomo_arch=riscv64;          agh_arch= ;;
     *) mihomo_arch=; agh_arch= ;;
 esac
 [ -z "$mihomo_arch$agh_arch" ] && { echo_log "未识别架构 $(uname -m)，跳过"; exit 1; }
 
 rc=0
-case "$MP_USE_PROXY" in 1|true|yes) curl_proxy="--proxy $MP_PROXY_HTTP" ;; *) curl_proxy="" ;; esac
 
-# mihomo：版本号在文件名里，先从 /releases/latest 的 Location 头取最新版本
+# mihomo：版本号在文件名里，先通过公共下载函数获取 latest release 元数据
 if [ -n "$mihomo_arch" ]; then
     while :; do
-        ver=$(curl --silent --show-error --fail -I --connect-timeout 10 --max-time 30 \
-                $curl_proxy \
-                https://github.com/MetaCubeX/mihomo/releases/latest \
-              | sed -n 's|.*[Ll]ocation:[[:space:]]*.*tag/\([^[:space:]]*\).*|\1|p' \
-              | head -1 | tr -d '\r')
+        release_meta=$(mktemp)
+        if download_file "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest" \
+                "$release_meta" false; then
+            ver=$(sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+                    "$release_meta" | head -1)
+        else
+            ver=
+        fi
+        rm -f "$release_meta"
         [ -n "$ver" ] && break
         echo_log "获取 mihomo 最新版本失败"
         download_retry_prompt || break
@@ -59,23 +61,29 @@ if [ -n "$mihomo_arch" ]; then
 fi
 
 # metacubexd UI：mihomo 的 Web 控制面板。架构无关的静态站点；
-# core/config.yaml 里 external-ui: ui 已指向 $MP_CORE_DIR/ui
+# 安装目录从 core/config.yaml 的 external-ui 动态读取并限制在 Core home 内。
 # tarball 内容直接在顶层（./index.html ./_nuxt/...），没有 dist/ 包一层；
 # 故解压到子目录避免和 ui.tgz 同位
-ui_tmp=$(mktemp -d); mkdir -p "$ui_tmp/extract"
-ui_url="https://github.com/MetaCubeX/metacubexd/releases/latest/download/compressed-dist.tgz"
-if download_file "$ui_url" "$ui_tmp/ui.tgz" true \
-   && tar -xzf "$ui_tmp/ui.tgz" -C "$ui_tmp/extract" 2>/dev/null \
-   && [ -f "$ui_tmp/extract/index.html" ]; then
-    rm -rf "$MP_CORE_DIR/ui"
-    mkdir -p "$MP_CORE_DIR/ui"
-    cp -rf "$ui_tmp/extract/." "$MP_CORE_DIR/ui/"
-    echo_log "metacubexd UI 已就位：$MP_CORE_DIR/ui"
+core_ui_dir=$(mp_core_external_ui_path 2>/dev/null || :)
+if [ -n "$core_ui_dir" ]; then
+    ui_tmp=$(mktemp -d); mkdir -p "$ui_tmp/extract"
+    ui_url="https://github.com/MetaCubeX/metacubexd/releases/latest/download/compressed-dist.tgz"
+    if download_file "$ui_url" "$ui_tmp/ui.tgz" true \
+       && tar -xzf "$ui_tmp/ui.tgz" -C "$ui_tmp/extract" 2>/dev/null \
+       && [ -f "$ui_tmp/extract/index.html" ]; then
+        rm -rf "$core_ui_dir"
+        mkdir -p "$core_ui_dir"
+        cp -rf "$ui_tmp/extract/." "$core_ui_dir/"
+        echo_log "metacubexd UI 已就位：$core_ui_dir"
+    else
+        echo_log "metacubexd UI 下载或解压失败"
+        rc=$((rc+1))
+    fi
+    rm -rf "$ui_tmp"
 else
-    echo_log "metacubexd UI 下载或解压失败"
+    echo_log "Core 配置缺少安全有效的 external-ui，跳过 UI"
     rc=$((rc+1))
 fi
-rm -rf "$ui_tmp"
 
 # AdGuardHome：/releases/latest/download/ 直接给到最新 tar.gz
 if [ -n "$agh_arch" ]; then

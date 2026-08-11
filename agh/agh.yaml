@@ -5,7 +5,7 @@ http:
   address: 0.0.0.0:180
   session_ttl: 720h
 users:
-  - name: {MP_AGH_USER_NAME}
+  - name: "{MP_AGH_USER_NAME}"
     password: {MP_AGH_PASSWORD}
 auth_attempts: 5
 block_auth_min: 15

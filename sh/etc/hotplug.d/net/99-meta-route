@@ -1,12 +1,4 @@
 #!/bin/sh
-# OpenWrt hotplug：仅当 MP_TUN_IFACES 中之一的接口 add 时调用统一脚本
+# OpenWrt hotplug：网络接口 add 时调用统一脚本；脚本自行读取并检查 tun.device。
 [ "$ACTION" = "add" ] || exit 0
-. /etc/proxy/sh/env.conf
-
-match=0
-for i in $MP_TUN_IFACES; do
-    [ "$INTERFACE" = "$i" ] && match=1 && break
-done
-[ "$match" = "1" ] || exit 0
-
 exec /etc/proxy/sh/setup-fake-ip-route.sh

@@ -4,11 +4,22 @@
 
 config_yaml="$MP_CORE_DIR/config.yaml"
 [ -f "$config_yaml" ] || { echo_log "未找到 $config_yaml，跳过"; exit 0; }
+core_api=$(mp_core_api_url "$config_yaml") \
+    || { echo_log "无法从 Core 配置读取有效的 external-controller"; exit 1; }
+core_secret=$(mp_core_value "" secret "$config_yaml" 2>/dev/null || :)
 
 # put_provider <kind> <name>：HTTP 204/200 视为成功
 put_provider() {
-    code=$(curl --silent --show-error --max-time 30 -o /dev/null -w '%{http_code}' \
-                -X PUT "$MP_CORE_API/providers/$1/$2" 2>&1)
+    if [ -n "$core_secret" ]; then
+        code=$(curl --silent --show-error --max-time 30 -o /dev/null -w '%{http_code}' \
+                    --noproxy '*' \
+                    -H "Authorization: Bearer $core_secret" \
+                    -X PUT "$core_api/providers/$1/$2" 2>&1)
+    else
+        code=$(curl --silent --show-error --max-time 30 -o /dev/null -w '%{http_code}' \
+                    --noproxy '*' \
+                    -X PUT "$core_api/providers/$1/$2" 2>&1)
+    fi
     case "$code" in
         200|204) echo_log "刷新 $1/$2 OK" ;;
         *)       echo_log "刷新 $1/$2 失败（HTTP $code）"; return 1 ;;

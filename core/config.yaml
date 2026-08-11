@@ -1,7 +1,6 @@
 mixed-port: 7890
 #redir-port: 7892
 tproxy-port: 7893
-authentication: [""]
 allow-lan: true
 mode: rule
 log-level: warning
@@ -11,6 +10,17 @@ external-ui: ui
 #secret:
 tcp-concurrent: true
 geo-auto-update: false
+# 不启用 unified-delay：官方文档称其用于"消除连接握手等带来的不同类型节点的延迟差异"，
+# 而本机场节点全部是同协议、tls:false、同域名，没有类型差异可消除；握手时间本就是
+# 真实体验的一部分，应当计入测速。
+# 若将来接入 Trojan / Reality 等带 TLS 握手的节点，与现有节点混在同一 url-test 组里
+# 选路，再重新评估。
+#
+# 网关转发的流量没有本地进程可查，规则里也没有 PROCESS-NAME。
+# 默认值 strict 的含义是"由内核自行判断是否开启"，在无 PROCESS 规则时大概率本就不查，
+# 所以这里显式写 off 主要是把行为固定下来、不依赖该判断逻辑，性能收益预期接近于零。
+# 必须加引号：YAML 会把裸写的 off 解析成布尔 false，而这里要的是字符串枚举。
+find-process-mode: "off"
 
 #长连接alive问题：https://github.com/vernesong/OpenClash/issues/2614
 #keep-alive-idle 没有数据活动，它会发起一个 keep alive 包给客户端
@@ -36,7 +46,16 @@ tun:
   enable: true
   device: utun
   stack: mixed
-  mtu: 1400
+  # TUN 是内核与 mihomo 之间的本地通道，MTU 与真实链路解耦（mihomo 在此终结 TCP
+  # 再对外重新建连）。9000 是 mihomo 默认值，包数少、syscall 少，大文件吞吐更好。
+  # 原值 1400 会把数据切碎。若某台设备出现丢包/卡顿，回退到 1400。
+  mtu: 9000
+  # 通用分段卸载，仅支持 Linux。让内核把多个包合并成大段一次交给 mihomo，
+  # 显著减少 syscall 次数。与上面的 mtu: 9000 是同方向、互相放大的两个杠杆，
+  # 官方示例里也是配套出现的。
+  # gso-max-size 取官方示例值 65536（应与默认值相同，显式写出便于日后调整）。
+  gso: true
+  gso-max-size: 65536
   auto-route: false
   auto-redir: false
   auto-detect-interface: false
@@ -48,21 +67,20 @@ dns:
   listen: :253
   use-hosts: false
   fake-ip-range: 198.18.0.1/16
-  # 用于解析 nameserver，fallback 以及其他 DNS 服务器配置的，DNS 服务域名
-  # 只能使用纯 IP 地址，可使用加密 DNS
-#  default-nameserver:
-#    - 223.5.5.5
-  # 这部分为主要 DNS 配置，影响所有直连，确保使用对大陆解析精准的 DNS  
-#  nameserver:
-#    - 223.5.5.5
-#    - 119.29.29.29
-  # 当配置 fallback 时，会查询 nameserver 中返回的 IP 是否为 CN，非必要配置
-  # 当不是 CN，则使用 fallback 中的 DNS 查询结果
-  # 确保配置 fallback 时能够正常查询
-#  fallback:
-#    - 8.8.8.8
+  # AGH 在前面完成域名分流，转发到这里的域名一律返回 fake-ip（本地分配，不查上游）。
+  # 所以下面的上游只服务两类查询：节点服务器域名，以及 mihomo 自身直连时的解析
+  # （目前仅 proxy-providers 的订阅刷新）。
+  #
+  # 不写 nameserver 会退回到版本相关的内置默认或系统解析器，各设备行为不一致，故写死。
+  nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+  # 机场节点全部在 paeadiy.com 下，该域名会被运营商污染，必须走机场自己的 DNS。
+  # 这台 DNS 只解析 paeadiy.com，因此用按域名匹配的 policy，不能用 proxy-server-nameserver
+  # ——后者按"所有节点域名"一刀切，机场若在别的域名下加节点，查询会被送去一台
+  # 拒绝解析它们的服务器。通配符覆盖将来可能出现的 cp2/cp3 等主机名。
   nameserver-policy:
-    'cp.paeadiy.com': '47.116.209.9:39053'
+    '+.paeadiy.com': '47.116.209.9:39053'
 
 proxy-providers:
   HongKong:
@@ -84,6 +102,7 @@ proxy-providers:
     health-check:
       enable: true
       url: http://www.gstatic.com/generate_204
+      expected-status: 204
       interval: 1800
 #-------------------------
   Singapore:
@@ -94,6 +113,7 @@ proxy-providers:
     health-check:
       enable: true
       url: http://www.gstatic.com/generate_204
+      expected-status: 204
       interval: 1800
 #-------------------------
   TaiWan:
@@ -115,6 +135,7 @@ proxy-providers:
     health-check:
       enable: true
       url: http://www.gstatic.com/generate_204
+      expected-status: 204
       interval: 1800
 
 proxy-groups:

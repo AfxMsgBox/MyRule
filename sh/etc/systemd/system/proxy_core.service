@@ -7,14 +7,19 @@ Wants=network-online.target
 After=network-online.target nss-lookup.target
 # 在 AGH 之前启动，保证 fake-ip 解析端口先就绪
 Before=adguardhome.service agh.service
-# 与 procd respawn 3600 5 5 等价：1 小时窗口内崩 5 次后停止重启
-StartLimitIntervalSec=3600
-StartLimitBurst=5
+# 关闭启动限流。注意 systemd 的 StartLimit 与 procd 的 respawn 语义不同：
+# procd 只计崩溃重生次数，systemd 计的是「所有启动」，包括人工 systemctl restart。
+# 原来的 3600/5 会让调试时连续重启 5 次后服务被锁死一小时（Start request repeated
+# too quickly），而调试恰恰最需要频繁起停。
+# 必须显式写 0 才是关闭：删掉本行会退回全局默认 DefaultStartLimitIntervalSec=10s
+# + DefaultStartLimitBurst=5，即「10 秒内 5 次」，快速连续重启仍会被拦。
+# 崩溃保护仍由下方 Restart=on-failure + RestartSec=5 承担（代价：真崩溃时会无限重试）。
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 # 用 sh -c 引导以便 source env.conf；systemd 的 EnvironmentFile 解析不了变量引用
-ExecStart=/bin/sh -c '. /etc/proxy/sh/env.conf; exec "$MP_CORE_DIR/mihomo" -d "$MP_CORE_DIR"'
+ExecStart=/bin/sh -c 'MP_INST_DIR=/etc/proxy; export MP_INST_DIR; . "$MP_INST_DIR/sh/env.conf"; exec "$MP_CORE_DIR/mihomo" -d "$MP_CORE_DIR"'
 # 等 mihomo 起好后修正 fake-ip 路由；sleep 5 给 TUN 创建与 /30 出现留时间
 ExecStartPost=/bin/sh -c 'sleep 5 && /etc/proxy/sh/setup-fake-ip-route.sh || true'
 

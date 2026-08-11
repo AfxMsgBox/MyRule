@@ -35,21 +35,18 @@ DIR_CORE="$DIR_INST/core"
 DIR_AGH="$DIR_INST/agh"
 mkdir -p "$DIR_SH/etc" "$DIR_CORE" "$DIR_AGH"
 
-# === OS 识别：先就地探测（common.sh 还没加载，无法用 mp_detect_os） ===
-if [ -z "$MP_OS_TYPE" ]; then
-    if [ -f /etc/openwrt_release ] || grep -qs '^ID=.*openwrt' /etc/os-release; then
-        MP_OS_TYPE=openwrt
-    elif command -v systemctl >/dev/null 2>&1 && [ -d /etc/systemd/system ]; then
-        MP_OS_TYPE=systemd
-    else
-        echo "未识别的系统；用 MP_OS_TYPE=openwrt 或 MP_OS_TYPE=systemd 强制" >&2
-        exit 1
-    fi
+# === OS 识别：common.sh 还没加载，先就地探测 ===
+if [ -f /etc/openwrt_release ] || grep -qs '^ID=.*openwrt' /etc/os-release; then
+    os_type=openwrt
+elif command -v systemctl >/dev/null 2>&1 && [ -d /etc/systemd/system ]; then
+    os_type=systemd
+else
+    echo "未识别 OpenWrt 或 systemd 系统" >&2
+    exit 1
 fi
-export MP_OS_TYPE
 
 say_section "MyProxy 安装向导"
-printf '%s\n' "${C_B}目标系统${C_R}    $MP_OS_TYPE"
+printf '%s\n' "${C_B}目标系统${C_R}    $os_type"
 printf '%s\n' "${C_B}安装根目录${C_R}  $DIR_INST"
 say_dim "  脚本 → $DIR_SH    (含 sh/etc/ 服务文件副本)"
 say_dim "  core → $DIR_CORE"
@@ -82,6 +79,8 @@ fi
 
 # === 预加载已有 env.local.conf（提供重装场景的默认值） ===
 [ -f "$DIR_SH/env.local.conf" ] && . "$DIR_SH/env.local.conf"
+
+# 安装与日常更新共用一个外部代理变量；运行后仍首选本机 Core。
 
 # === 交互向导：能读 /dev/tty 就开问，否则跳过 ===
 HAVE_TTY=0
@@ -122,50 +121,47 @@ if [ "$HAVE_TTY" = "1" ]; then
         *)              cur_branch="$MP_REPO_RAW_URL" ;;
     esac
 
-    prompt_to in_branch "$cur_branch" "[1/7] 仓库分支或完整 URL" \
+    prompt_to in_branch "$cur_branch" "[1/9] 仓库分支或 GitHub Raw 根 URL" \
         "主分支:   main" \
         "指定分支: claude/update-readme-overview-pU5D3" \
-        "完整 URL: https://raw.githubusercontent.com/owner/repo/refs/heads/dev"
+        "GitHub Raw: https://raw.githubusercontent.com/owner/repo/refs/heads/dev"
     MP_REPO_RAW_URL=$(expand_branch "$in_branch")
 
-    # 代理选择：HTTP / SOCKS5 均由 curl --proxy 处理
-    # 持久化到 env.local.conf，影响后续 cron 跑 update-* 与 keeplive.sh
+    # 安装时是外部代理；安装完成后自然成为 Core 不可用时的后备代理。
     while :; do
         if [ -z "$cur_proxy_choice" ]; then
-            case "${MP_USE_PROXY:-0}:$MP_PROXY_HTTP" in
-                1:http://127.0.0.1:7890|true:http://127.0.0.1:7890|yes:http://127.0.0.1:7890) cur_proxy_choice=2 ;;
-                1:socks5h://127.0.0.1:1080|true:socks5h://127.0.0.1:1080|yes:socks5h://127.0.0.1:1080) cur_proxy_choice=3 ;;
-                1:*|true:*|yes:*) cur_proxy_choice=4 ;;
-                *) cur_proxy_choice=1 ;;
+            case "$MP_PROXY" in
+                socks5h://127.0.0.1:1080) cur_proxy_choice=2 ;;
+                '')                         cur_proxy_choice=1 ;;
+                *)                          cur_proxy_choice=3 ;;
             esac
         fi
-        prompt_to in_proxy "$cur_proxy_choice" "[2/7] 下载是否走代理？" \
-            "1) 直连（推荐；首次安装时核心还没起，代理多半不可用）" \
-            "2) HTTP:   http://127.0.0.1:7890" \
-            "3) SOCKS5: socks5h://127.0.0.1:1080（域名由代理解析）" \
-            "4) 自定义代理 URL"
+        prompt_to in_proxy "$cur_proxy_choice" "[2/9] 本次安装使用的代理" \
+            "1) 直连" \
+            "2) SSH SOCKS5: socks5h://127.0.0.1:1080" \
+            "3) 自定义代理 URL" \
+            "安装代理会保存为日常更新的后备代理"
         case "$in_proxy" in
-            1) MP_USE_PROXY=0; MP_PROXY_HTTP="http://127.0.0.1:7890"; break ;;
-            2) MP_USE_PROXY=1; MP_PROXY_HTTP="http://127.0.0.1:7890"; break ;;
-            3) MP_USE_PROXY=1; MP_PROXY_HTTP="socks5h://127.0.0.1:1080"; break ;;
-            4) prompt_to MP_PROXY_HTTP "${MP_PROXY_HTTP:-http://127.0.0.1:7890}" \
+            1) MP_PROXY=""; break ;;
+            2) MP_PROXY="socks5h://127.0.0.1:1080"; break ;;
+            3) prompt_to MP_PROXY "${MP_PROXY:-socks5h://127.0.0.1:1080}" \
                    "      自定义代理 URL（http://、https://、socks5:// 或 socks5h://）"
-               case "$MP_PROXY_HTTP" in
-                   http://*|https://*|socks5://*|socks5h://*) MP_USE_PROXY=1; break ;;
+               case "$MP_PROXY" in
+                   http://*|https://*|socks5://*|socks5h://*) break ;;
                    *) say_err "      不支持的代理 URL" ;;
                esac ;;
-            *) say_err "      请输入 1 / 2 / 3 / 4" ;;
+            *) say_err "      请输入 1 / 2 / 3" ;;
         esac
     done
-    export MP_USE_PROXY MP_PROXY_HTTP
+    export MP_PROXY
 
-    prompt_to MP_SUBSCRIBE_URL "$MP_SUBSCRIBE_URL" "[3/7] 节点订阅 URL / MP_SUBSCRIBE_URL"
-    prompt_to MP_AGH_USER_NAME "$MP_AGH_USER_NAME" "[4/7] AdGuardHome 管理员用户名 / MP_AGH_USER_NAME"
+    prompt_to MP_SUBSCRIBE_URL "$MP_SUBSCRIBE_URL" "[3/9] 节点订阅 URL / MP_SUBSCRIBE_URL"
+    prompt_to MP_AGH_USER_NAME "$MP_AGH_USER_NAME" "[4/9] AdGuardHome 管理员用户名 / MP_AGH_USER_NAME"
 
     # 密码：必须是 bcrypt 哈希（$2a$ / $2b$ / $2y$）；不合法循环重问
     while :; do
         prompt_to MP_AGH_PASSWORD "$MP_AGH_PASSWORD" \
-            "[5/7] AdGuardHome 管理员密码（bcrypt 哈希，\$2a\$/\$2y\$ 开头）" \
+            "[5/9] AdGuardHome 管理员密码（bcrypt 哈希，\$2a\$/\$2y\$ 开头）" \
             "生成: htpasswd -bnBC 10 '' '明文' | cut -d: -f2     # apache2-utils" \
             "      mkpasswd -m bcrypt-a '明文'                    # Debian: apt install whois" \
             "      python3 -c \"import bcrypt;print(bcrypt.hashpw(b'明文',bcrypt.gensalt(10)).decode())\""
@@ -177,7 +173,7 @@ if [ "$HAVE_TTY" = "1" ]; then
     done
 
     : "${MP_LOCAL_DNS:=223.5.5.5 119.29.29.29}"
-    prompt_to MP_LOCAL_DNS "$MP_LOCAL_DNS" "[6/7] AGH 上游 DNS / MP_LOCAL_DNS"
+    prompt_to MP_LOCAL_DNS "$MP_LOCAL_DNS" "[6/9] AGH 上游 DNS / MP_LOCAL_DNS"
 else
     # 非交互：env.local.conf 必须已具备必填项
     : "${MP_REPO_RAW_URL:=https://raw.githubusercontent.com/AfxMsgBox/MyRule/main}"
@@ -187,6 +183,7 @@ else
     [ -n "$MP_AGH_PASSWORD" ] || miss="$miss MP_AGH_PASSWORD"
     [ -z "$miss" ] || { echo "无 tty 且 env.local.conf 缺：$miss" >&2; exit 1; }
 fi
+export MP_PROXY
 
 # === 写 env.local.conf ===
 # upsert_conf <key> <value> <file>：已存在则替换，否则追加。
@@ -209,24 +206,33 @@ upsert_conf() {
 say_section "写入 env.local.conf"
 say_dim "$DIR_SH/env.local.conf"
 [ -f "$DIR_SH/env.local.conf" ] || : > "$DIR_SH/env.local.conf"
-# tty 路径多写代理选择两条；非 tty 路径走 env.conf 默认 / 调用方预设
-kv_keys="MP_INST_DIR MP_REPO_RAW_URL MP_SUBSCRIBE_URL MP_AGH_USER_NAME MP_AGH_PASSWORD MP_LOCAL_DNS"
-[ "$HAVE_TTY" = "1" ] && kv_keys="$kv_keys MP_USE_PROXY MP_PROXY_HTTP"
+kv_keys="MP_INST_DIR MP_REPO_RAW_URL MP_PROXY MP_SUBSCRIBE_URL MP_AGH_USER_NAME MP_AGH_PASSWORD MP_LOCAL_DNS"
 for kv_key in $kv_keys; do
     eval "kv_val=\$$kv_key"
-    [ "$kv_key" = "MP_INST_DIR" ] && kv_val="$DIR_INST"
+    case "$kv_key" in
+        MP_INST_DIR) kv_val="$DIR_INST" ;;
+    esac
     upsert_conf "$kv_key" "$kv_val" "$DIR_SH/env.local.conf"
 done
+chmod 0600 "$DIR_SH/env.local.conf"
 
 # === Bootstrap：先拿到 env.conf + common.sh，足以 source 后用 mp_fetch_repo_sh ===
 bootstrap_download() {
     _bd_url=$1; _bd_dst=$2; _bd_tmp="$_bd_dst.tmp"
-    case "$MP_USE_PROXY" in 1|true|yes) _bd_proxy="--proxy $MP_PROXY_HTTP" ;; *) _bd_proxy="" ;; esac
     while :; do
         rm -f "$_bd_tmp"
-        if curl --progress-bar --show-error --fail -L --connect-timeout 10 --max-time 300 \
-                $_bd_proxy "$_bd_url" -o "$_bd_tmp" \
-           && [ -s "$_bd_tmp" ]; then
+        _bd_ok=0
+        if [ -n "$MP_PROXY" ]; then
+            curl --progress-bar --show-error --fail -L --connect-timeout 10 --max-time 300 \
+                --proxy "$MP_PROXY" "$_bd_url" -o "$_bd_tmp" \
+                && [ -s "$_bd_tmp" ] && _bd_ok=1
+        fi
+        if [ "$_bd_ok" -eq 0 ]; then
+            curl --progress-bar --show-error --fail -L --connect-timeout 10 --max-time 300 \
+                --noproxy '*' "$_bd_url" -o "$_bd_tmp" \
+                && [ -s "$_bd_tmp" ] && _bd_ok=1
+        fi
+        if [ "$_bd_ok" -eq 1 ]; then
             mv "$_bd_tmp" "$_bd_dst"
             return 0
         fi
@@ -251,34 +257,35 @@ export MP_INST_DIR="$DIR_INST"            # 显式声明根（init.d/$0 不可�
 say_step "拉取仓库 sh/ 整树"
 mp_fetch_repo_sh "$DIR_SH" || { say_err "tarball 下载失败"; exit 1; }
 
-# === sh/etc 路径占位替换（先只 sed-patch，是否 cp 到 /etc 由后面 autostart 决定） ===
+# === sh/etc 路径占位替换（是否 cp 到 /etc 由后面 autostart 决定） ===
 etc_rels=$(mp_etc_rels)
 say_step "sh/etc 路径替换 /etc/proxy → $DIR_INST"
-for rel in $etc_rels; do
-    [ -f "$DIR_SH/etc/$rel" ] && sed -i "s|/etc/proxy|$DIR_INST|g" "$DIR_SH/etc/$rel"
-    mp_set_etc_mode "$DIR_SH/etc/$rel" 2>/dev/null || true
-done
+mp_sync_etc_files never || { say_err "处理 sh/etc 失败"; exit 1; }
+
+# === 先生成 Core 配置并预下载 providers ===
+# 后续脚本所需的代理端口、API、DNS、UI、TUN 和 fake-ip 均以该配置为准。
+say_section "生成 Core 配置"
+sh "$DIR_SH/update-core-config.sh" \
+    || { say_err "Core 配置或 provider 下载失败，停止安装"; exit 1; }
 
 # === 下载内核二进制（mihomo / AdGuardHome）===
+# metacubexd 的目标目录从上一步 config.yaml 的 external-ui 读取。
 say_section "下载内核二进制"
-sh "$DIR_SH/update-bin.sh" || say_warn "（二进制更新有失败项，详见上方日志）"
+sh "$DIR_SH/update-bin.sh" \
+    || { say_err "二进制或 UI 下载失败，停止安装"; exit 1; }
 
-# === 渲染 agh.yaml：拉模板 + mp_render_template ===
+# === 下载并渲染 agh.yaml，同时预下载其中的 filters ===
 say_section "渲染 AGH 配置"
 say_dim "$MP_AGH_DIR/agh.yaml"
-agh_tpl=$(mktemp)
-if download_file "$MP_URL_AGH_CONFIG" "$agh_tpl"; then
-    mp_render_template "$agh_tpl" "$MP_AGH_DIR/agh.yaml"
-    say_ok "agh.yaml 已生成"
-else
-    say_err "下载 agh.yaml 模板失败"
-fi
-rm -f "$agh_tpl"
+say_step "下载模板并预下载 AGH filters"
+mp_prepare_agh_config "$MP_AGH_DIR/agh.yaml" "$MP_CORE_DIR/config.yaml" \
+    || { say_err "AGH 配置或 filter 下载失败，停止安装"; exit 1; }
+say_ok "agh.yaml 已生成"
 
-# === 刷新 AGH dns.conf 与 core/config.yaml（不跑 update-proxy-rule.sh：mihomo 还没起）===
-say_section "刷新 AGH dns.conf 与 core/config.yaml"
-sh "$DIR_SH/update-agh-config.sh"  || say_warn "（AGH dns.conf 有失败项）"
-sh "$DIR_SH/update-core-config.sh" || say_warn "（core config.yaml 有失败项）"
+# === 生成 AGH dns.conf；Core DNS 地址从 config.yaml 读取 ===
+say_section "生成 AGH dns.conf"
+sh "$DIR_SH/update-agh-config.sh" \
+    || { say_err "AGH dns.conf 生成失败，停止安装"; exit 1; }
 
 # === [7/9] 自启动询问 ===
 # Y：把 $DIR_SH/etc 下文件复制到 /etc 对应位置并 enable+start
@@ -291,47 +298,48 @@ case "$autostart" in
     n|N|no|NO|No)
         say_section "已跳过自启动"
         say_dim "服务文件保留在 $DIR_SH/etc/；手动启用："
-        case "$MP_OS_TYPE" in
+        case "$os_type" in
             openwrt)
                 for rel in $etc_rels; do
                     say_dim "  cp $DIR_SH/etc/$rel  /etc/$rel  && chmod +x /etc/$rel"
                 done
                 say_dim "  service proxy_core enable && service proxy_core start"
+                say_dim "  # 确认 Core API 就绪后："
                 say_dim "  service agh enable && service agh start"
                 ;;
             systemd)
                 for rel in $etc_rels; do
                     say_dim "  cp $DIR_SH/etc/$rel  /etc/$rel"
                 done
-                say_dim "  systemctl daemon-reload && systemctl enable --now proxy_core.service agh.service"
+                say_dim "  systemctl daemon-reload && systemctl enable --now proxy_core.service"
+                say_dim "  # 确认 Core API 就绪后："
+                say_dim "  systemctl enable --now agh.service"
                 ;;
         esac
         ;;
     *)
         say_section "安装服务文件到 /etc 并启动"
-        for rel in $etc_rels; do
-            mkdir -p "/etc/$(dirname "$rel")"
-            cp "$DIR_SH/etc/$rel" "/etc/$rel"
-            mp_set_etc_mode "/etc/$rel" 2>/dev/null || true
-        done
-        [ "$MP_OS_TYPE" = "systemd" ] && systemctl daemon-reload
-        mp_service_op enable_start proxy_core agh
-
-        # mihomo API 起来后补跑订阅/规则集刷新；失败不影响安装结束
-        say_step "等待 mihomo API 就绪后刷新订阅与规则集"
-        sleep 3
-        sh "$DIR_SH/update-proxy-rule.sh" || say_warn "（订阅/规则集刷新失败，可稍后手动跑 update-proxy-rule.sh）"
+        mp_sync_etc_files always \
+            || { say_err "安装服务文件失败"; exit 1; }
+        mp_service_op enable_start proxy_core \
+            || { say_err "Core 服务启动失败，未启动 AGH"; exit 1; }
+        say_step "等待 Core API 就绪"
+        mp_wait_core_ready 30 \
+            || { say_err "Core 未就绪，未启动 AGH"; exit 1; }
+        mp_service_op enable_start agh \
+            || { say_err "AGH 服务启动失败"; exit 1; }
         ;;
 esac
 
 # === 定时更新：输入间隔天数，默认 3；输入 n 跳过 ===
-# 使用 root crontab，任务固定在凌晨 3 点执行；重复安装时按 marker 替换旧任务。
+# 使用 root crontab：脚本固定 03:00，配置固定 03:05；重复安装时按 marker 替换。
 install_cron_job() {
-    _cj_marker=$1; _cj_days=$2; _cj_script=$3
+    _cj_marker=$1; _cj_days=$2; _cj_script=$3; _cj_minute=$4
     _cj_tmp=$(mktemp) || return 1
     crontab -l > "$_cj_tmp" 2>/dev/null || :
     awk -v marker="$_cj_marker" 'index($0, marker) == 0 { print }' "$_cj_tmp" > "$_cj_tmp.new"
-    printf "0 3 */%s * * sh '%s' # %s\n" "$_cj_days" "$_cj_script" "$_cj_marker" >> "$_cj_tmp.new"
+    printf "%s 3 */%s * * sh '%s' # %s\n" \
+        "$_cj_minute" "$_cj_days" "$_cj_script" "$_cj_marker" >> "$_cj_tmp.new"
     if crontab "$_cj_tmp.new"; then
         rm -f "$_cj_tmp" "$_cj_tmp.new"
         return 0
@@ -365,26 +373,37 @@ if [ "$HAVE_TTY" = "1" ]; then
     if ! command -v crontab >/dev/null 2>&1; then
         say_warn "系统未安装 crontab，跳过定时任务设置"
     else
-        if prompt_cron_days cron_config_days "[8/9] 定时更新配置文件的间隔天数"; then
+        cron_changed=0
+        if prompt_cron_days cron_script_days "[8/9] 定时更新脚本的间隔天数"; then
+            if install_cron_job "MyProxy:update-scripts" "$cron_script_days" \
+                    "$DIR_SH/update-scripts.sh" 0; then
+                say_ok "脚本：每 $cron_script_days 天 03:00 更新"
+                cron_changed=1
+            else
+                say_warn "脚本定时任务写入失败"
+            fi
+        else
+            say_dim "已跳过脚本定时更新"
+        fi
+
+        if prompt_cron_days cron_config_days "[9/9] 定时更新配置文件的间隔天数"; then
             if install_cron_job "MyProxy:update-configs" "$cron_config_days" \
-                    "$DIR_SH/update-all-configs-restart-services.sh"; then
-                say_ok "配置文件：每 $cron_config_days 天凌晨 3 点更新并重启服务"
+                    "$DIR_SH/update-all-configs-restart-services.sh" 5; then
+                say_ok "配置文件：每 $cron_config_days 天 03:05 更新并重启服务"
+                cron_changed=1
             else
                 say_warn "配置文件定时任务写入失败"
             fi
         else
             say_dim "已跳过配置文件定时更新"
         fi
-
-        if prompt_cron_days cron_script_days "[9/9] 定时更新脚本的间隔天数"; then
-            if install_cron_job "MyProxy:update-scripts" "$cron_script_days" \
-                    "$DIR_SH/update-scripts.sh"; then
-                say_ok "脚本：每 $cron_script_days 天凌晨 3 点更新"
+        if [ "$cron_changed" -eq 1 ] && [ "$os_type" = openwrt ]; then
+            if /etc/init.d/cron enable >/dev/null 2>&1 \
+               && /etc/init.d/cron restart >/dev/null 2>&1; then
+                say_ok "OpenWrt cron 服务已启用并重启"
             else
-                say_warn "脚本定时任务写入失败"
+                say_warn "定时任务已写入，但 OpenWrt cron 服务启用或重启失败"
             fi
-        else
-            say_dim "已跳过脚本定时更新"
         fi
     fi
 fi
@@ -392,11 +411,11 @@ fi
 say_section "安装完成"
 printf '%s  %s\n' "${C_B}安装目录${C_R}" "$DIR_INST"
 printf '%s  %s%s%s   用户名 %s\n' "${C_B}AGH Web ${C_R}" "${C_CYN}" "http://<本机IP>:180" "${C_R}" "$MP_AGH_USER_NAME"
-case "$MP_OS_TYPE" in
+case "$os_type" in
     openwrt) printf '%s  %slogread -e MyProxy -f%s\n' "${C_B}日志    ${C_R}" "${C_D}" "${C_R}" ;;
     systemd) printf '%s  %sjournalctl -t MyProxy -f%s\n' "${C_B}日志    ${C_R}" "${C_D}" "${C_R}" ;;
 esac
 printf '\n%s\n' "${C_B}以后刷新${C_R}"
 say_dim "  脚本:   sh $DIR_SH/update-scripts.sh"
-say_dim "  配置:   sh $DIR_SH/update-all-configs.sh   # 或单独跑 update-{agh,core,proxy-rule}-config.sh"
+say_dim "  配置:   sh $DIR_SH/update-all-configs.sh   # 或单独跑 update-agh-config.sh / update-core-config.sh / update-proxy-rule.sh"
 say_dim "  二进制: sh $DIR_SH/update-bin.sh"

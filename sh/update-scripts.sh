@@ -23,22 +23,7 @@ fi
 
 # === 阶段 2：新版本已 exec 起来，做 sh/etc 路径替换与 /etc 同步 ===
 echo_log "============ patch sh/etc & sync /etc ============"
-mp_detect_os || { echo_log "未识别 OS，跳过 sh/etc 处理"; exit 0; }
-
-systemd_changed=0
-for rel in $(mp_etc_rels); do
-    local_path="$dir_sh/etc/$rel"
-    [ -f "$local_path" ] || { echo_log "$rel 不在 tarball 里？跳过"; continue; }
-    sed -i "s|/etc/proxy|$MP_INST_DIR|g" "$local_path"
-    mp_set_etc_mode "$local_path" 2>/dev/null || true
-    # per-file 判断：用户当初没选自启动 → /etc 下没文件 → 跳过（绝不创建）
-    if [ -e "/etc/$rel" ]; then
-        cp "$local_path" "/etc/$rel" && mp_set_etc_mode "/etc/$rel" 2>/dev/null
-        echo_log "同步 /etc/$rel"
-        [ "$MP_OS_TYPE" = "systemd" ] && systemd_changed=1
-    fi
-done
-
-[ "$systemd_changed" = "1" ] && systemctl daemon-reload
+mp_sync_etc_files if-exists \
+    || { echo_log "sh/etc 处理或同步失败"; exit 1; }
 
 echo_log "============ done ============"

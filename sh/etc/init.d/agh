@@ -4,7 +4,9 @@ START=99
 STOP=1
 USE_PROCD=1
 
-. /etc/proxy/sh/env.conf
+MP_INST_DIR=/etc/proxy
+export MP_INST_DIR
+. "$MP_INST_DIR/sh/env.conf"
 
 start_service() {
     procd_open_instance

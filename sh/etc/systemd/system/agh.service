@@ -4,15 +4,16 @@ Description=AdGuardHome (MyProxy 部署)
 Documentation=https://github.com/AfxMsgBox/MyRule
 # 等本机网络与代理内核就绪后再启动
 Wants=network-online.target
+Requires=proxy_core.service
 After=network-online.target proxy_core.service
-# 与 procd respawn 3600 5 5 等价
-StartLimitIntervalSec=3600
-StartLimitBurst=5
+# 关闭启动限流，理由同 proxy_core.service：systemd 的 StartLimit 把人工 restart
+# 也算进配额，调试时会把服务锁死。必须显式写 0，删掉本行会退回全局默认 10s/5 次。
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 # 用 sh -c 引导以便 source env.conf 与可选的 env.local.conf
-ExecStart=/bin/sh -c '. /etc/proxy/sh/env.conf; exec "$MP_AGH_DIR/AdGuardHome" -c "$MP_AGH_DIR/agh.yaml" -w "$MP_AGH_DIR" --no-check-update'
+ExecStart=/bin/sh -c 'MP_INST_DIR=/etc/proxy; export MP_INST_DIR; . "$MP_INST_DIR/sh/env.conf"; exec "$MP_AGH_DIR/AdGuardHome" -c "$MP_AGH_DIR/agh.yaml" -w "$MP_AGH_DIR" --no-check-update'
 
 # 进程崩溃自动重启
 Restart=on-failure
