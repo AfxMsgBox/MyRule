@@ -78,7 +78,11 @@ else
 fi
 
 # === 预加载已有 env.local.conf（提供重装场景的默认值） ===
+# 调用方显式传入的 MP_* 仍优先于旧本机配置，与 env.conf 的优先级保持一致。
+inst_env_override=$(export -p 2>/dev/null | grep -E ' MP_[A-Za-z0-9_]+=' || true)
 [ -f "$DIR_SH/env.local.conf" ] && . "$DIR_SH/env.local.conf"
+[ -n "$inst_env_override" ] && eval "$inst_env_override"
+unset inst_env_override
 
 # 安装与日常更新共用一个外部代理变量；运行后仍首选本机 Core。
 
@@ -129,29 +133,39 @@ if [ "$HAVE_TTY" = "1" ]; then
 
     # 安装时是外部代理；安装完成后自然成为 Core 不可用时的后备代理。
     while :; do
-        if [ -z "$cur_proxy_choice" ]; then
-            case "$MP_PROXY" in
-                socks5h://127.0.0.1:1080) cur_proxy_choice=2 ;;
-                '')                         cur_proxy_choice=1 ;;
-                *)                          cur_proxy_choice=3 ;;
+        if [ -n "$MP_PROXY" ]; then
+            prompt_to in_proxy "2" "[2/9] 本次安装使用的代理" \
+                "1) 直连" \
+                "2) 使用现有代理: $MP_PROXY" \
+                "3) 修改代理 URL" \
+                "安装代理会保存为日常更新的后备代理"
+            case "$in_proxy" in
+                1) MP_PROXY=""; break ;;
+                2) break ;;
+                3) prompt_to in_proxy_url "$MP_PROXY" \
+                       "      代理 URL（http://、https://、socks5:// 或 socks5h://）"
+                   case "$in_proxy_url" in
+                       http://*|https://*|socks5://*|socks5h://*) MP_PROXY=$in_proxy_url; break ;;
+                       *) say_err "      不支持的代理 URL" ;;
+                   esac ;;
+                *) say_err "      请输入 1 / 2 / 3" ;;
+            esac
+        else
+            prompt_to in_proxy "1" "[2/9] 本次安装使用的代理" \
+                "1) 直连" \
+                "2) 手工输入代理 URL" \
+                "安装代理会保存为日常更新的后备代理"
+            case "$in_proxy" in
+                1) break ;;
+                2) prompt_to in_proxy_url "socks5h://127.0.0.1:1080" \
+                       "      代理 URL（http://、https://、socks5:// 或 socks5h://）"
+                   case "$in_proxy_url" in
+                       http://*|https://*|socks5://*|socks5h://*) MP_PROXY=$in_proxy_url; break ;;
+                       *) say_err "      不支持的代理 URL" ;;
+                   esac ;;
+                *) say_err "      请输入 1 / 2" ;;
             esac
         fi
-        prompt_to in_proxy "$cur_proxy_choice" "[2/9] 本次安装使用的代理" \
-            "1) 直连" \
-            "2) SSH SOCKS5: socks5h://127.0.0.1:1080" \
-            "3) 自定义代理 URL" \
-            "安装代理会保存为日常更新的后备代理"
-        case "$in_proxy" in
-            1) MP_PROXY=""; break ;;
-            2) MP_PROXY="socks5h://127.0.0.1:1080"; break ;;
-            3) prompt_to MP_PROXY "${MP_PROXY:-socks5h://127.0.0.1:1080}" \
-                   "      自定义代理 URL（http://、https://、socks5:// 或 socks5h://）"
-               case "$MP_PROXY" in
-                   http://*|https://*|socks5://*|socks5h://*) break ;;
-                   *) say_err "      不支持的代理 URL" ;;
-               esac ;;
-            *) say_err "      请输入 1 / 2 / 3" ;;
-        esac
     done
     export MP_PROXY
 
@@ -311,9 +325,13 @@ case "$autostart" in
                 for rel in $etc_rels; do
                     say_dim "  cp $DIR_SH/etc/$rel  /etc/$rel"
                 done
-                say_dim "  systemctl daemon-reload && systemctl enable --now proxy_core.service"
+                say_dim "  systemctl daemon-reload"
+                say_dim "  mkdir -p /etc/systemd/system/multi-user.target.wants"
+                say_dim "  ln -sf /etc/systemd/system/proxy_core.service /etc/systemd/system/multi-user.target.wants/proxy_core.service"
+                say_dim "  ln -sf /etc/systemd/system/agh.service /etc/systemd/system/multi-user.target.wants/agh.service"
+                say_dim "  systemctl start proxy_core.service"
                 say_dim "  # 确认 Core API 就绪后："
-                say_dim "  systemctl enable --now agh.service"
+                say_dim "  systemctl start agh.service"
                 ;;
         esac
         ;;

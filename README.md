@@ -56,7 +56,9 @@ curl --fail --location --progress-bar --proxy "$MP_PROXY" \
     "$MP_REPO_RAW_URL/sh/inst.sh" | sh -s -- /etc/proxy
 ```
 
-inst.sh 自动识别 OpenWrt / systemd 并分发对应服务文件。安装时，`MP_PROXY` 就是外部安装代理；Core 尚未可用时会自动落到该代理，再失败则试直连。全部文件就绪后，安装器先启动 Core，等待配置中的 API 可用，再启动 AGH。
+inst.sh 自动识别 OpenWrt / systemd 并分发对应服务文件。第 2 步会先读取已有 `MP_PROXY`：未设置时只提供直连或手工输入；已设置时默认直接使用现有代理，也可改为直连或修改 URL。安装时，`MP_PROXY` 就是外部安装代理；Core 尚未可用时会自动落到该代理，再失败则试直连。全部文件就绪后，安装器先启动 Core，等待配置中的 API 可用，再启动 AGH。
+
+在 systemd 系统上，安装器直接为原生 unit 建立 `multi-user.target.wants` 链接后启动服务，不调用 `systemctl enable`。这样即使系统残留同名 `/etc/init.d/agh`，也不会触发 Debian 的 SysV 兼容同步并导致启用失败。
 
 日常下载的回退顺序为：`core/config.yaml` 派生的本机 Core 代理 → `MP_PROXY` 外部代理 → 强制直连。整批更新期间，正式 `core/config.yaml` 保持不变，新配置只写入 pending 文件，因此所有下载始终能使用正在运行的旧 Core 代理；如果任一必需下载失败，会丢弃 Core/AGH pending 配置并跳过重启。
 

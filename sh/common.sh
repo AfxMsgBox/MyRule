@@ -260,7 +260,17 @@ mp_service_op() {
             openwrt-enable_start) service "$_svc" enable && service "$_svc" start ;;
             openwrt-restart)      service "$_svc" restart ;;
             openwrt-stop)         service "$_svc" stop ;;
-            systemd-enable_start) systemctl enable --now "$_svc.service" ;;
+            systemd-enable_start)
+                # systemctl enable 会在 /etc/init.d 存在同名脚本时强制同步 SysV，
+                # 即使原生 unit 已安装也可能因旧脚本头不完整而失败。直接按 unit
+                # 的 WantedBy 建立链接，再启动原生服务，避开 SysV 兼容层。
+                _mso_unit="/etc/systemd/system/$_svc.service"
+                _mso_wants="/etc/systemd/system/multi-user.target.wants"
+                [ -f "$_mso_unit" ] \
+                    && mkdir -p "$_mso_wants" \
+                    && ln -sf "$_mso_unit" "$_mso_wants/$_svc.service" \
+                    && systemctl start "$_svc.service"
+                ;;
             systemd-restart)      systemctl restart "$_svc.service" ;;
             systemd-stop)         systemctl stop "$_svc.service" ;;
             *) echo_log "未支持的操作 $_mso_os-$_op"; return 1 ;;
