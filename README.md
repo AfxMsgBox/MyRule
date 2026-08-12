@@ -50,10 +50,9 @@ wget -O- "$MP_REPO_RAW_URL/sh/inst.sh" | sh -s -- /etc/proxy
 
 # 通过 SSH SOCKS5 / 其它代理安装；HTTP 代理同样适用
 # 同一个外部代理同时用于安装和以后的后备下载
-export MP_REPO_RAW_URL=https://raw.githubusercontent.com/AfxMsgBox/MyRule/main
-export MP_PROXY=socks5h://127.0.0.1:7890
-curl --fail --location --progress-bar --proxy "$MP_PROXY" \
-    "$MP_REPO_RAW_URL/sh/inst.sh" | sh -s -- /etc/proxy
+export MP_REPO_RAW_URL=https://raw.githubusercontent.com/AfxMsgBox/MyRule/refs/heads/claude/update-readme-overview-pU5D3
+export MP_PROXY=socks5h://192.168.2.250:7890
+curl --fail --location --progress-bar --proxy "$MP_PROXY" "$MP_REPO_RAW_URL/sh/inst.sh" | sh -s -- /etc/proxy
 ```
 
 inst.sh 自动识别 OpenWrt / systemd 并分发对应服务文件。第 2 步会先读取已有 `MP_PROXY`：未设置时只提供直连或手工输入；已设置时默认直接使用现有代理，也可改为直连或修改 URL。安装时，`MP_PROXY` 就是外部安装代理；Core 尚未可用时会自动落到该代理，再失败则试直连。全部文件就绪后，安装器先启动 Core，等待配置中的 API 可用，再启动 AGH。
