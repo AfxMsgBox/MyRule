@@ -32,6 +32,8 @@
 
 安装阶段会先渲染 `core/config.yaml`，再解析其 `proxy-providers` / `rule-providers` 的 `type`、`url` 和 `path`，把 Mihomo 首次启动所需的订阅与规则集全部预下载。随后按 `uname -m` 下载最新版 Mihomo、AdGuardHome 及 Web UI。最后渲染 `agh.yaml`，并把 `filters` 与 `whitelist_filters` 预下载到 `agh/data/filters/<id>.txt`。上述必需文件有任何一项失败，安装器都不会启动服务。
 
+安装器还会开启 `net.ipv4.ip_forward`：systemd 系统持久化到较晚加载的 `/etc/sysctl.d/99-zz-myproxy.conf`，OpenWrt 持久化到 `/etc/sysctl.conf`，并读取 `/proc/sys/net/ipv4/ip_forward` 验证是否已经即时生效。LXC 等受限环境无法修改内核参数时会明确警告，但不会中断安装，需要在宿主机侧放行。
+
 ### 一键安装
 
 ```sh
