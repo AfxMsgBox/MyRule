@@ -104,6 +104,8 @@ AGH 运行时可能回写 `agh.yaml`，但仓库模板仍是权威来源。完�
 
 `MP_CORE_DIR` 与 `MP_AGH_DIR` 只能由 `MP_INST_DIR` 派生，不能独立持久化，否则会与服务文件和运行目录失配。
 
+`sh/.install-state/forward/` 保存本次安装周期的转发恢复凭据，`sh/.schedule/` 保存调度状态，`core/.fake-ip-route` 保存路由归属记录；均不入库。仓库脚本同步明确排除来源中的 `env.local.conf`、`.install-state/`、`.schedule/`，防止复制另一台设备的状态。
+
 ### 3.2 Core 配置是运行参数的唯一基础
 
 外围脚本不得另设全局变量或隐藏默认值来复制以下 Core 字段：
@@ -177,7 +179,7 @@ curl 的首个参数为 `--disable`，避免读取用户配置。代理通道使
 来源通过仅在安装进程及子进程中导出的 `_MP_SOURCE_DIR` 传递，参数解析时清空旧环境值，不持久化。`MP_REPO_RAW_URL` 仍由 `MP_REPO_BRANCH` 派生为在线地址，确保渲染后的 provider URL 及以后独立执行的更新脚本继续在线更新。
 
 - `inst_bootstrap_file`：本地模式直接原子复制 `sh/env.conf`、`sh/common.sh`，在线模式使用原有 bootstrap 下载。
-- `mp_fetch_repo_sh`：本地模式跳过 codeload，枚举本地 `sh/`，复用逐文件原子同步；两种来源都排除 `env.local.conf`。
+- `mp_fetch_repo_sh`：本地模式跳过 codeload，枚举本地 `sh/`，复用逐文件原子同步；两种来源都排除 `env.local.conf`、`.install-state/`、`.schedule/`。
 - `download_file`：仅当本地来源非空且 URL 以当前 `MP_REPO_RAW_URL/` 开头时，映射为本地仓库相对路径，调用 `mp_copy_repo_file`。检查路径边界、可读性及大小，复制后原子替换；失败直接返回，不混入远端版本。
 - 其它 URL，包括外部 GFW/TLD 规则、订阅、过滤器、二进制及 UI，仍使用 Core → 外部代理 → 直连。本地来源不是离线安装，不跳过 curl/jq 检查。
 
@@ -276,6 +278,8 @@ bootstrap 从所选来源获取 env.conf/common.sh
 AGH 依赖 Core，因为部分域名上游指向 Core DNS，且 AGH 自身的 `http_proxy` 从 Core 配置生成。
 
 安装器还会开启 `net.ipv4.ip_forward`：systemd 系统持久化到较晚加载的 `/etc/sysctl.d/99-zz-myproxy.conf`，OpenWrt 持久化到 `/etc/sysctl.conf`，并读取 `/proc/sys/net/ipv4/ip_forward` 验证是否已经即时生效。LXC 等受限环境无法修改内核参数时会明确警告，但不会中断安装，需要在宿主机侧放行。
+
+首次改动转发设置前，`inst_record_forward_state` 在 `sh/.install-state/forward/` 原子保存安装目录、平台、配置文件原有/不存在标记、原文件快照、预计安装后的快照及运行值。目录权限为 700；状态不通过 source 执行。保存失败停止安装，重装沿用首次记录；已完成卸载的 `restored` 标记允许下次安装重新采集原值。已有旧配置但缺少记录时不把重装时的值冒充最初原值，提示无法自动恢复旧改动。
 
 ### 5.1 系统依赖自举
 
@@ -454,6 +458,8 @@ README 的接入示例限定为上述 IPv4 拓扑；跨网段、容器 NAT 或�
 
 在 TUN 已存在时，它会删除 Mihomo 可能产生的错误 `<base>/30` 路由，再把完整 fake-ip CIDR 路由到 TUN。
 
+成功后将 CIDR、TUN 名称、内核 ifindex 和 boot_id 原子写入 `core/.fake-ip-route`，供卸载识别归属。状态位于 Core 可写目录中。无法读取接口身份时记录日志，卸载依靠 TUN 销毁自动移除路由，不猜测同名接口归属。
+
 旧 `/30` 路由不存在可忽略，但完整网段路由设置失败会记录错误并返回非零。现有服务触发器如何处理退出码保持不变。
 
 触发方式：
@@ -487,22 +493,23 @@ README 的接入示例限定为上述 IPv4 拓扑；跨网段、容器 NAT 或�
 
 ### 9.3 卸载流程
 
-`uninstall.sh` 独立于 common.sh/env.conf，不加载或执行本机配置，不联网。默认目录为 `/etc/proxy`；支持 `--install-dir DIR`（或等号形式）、`--purge`、`--yes`、`--help`。除单独帮助外要求 root；默认终端确认，回车取消，自动化必须显式传 `--yes`。不继承 MP_INST_DIR，以命令行目标为准。
+`uninstall.sh` 独立于 common.sh/env.conf，不加载或执行本机配置，不联网。默认目录为 `/etc/proxy`；支持 `--install-dir DIR`（或等号形式）、`--purge`、`--yes`、`--help`。除单独帮助外要求 root。无参数时先询问是否删除安装文件，回车默认保留，再展示范围并确认卸载，最终确认回车取消。带参数时保留原语义：仅 `--purge` 要求删除，`--yes` 跳过终端确认。无终端且未指定 `--yes` 时拒绝执行。不继承 MP_INST_DIR，以命令行目标为准。
 
 执行顺序：
 
 1. 检查目标路径；purge 额外检查安装凭据、三个子目录的符号链接和 `/proc/self/mountinfo` 中的挂载点。
 2. 预检 systemd、init.d、hotplug 和自启动链接归属。unit 要求项目 Documentation 及 ExecStart 中的精确安装路径；init.d 要求 MP_INST_DIR、env.conf 加载及 procd 标记；hotplug 要求目标脚本路径。systemd 另检查实际 FragmentPath、LoadState、DropInPaths，避免停止被其它 unit 或覆盖配置接管的服务。冲突时整体中止，不修改 cron 或服务。
-3. 读取 root crontab，生成仅剔除目标安装器任务的新版本。注释、其它安装路径及手工任务保留；读取失败中止，不能将错误当作空 crontab。交互确认后重新检查归属和 crontab。
-4. 提交 cron 清理，按 AGH → Core 顺序停止服务；检查 `/proc/*/exe` 是否仍指向目标二进制（包括已删除但运行中的旧文件），有残留则保留文件和数据并失败。
+3. 读取 root crontab，生成仅剔除目标安装器任务的新版本。注释、其它安装路径及手工任务保留；读取失败中止，不能将错误当作空 crontab。有转发恢复记录时校验其目录、平台、格式及当前文件是否等于安装前/后快照；配置被另外修改时整体中止。交互确认后重新检查归属、crontab、转发快照及 purge 边界。
+4. 提交 cron 清理，按 AGH → Core 顺序停止服务；检查 `/proc/*/exe` 是否仍指向目标二进制（包括已删除但运行中的旧文件），有残留则保留文件和数据并失败。读取路由记录，仅在同一 boot_id、TUN 的 ifindex 仍一致、路由仍为记录的 CIDR 与设备且没有 via 网关时清理残留；接口不存在表示内核已随接口销毁清理，跨启动周期或同名接口重建则保留其路由。无记录时不猜测路由归属。
 5. OpenWrt 禁用服务；移除已核对的自启动链接、服务文件和 hotplug。systemd 直接删除启用链接再 daemon-reload，避免 systemctl disable 触发旧 SysV 兼容同步。
-6. 默认保留数据。显式 purge 在重查路径及进程后仅删除目标的 core/、agh/、sh/；安装根目录及其它文件保留。清理顺序将 sh/ 放最后，整个卸载流程位于函数中，支持删除当前执行的脚本。
+6. 有恢复凭据时恢复安装前的转发配置文件，原文件不存在则删除安装器新增文件；运行值仅在仍为安装器设置的 1 且原值为 0 时恢复为 0。成功后写入 `restored` 标记，重复卸载不重放恢复操作。失败保留记录和数据供重试；旧安装没有记录时提示并保留转发设置。
+7. 默认保留数据。显式 purge 或无参数交互选择删除时，在重查路径及进程后仅删除目标的 core/、agh/、sh/；安装根目录及其它文件保留。清理顺序将 sh/ 放最后，整个卸载流程位于函数中，支持删除当前执行的脚本。
 
 `env.local.conf` 仅作为安装凭据以文本匹配 MP_INST_DIR，不执行其中内容。服务命令失败、链接/文件删除失败、daemon-reload 失败都返回非零，后续数据清理不执行；流程不承诺回滚已经移除的 cron 或停止的服务。
 
-IPv4 转发及持久化 sysctl 设置不变，因为安装器未保存旧值。卸载不新增全局路由清理或关闭转发，不停止 cron 服务，不清理用户手工任务和系统日志；不与安装/更新并发执行。平台开机就绪机制保持原样。
+卸载只撤销有归属依据的安装器改动，不调用 apk/opkg/apt，不移除软件包、不停止系统 cron，不清理用户手工任务、系统日志、主路由静态路由或防火墙。安装前已启用的转发保持启用；旧安装的未记录原值无法追溯。安装后共享 sysctl 文件发生变化时不能用完整快照覆盖，必须先人工核对。不与安装/更新并发执行，平台开机就绪机制保持原样。
 
-安装器本地来源检查包含 uninstall.sh，在线及本地 sh/ 同步会一起部署卸载脚本。测试只在临时脚本副本替换固定 /etc、/proc 根路径，用模拟服务管理器和 crontab 检查行为；生产脚本不提供系统根目录环境覆盖选项。
+安装器本地来源检查包含 uninstall.sh，在线及本地 sh/ 同步会一起部署卸载脚本。测试只在临时脚本副本替换固定 /etc、/proc、/sys 根路径，用模拟服务管理器、crontab、sysctl 和 ip 检查行为；生产脚本不提供系统根目录环境覆盖选项。
 
 ## 10. 修改时必须保持的约束
 
@@ -515,7 +522,7 @@ IPv4 转发及持久化 sysctl 设置不变，因为安装器未保存旧值。�
 7. 新配置必须先写临时或 pending 文件，验证并完成依赖下载后再原子替换。
 8. AGH 模板完整更新会覆盖运行期修改，不能假定 Web UI 状态是权威来源。
 9. provider、filter、UI 等配置派生路径必须限制在对应工作目录内。
-10. 不持久化可即时探测的信息，例如 OS 类型或 CPU 架构。
+10. 不将 OS 类型或 CPU 架构持久化为运行配置；卸载恢复凭据可记录当时的平台以校验快照归属。
 11. 服务文件路径仍以 `/etc/proxy` 为模板占位时，必须继续经过 `mp_sync_etc_files` 替换。
 12. 保持 POSIX `sh` 兼容；公共函数中的变量需使用函数专属前缀，避免无 `local` 环境下污染调用方。
 

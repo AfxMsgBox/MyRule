@@ -29,6 +29,21 @@ if ip link show "$tun_device" >/dev/null 2>&1; then
         logger -t MyProxy "fake-ip 路由设置失败：$fake_ip_cidr -> $tun_device"
         exit 1
     fi
+    # 记录本项目实际创建的路由及接口身份，卸载时只清理仍匹配的路由。
+    route_index=$(cat "/sys/class/net/$tun_device/ifindex" 2>/dev/null) || route_index=
+    route_boot=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null) || route_boot=
+    case "$route_boot" in ''|*[!a-f0-9-]*) route_index= ;; esac
+    case "$route_index" in ''|*[!0-9]*)
+        logger -t MyProxy '无法记录 TUN 接口身份；卸载将依靠接口销毁清理路由' ;;
+        *)
+            route_record=$(mktemp "$MP_CORE_DIR/.route.XXXXXX") || exit 1
+            if ! printf '%s %s %s %s\n' "$fake_ip_cidr" "$tun_device" "$route_index" "$route_boot" > "$route_record" \
+                || ! mv "$route_record" "$MP_CORE_DIR/.fake-ip-route"; then
+                rm -f "$route_record"
+                logger -t MyProxy '保存路由卸载记录失败'
+                exit 1
+            fi ;;
+    esac
     logger -t MyProxy "fake-ip 路由 $fake_ip_cidr -> $tun_device"
     exit 0
 fi

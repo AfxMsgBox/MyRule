@@ -118,11 +118,18 @@ test "$_MP_SOURCE_DIR" = "$TEST_SOURCE" && test "$MP_REPO_BRANCH" = feature/loca
     def test_local_script_sync_preserves_private_config(self):
         source = self.local_source()
         (source / "sh/env.local.conf").write_text("PRIVATE='source-secret'\n")
+        for directory in (".install-state/forward", ".schedule"):
+            (source / "sh" / directory).mkdir(parents=True, exist_ok=True)
+            (source / "sh" / directory / "private-state").write_text("other-host-state\n")
         self.file("sh/env.local.conf", "CUSTOM='installed'\n")
+        own_state = self.file("sh/.install-state/forward/owner", "this-host\n")
         result = self.run_shell('mp_fetch_repo_sh "$MP_INST_DIR/sh"', extra={"_MP_SOURCE_DIR": str(source)})
         self.assert_ok(result)
         self.assertEqual((self.root / "sh/env.local.conf").read_text(), "CUSTOM='installed'\n")
         self.assertEqual((self.root / "sh/inst.sh").read_bytes(), (source / "sh/inst.sh").read_bytes())
+        self.assertEqual(own_state.read_text(), "this-host\n")
+        self.assertFalse((self.root / "sh/.install-state/forward/private-state").exists())
+        self.assertFalse((self.root / "sh/.schedule/private-state").exists())
 
     def test_local_install_end_to_end_with_external_downloads(self):
         source = self.local_source()

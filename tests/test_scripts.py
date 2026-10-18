@@ -259,6 +259,11 @@ printf '%s' "$TEST_VALUE"
 
     def test_route_failure_and_missing_old_route(self):
         self.file("core/config.yaml", (ROOT / "core/config.yaml").read_text())
+        self.file("sys/class/net/utun/ifindex", "7\n")
+        self.file("proc/sys/kernel/random/boot_id", "11111111-1111-1111-1111-111111111111\n")
+        script = self.root / "sh/setup-fake-ip-route.sh"
+        script.write_text(script.read_text().replace("/sys/class/net/", str(self.root / "sys/class/net") + "/")
+                          .replace("/proc/sys/kernel/random/boot_id", str(self.root / "proc/sys/kernel/random/boot_id")))
         self.command("ip", 'case "$1 $2" in "link show") exit 0;; "route del") exit 1;; '
                            '"route replace") exit "$TEST_ROUTE_RC";; esac\n')
         for status in ("0", "1"):
@@ -266,6 +271,8 @@ printf '%s' "$TEST_VALUE"
                 result = self.run_shell('sh "$MP_INST_DIR/sh/setup-fake-ip-route.sh"',
                                         extra={"TEST_ROUTE_RC": status})
                 self.assertEqual(result.returncode, int(status), result.stderr)
+                self.assertEqual((self.root / "core/.fake-ip-route").read_text(),
+                                 "198.18.0.0/16 utun 7 11111111-1111-1111-1111-111111111111\n")
 
     def run_install_flow(self, *, reinstall, answer="Y", fail_download=False):
         self.configure_downloads()

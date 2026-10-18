@@ -515,7 +515,7 @@ mp_fetch_repo_sh() {
     while IFS= read -r _mfr_file; do
         _mfr_rel=${_mfr_file#"$_mfr_src"/}
         # 手工下载或 git 工作目录可能带有本机私有配置，不能覆盖本次安装参数。
-        [ "$_mfr_rel" != env.local.conf ] || continue
+        case "$_mfr_rel" in env.local.conf|.install-state/*|.schedule/*) continue ;; esac
         _mfr_target="$_mfr_dst/$_mfr_rel"
         _mfr_target_dir=$(dirname "$_mfr_target")
         mkdir -p "$_mfr_target_dir" || { _mfr_failed=1; break; }

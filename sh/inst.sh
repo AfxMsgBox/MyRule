@@ -482,6 +482,58 @@ inst_collect_inputs() {
     return 0
 }
 
+# 在改动系统前保存恢复凭据；重装保留首次快照，绝不 source 状态文件。
+inst_record_forward_state() {
+    _irf_root="$DIR_SH/.install-state"
+    _irf_state="$_irf_root/forward"
+    [ ! -L "$_irf_root" ] && [ ! -L "$_irf_state" ] \
+        || { say_err '转发恢复记录不能是符号链接'; return 1; }
+    if [ -d "$_irf_state" ]; then
+        [ "$(cat "$_irf_state/owner" 2>/dev/null)" = "$DIR_INST" ] \
+            && [ "$(cat "$_irf_state/platform" 2>/dev/null)" = "$os_type" ] \
+            && [ -f "$_irf_state/before" ] && [ -f "$_irf_state/after" ] \
+            || { say_err '转发恢复记录不完整或不属于本次安装'; return 1; }
+        [ -f "$_irf_state/restored" ] || return 0
+        rm -rf -- "$_irf_state" || return 1
+        _irf_restored=1
+    else
+        _irf_restored=0
+    fi
+    if [ "$_irf_restored" -ne 1 ] && { [ "$reinstall" -eq 1 ] || [ -e "$DIR_SH/env.local.conf" ]; }; then
+        say_warn '旧安装没有转发原值记录；卸载时将保留无法确认的设置'
+        return 0
+    fi
+    [ ! -L "$sysctl_conf" ] && { [ ! -e "$sysctl_conf" ] || [ -f "$sysctl_conf" ]; } \
+        || { say_err '无法记录转发配置：目标不是普通文件'; return 1; }
+    mkdir -p "$_irf_root" && chmod 700 "$_irf_root" || return 1
+    _irf_tmp=$(mktemp -d "$_irf_root/.forward.XXXXXX") || return 1
+    (
+        umask 077
+        printf '%s\n' "$DIR_INST" > "$_irf_tmp/owner" &&
+        printf '%s\n' "$os_type" > "$_irf_tmp/platform" || exit 1
+        if [ -f "$sysctl_conf" ]; then
+            cp -p "$sysctl_conf" "$_irf_tmp/before" &&
+            printf '1\n' > "$_irf_tmp/existed" || exit 1
+        else
+            : > "$_irf_tmp/before"
+            printf '0\n' > "$_irf_tmp/existed" || exit 1
+        fi
+        if grep -Eq '^[[:space:]]*net\.ipv4\.ip_forward[[:space:]]*=' "$_irf_tmp/before"; then
+            sed -E 's/^[[:space:]]*net\.ipv4\.ip_forward[[:space:]]*=.*/net.ipv4.ip_forward=1/' \
+                "$_irf_tmp/before" > "$_irf_tmp/after" || exit 1
+        else
+            cp "$_irf_tmp/before" "$_irf_tmp/after" &&
+            printf '%s\n' 'net.ipv4.ip_forward=1' >> "$_irf_tmp/after" || exit 1
+        fi
+        _irf_old=$(cat /proc/sys/net/ipv4/ip_forward 2>/dev/null) || exit 1
+        case "$_irf_old" in 0|1) ;; *) exit 1 ;; esac
+        printf '%s\n' "$_irf_old" > "$_irf_tmp/runtime" || exit 1
+    ) && mv "$_irf_tmp" "$_irf_state" && return 0
+    rm -rf -- "$_irf_tmp"
+    say_err '无法保存转发原值，停止安装'
+    return 1
+}
+
 # === 主流程：此前只有函数定义，便于单元测试在无系统副作用下加载 ===
 inst_colors
 inst_parse_args "$@" || exit 1
@@ -544,6 +596,7 @@ case "$os_type" in
     systemd) sysctl_conf=/etc/sysctl.d/99-zz-myproxy.conf ;;
     openwrt) sysctl_conf=/etc/sysctl.conf ;;
 esac
+inst_record_forward_state || exit 1
 forward_persisted=0
 mkdir -p "$(dirname "$sysctl_conf")"
 if grep -Eq '^[[:space:]]*net\.ipv4\.ip_forward[[:space:]]*=' "$sysctl_conf" 2>/dev/null; then

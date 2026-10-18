@@ -18,6 +18,7 @@ class UninstallTests(unittest.TestCase):
     command = test_scripts.ShellTests.command
     file = test_scripts.ShellTests.file
     assert_ok = test_scripts.ShellTests.assert_ok
+    run_shell = test_scripts.ShellTests.run_shell
 
     def setUp(self):
         self.setUp_base()
@@ -25,6 +26,7 @@ class UninstallTests(unittest.TestCase):
         self.etc = self.root / "etc"
         self.proc = self.root / "proc"
         self.file("proc/self/mountinfo", "")
+        self.file("proc/sys/kernel/random/boot_id", "11111111-1111-1111-1111-111111111111\n")
         self.file("installed/sh/env.local.conf", f"MP_INST_DIR='{self.target}'\n")
         self.file("installed/core/config.yaml", "test config")
         self.file("installed/agh/agh.yaml", "test config")
@@ -32,6 +34,7 @@ class UninstallTests(unittest.TestCase):
         source = (ROOT / "sh/uninstall.sh").read_text()
         source = source.replace('un_etc=/etc; un_proc=/proc',
                                 'un_etc="$TEST_ROOT/etc"; un_proc="$TEST_ROOT/proc"')
+        source = source.replace('un_sys=/sys', 'un_sys="$TEST_ROOT/sys"')
         self.script = self.file("uninstall.sh", source)
         self.file("installed/sh/uninstall.sh", source)
         self.command("id", "echo 0\n")
@@ -70,6 +73,164 @@ else
 fi
 ''')
         self.platform("systemd")
+
+    def forward_snapshot(self, *, platform="systemd", before=None, runtime="0"):
+        relative = "etc/sysctl.conf" if platform == "openwrt" else "etc/sysctl.d/99-zz-myproxy.conf"
+        config = self.root / relative
+        if before is not None:
+            self.file(relative, before)
+        self.file("proc/sys/net/ipv4/ip_forward", runtime + "\n")
+        source = test_scripts.function_source(ROOT / "sh/inst.sh", "inst_record_forward_state")
+        source = source.replace("/proc/sys/net/ipv4/ip_forward", str(self.proc / "sys/net/ipv4/ip_forward"))
+        # A new installation has not written env.local.conf yet.
+        local = self.target / "sh/env.local.conf"
+        contents = local.read_text()
+        local.unlink()
+        self.assert_ok(self.run_shell(source + '''
+say_err() { echo "$*" >&2; }; say_warn() { echo "$*"; }
+DIR_INST="$TEST_ROOT/installed"; DIR_SH="$DIR_INST/sh"; reinstall=0
+os_type=$TEST_OS; sysctl_conf=$TEST_CONF
+inst_record_forward_state
+''', source=False, extra={"TEST_OS": platform, "TEST_CONF": str(config)}))
+        local.write_text(contents)
+        state = self.target / "sh/.install-state/forward"
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_bytes((state / "after").read_bytes())
+        self.file("proc/sys/net/ipv4/ip_forward", "1\n")
+        self.command("sysctl", '''
+printf 'sysctl %s\n' "$*" >> "$TEST_ROOT/events"
+[ "${FAIL_SYSCTL:-0}" = 0 ] || exit 1
+[ "$*" = '-w net.ipv4.ip_forward=0' ] || exit 99
+printf '0\n' > "$TEST_ROOT/proc/sys/net/ipv4/ip_forward"
+''')
+        return config, state
+
+    def test_restore_installer_sysctl_and_leave_packages_untouched(self):
+        config, state = self.forward_snapshot()
+        for manager in ("apk", "opkg", "apt-get"):
+            self.command(manager, 'echo package-operation >> "$TEST_ROOT/events"; exit 99\n')
+        self.assert_ok(self.run_uninstall())
+        self.assertFalse(config.exists())
+        self.assertTrue((state / "restored").exists())
+        self.assertEqual((self.proc / "sys/net/ipv4/ip_forward").read_text(), "0\n")
+        self.assertNotIn("package-operation", self.events())
+        count = len(self.events())
+        self.assert_ok(self.run_uninstall())
+        self.assertNotIn("sysctl -w net.ipv4.ip_forward=0", self.events()[count:])
+
+    def test_openwrt_restores_original_file_and_forwarding(self):
+        self.platform("openwrt")
+        original = "# original\nnet.ipv4.ip_forward = 0\nother=1\n"
+        config, _ = self.forward_snapshot(platform="openwrt", before=original)
+        self.assert_ok(self.run_uninstall("--purge"))
+        self.assertEqual(config.read_text(), original)
+        self.assertFalse((self.target / "sh").exists())
+        self.assertNotIn("service cron stop", self.events())
+
+    def test_forwarding_already_enabled_before_install_is_preserved(self):
+        config, _ = self.forward_snapshot(before="net.ipv4.ip_forward=1\n", runtime="1")
+        self.assert_ok(self.run_uninstall())
+        self.assertEqual(config.read_text(), "net.ipv4.ip_forward=1\n")
+        self.assertFalse(any(event.startswith("sysctl ") for event in self.events()))
+
+    def test_reinstall_preserves_first_snapshot_and_rebases_after_uninstall(self):
+        config, state = self.forward_snapshot()
+        source = test_scripts.function_source(ROOT / "sh/inst.sh", "inst_record_forward_state")
+        source = source.replace("/proc/sys/net/ipv4/ip_forward", str(self.proc / "sys/net/ipv4/ip_forward"))
+        call = source + '''
+say_err() { echo "$*" >&2; }; say_warn() { echo "$*"; }
+DIR_INST="$TEST_ROOT/installed"; DIR_SH="$DIR_INST/sh"; reinstall=1
+os_type=systemd; sysctl_conf=$TEST_CONF
+inst_record_forward_state
+'''
+        self.assert_ok(self.run_shell(call, source=False, extra={"TEST_CONF": str(config)}))
+        self.assertEqual((state / "runtime").read_text(), "0\n")
+        self.assertEqual((state / "existed").read_text(), "0\n")
+        self.assert_ok(self.run_uninstall())
+        config.write_text("# new baseline\nnet.ipv4.ip_forward=1\n")
+        self.file("proc/sys/net/ipv4/ip_forward", "1\n")
+        self.assert_ok(self.run_shell(call, source=False, extra={"TEST_CONF": str(config)}))
+        self.assertEqual((state / "before").read_text(), config.read_text())
+        self.assertEqual((state / "runtime").read_text(), "1\n")
+        self.assertFalse((state / "restored").exists())
+
+    def test_modified_sysctl_aborts_before_service_changes(self):
+        config, _ = self.forward_snapshot()
+        config.write_text("net.ipv4.ip_forward=1\nuser_added=1\n")
+        result = self.run_uninstall("--purge")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.events(), [])
+        self.assertIn("user_added=1", config.read_text())
+        self.assertTrue((self.target / "sh/env.local.conf").exists())
+
+    def test_failed_forward_restore_keeps_record_and_data_for_retry(self):
+        _, state = self.forward_snapshot()
+        self.assertNotEqual(self.run_uninstall("--purge", extra={"FAIL_SYSCTL": "1"}).returncode, 0)
+        self.assertTrue((state / "runtime").exists())
+        self.assertFalse((state / "restored").exists())
+        self.assertTrue((self.target / "sh/env.local.conf").exists())
+        self.assert_ok(self.run_uninstall("--purge"))
+
+    def test_only_recorded_route_on_same_interface_is_deleted(self):
+        record = "198.18.0.0/16 utun 7 11111111-1111-1111-1111-111111111111\n"
+        self.file("installed/core/.fake-ip-route", record)
+        index = self.file("sys/class/net/utun/ifindex", "8\n")
+        self.command("ip", '''
+printf 'ip %s\n' "$*" >> "$TEST_ROOT/events"
+case "$*" in
+    '-4 route show exact 198.18.0.0/16 dev utun') echo '198.18.0.0/16 dev utun scope link' ;;
+    '-4 route del 198.18.0.0/16 dev utun') ;;
+    *) exit 99 ;;
+esac
+''')
+        self.assert_ok(self.run_uninstall())
+        self.assertFalse(any(event.startswith("ip ") for event in self.events()))
+        self.file("installed/core/.fake-ip-route", record)
+        index.write_text("7\n")
+        self.assert_ok(self.run_uninstall())
+        self.assertIn("ip -4 route del 198.18.0.0/16 dev utun", self.events())
+
+    def test_route_record_from_previous_boot_does_not_delete_reused_interface(self):
+        self.file("installed/core/.fake-ip-route", "198.18.0.0/16 utun 7 22222222-2222-2222-2222-222222222222\n")
+        self.file("sys/class/net/utun/ifindex", "7\n")
+        self.assert_ok(self.run_uninstall())
+        self.assertFalse((self.target / "core/.fake-ip-route").exists())
+
+    def test_no_arguments_asks_about_files_before_final_confirmation(self):
+        source = self.script.read_text().replace("un_dir=/etc/proxy;", f"un_dir={self.target};")
+        self.script.write_text(source)
+        for choice, confirm in ((b"\n", b"y\n"), (b"y\n", b"\n"), (b"y\n", b"y\n")):
+            events_before = self.events()
+            pid, fd = pty.fork()
+            if pid == 0:
+                os.execvpe("sh", ["sh", str(self.script)], self.env)
+            output = b""
+            prompts = [("是否删除安装文件和数据？".encode(), choice), ("确认卸载？".encode(), confirm)]
+            try:
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    if select.select([fd], [], [], 0.1)[0]:
+                        try:
+                            data = os.read(fd, 65536)
+                        except OSError:
+                            break
+                        if not data:
+                            break
+                        output += data
+                    if prompts and prompts[0][0] in output:
+                        os.write(fd, prompts.pop(0)[1])
+                else:
+                    os.kill(pid, 9)
+                    self.fail("interactive uninstall timed out")
+            finally:
+                os.close(fd)
+                _, status = os.waitpid(pid, 0)
+            self.assertEqual(os.waitstatus_to_exitcode(status), 0, output.decode())
+            self.assertEqual(prompts, [])
+            if confirm == b"\n":
+                self.assertEqual(self.events(), events_before)
+            self.assertEqual((self.target / "sh/env.local.conf").exists(),
+                             not (choice == b"y\n" and confirm == b"y\n"))
 
     def platform(self, platform):
         if platform == "systemd":
