@@ -2,6 +2,7 @@
 import json
 import os
 import pty
+import select
 import shlex
 import subprocess
 import sys
@@ -10,6 +11,7 @@ import shutil
 import gzip
 import io
 import tarfile
+import time
 
 import test_scripts
 
@@ -217,6 +219,69 @@ cp "$TEST_ROOT/fixtures/$fixture" "$out"
             if slave is not None:
                 os.close(slave)
 
+    def test_interactive_inputs_echo_paste_and_preserve_defaults(self):
+        values = ["http://user:p%40ss@proxy.invalid:1080",
+                  "https://example.invalid/sub?token=a'b&path=\\test",
+                  "admin", "$2b$10$test'quoted\\hash", "1.1.1.1 9.9.9.9"]
+        script = PREFIX + r'''
+exec 3<&0
+inst_colors
+INSTALL_MODE=interactive
+MP_PROXY=$TEST_PROXY; MP_SUBSCRIBE_URL=$TEST_SUB; MP_AGH_USER_NAME=$TEST_USER
+MP_AGH_PASSWORD=$TEST_HASH; MP_LOCAL_DNS=$TEST_DNS
+inst_choose_source() { return 0; }
+inst_collect_inputs || exit 1
+printf '%s\n' "$MP_PROXY" "$MP_SUBSCRIBE_URL" "$MP_AGH_USER_NAME" "$MP_AGH_PASSWORD" "$MP_LOCAL_DNS" > "$TEST_ROOT/inputs"
+'''
+        for retain_defaults in (False, True):
+            with self.subTest(retain_defaults=retain_defaults):
+                extra = dict(zip(('TEST_PROXY', 'TEST_SUB', 'TEST_USER', 'TEST_HASH', 'TEST_DNS'),
+                                 values if retain_defaults else [''] * len(values)))
+                master, slave = pty.openpty()
+                proc = subprocess.Popen(['sh', '-c', script], stdin=slave, stdout=slave, stderr=slave,
+                                        env=self.env | extra, cwd=self.root)
+                os.close(slave)
+                pending = b''
+
+                def read_until(marker):
+                    nonlocal pending
+                    deadline = time.monotonic() + 3
+                    while marker not in pending:
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0 or not select.select([master], [], [], remaining)[0]:
+                            self.fail('input was not echoed or prompt did not appear: ' + repr(pending))
+                        try:
+                            chunk = os.read(master, 65536)
+                        except OSError:
+                            self.fail('terminal closed before expected output: ' + repr(pending))
+                        if not chunk:
+                            self.fail('terminal reached EOF before expected output')
+                        pending += chunk
+                    before, pending = pending.split(marker, 1)
+                    return before
+
+                try:
+                    read_until(b'] > ')
+                    os.write(master, b'2')
+                    read_until(b'2')  # Visible before submitting, not a later value dump.
+                    os.write(master, b'\n')
+                    for value in values:
+                        prompt = read_until(b'] > ')
+                        if retain_defaults:
+                            self.assertIn(value.encode(), prompt)
+                        else:
+                            os.write(master, value.encode())  # Simulate pasting one line.
+                            read_until(value.encode())
+                        os.write(master, b'\n')
+                    proc.wait(timeout=3)
+                    self.assertEqual(proc.returncode, 0)
+                    self.assertEqual((self.root / 'inputs').read_text().splitlines(), values)
+                finally:
+                    if proc.poll() is None:
+                        proc.kill()
+                        proc.wait()
+                    os.close(master)
+
     def test_named_defaults_ignore_old_environment(self):
         result = self.installer(self.args() + 'inst_validate || exit 1\n'
                                 'printf "%s\\n" "$INSTALL_MODE" "$DIR_INST" "$MP_REPO_BRANCH" '
@@ -270,11 +335,12 @@ cp "$TEST_ROOT/fixtures/$fixture" "$out"
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("交互终端", result.stdout + result.stderr)
 
-    def test_missing_jq_has_actionable_error(self):
-        result = self.installer('command() { return 1; }\ninst_require_tools')
+    def test_missing_tools_without_package_manager_has_actionable_error(self):
+        result = self.installer('os_type=openwrt\ncommand() { return 1; }\ninst_require_tools')
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("缺少 jq", result.stdout)
-        self.assertIn("opkg install jq", result.stdout)
+        self.assertIn("缺少依赖", result.stdout)
+        self.assertIn("jq", result.stdout)
+        self.assertIn("opkg/apk", result.stdout)
 
     def test_silent_with_terminal_never_prompts_or_changes_cron(self):
         cron = SOURCE[SOURCE.index("# === 定时更新"):SOURCE.index('say_section "安装完成"')]
@@ -439,8 +505,8 @@ with open(args[args.index("-o") + 1], "w") as out:
         self.assertFalse(list(self.root.glob("result.tmp.*")))
 
     def test_noninteractive_mode_reaches_child_scripts(self):
-        # Run the real entry through validation/export, stopping before any system writes.
-        entry = SOURCE[:SOURCE.index("if [ -f /etc/openwrt_release ]")]
+        # Run validation/export, stopping before project writes; package managers are mocked.
+        entry = SOURCE[:SOURCE.index("say_section '安装概览'")]
         entry += '\nsh -c \'test "$_MP_NONINTERACTIVE" = 1 && test "$MP_PROXY" = "" && test "$MP_REPO_BRANCH" = main\'\n'
         script = self.file("safe-inst.sh", entry)
         result = subprocess.run(["sh", str(script), *REQUIRED], env=self.env | {"MP_PROXY": "http://old"},

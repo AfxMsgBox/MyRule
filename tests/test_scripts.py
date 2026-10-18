@@ -36,7 +36,8 @@ class ShellTests(unittest.TestCase):
                     "MP_AGH_USER_NAME": "test", "MP_AGH_PASSWORD": "$2a$10$test"}
         self.command("logger", "exit 0\n")
         # Unexpected network/service use fails closed in every test.
-        for command in ("curl", "systemctl", "service", "sysctl", "crontab"):
+        for command in ("curl", "systemctl", "service", "sysctl", "crontab", "ip",
+                        "apt-get", "opkg", "apk"):
             self.command(command, "echo unexpected-command >&2; exit 99\n")
 
     def command(self, name, script):

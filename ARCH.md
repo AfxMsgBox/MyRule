@@ -46,6 +46,7 @@ sh/common.sh                  公共解析、下载、渲染、服务控制函�
 sh/update-*.sh                各类更新入口
 sh/setup-fake-ip-route.sh     fake-ip 路由修正
 sh/keeplive.sh                Core 本机代理保活
+sh/run-scheduled-update.sh    按连续日间隔执行定时更新
 sh/etc/                       OpenWrt/systemd 服务文件模板
 ```
 
@@ -99,7 +100,7 @@ AGH 运行时可能回写 `agh.yaml`，但仓库模板仍是权威来源。完�
 
 安装入口的优先级与日常脚本不同：无参数才交互，有任意参数即静默（仅 `--help` 单独退出）。静默安装的公开参数由命名参数及默认值确定，忽略调用环境和旧配置中的同名值，三个必填项必须显式提供；解析后导出本次值，防止子脚本重载旧配置时覆盖。交互安装读取 `/etc/proxy/sh/env.local.conf`，调用环境可覆盖，用作输入默认值；分支默认选 main，外部代理默认不启用。其它自定义配置行保留。
 
-`MP_REPO_RAW_URL` 仅为内部派生变量，不再接受配置输入。`env.conf` 在本机配置和调用环境加载后强制重算地址，旧 URL 不迁移；安装器保存时删除旧 URL 行。`MP_REPO_BRANCH_PATH` 使用 jq 对分支名按 `/` 分段编码，再拼接固定 Raw 与 codeload 地址。脚本、模板和仓库规则使用同一分支。jq 是安装和运行更新脚本的依赖，缺少时提示并退出，不能自动安装或用脆弱的文本替换解析分支 JSON。
+`MP_REPO_RAW_URL` 仅为内部派生变量，不再接受配置输入。`env.conf` 在本机配置和调用环境加载后强制重算地址，旧 URL 不迁移；安装器保存时删除旧 URL 行。`MP_REPO_BRANCH_PATH` 使用 jq 对分支名按 `/` 分段编码，再拼接固定 Raw 与 codeload 地址。脚本、模板和仓库规则使用同一分支。jq 是安装和运行更新脚本的依赖；安装器会自动补装，日常更新缺少时仍提示并退出，不用文本替换解析分支 JSON。
 
 `MP_CORE_DIR` 与 `MP_AGH_DIR` 只能由 `MP_INST_DIR` 派生，不能独立持久化，否则会与服务文件和运行目录失配。
 
@@ -213,26 +214,26 @@ GFW 和非中国顶级域名列表参与生成 `agh/dns.conf.pending`，配置�
 
 订阅和过滤器清单由 `core/config.yaml` 与 `agh/agh.yaml` 决定；修改模板后，下载项也会变化。当前 `whitelist_filters` 为空，没有额外白名单下载；GPT 规则来自本仓库，不列入 README 下载列表。GitHub Release 下载会跟随 HTTP 重定向，表中列的是脚本使用的入口地址。
 
-README 下载列表统计安装脚本主动下载的文件及版本信息。服务启动后的订阅/过滤器刷新、`www.gstatic.com/generate_204` 节点健康检查和 DNS 查询属于运行期网络访问，未计入；健康检查不下载安装文件。安装器也不会自动下载或安装 curl、jq 等系统依赖。
+README 下载列表统计安装脚本主动下载的文件及版本信息，以及补装缺失依赖时由包管理器下载的索引和软件包。软件包使用系统软件源及包管理器自己的代理设置，不走项目的 Core → 外部代理 → 直连链路。服务启动后的订阅/过滤器刷新、`www.gstatic.com/generate_204` 节点健康检查和 DNS 查询属于运行期网络访问，未计入；健康检查不下载安装文件。
 
 GFW 域名列表使用 Loyalsoldier/clash-rules 已整理的 Clash payload，直接转换为 AGH 上游规则；不再下载或解析官方 AutoProxy 列表，也不生成跳过规则报告。
 
 ## 5. 安装流程
 
-`inst.sh` 仅提供命名参数，支持 `--key value`/`--key=value`。默认目录 `/etc/proxy`，默认分支 main，默认 DNS `223.5.5.5 119.29.29.29`，默认无外部代理。`--subscribe-url`、`--agh-user`、`--agh-password` 必填。未知、重复、缺值、非法值在系统写入前拒绝。安装路径限定安全字符以匹配现有服务文件和 cron 模板。
+`inst.sh` 仅提供命名参数，支持 `--key value`/`--key=value`。默认目录 `/etc/proxy`，默认分支 main，默认 DNS `223.5.5.5 119.29.29.29`，默认无外部代理。`--subscribe-url`、`--agh-user`、`--agh-password` 必填。未知、重复、缺值及静默模式基本字段的非法值在软件包安装前拒绝；分支名的 jq 校验、本地文件检查在补齐依赖后执行，失败时尚未写入项目配置，但可能已安装系统依赖。安装路径限定安全字符以匹配现有服务文件和 cron 模板。
 
 无参数时必须能打开 `/dev/tty`；交互输入走独立 fd 3，支持脚本从管道输入。先选择外部代理，再调用 GitHub `/repos/AfxMsgBox/MyRule/branches?per_page=100&page=N`，通过 jq 验证响应并逐页获取，直到页面少于 100 条；完整列表排序去重，main 置顶。任何页面失败或响应异常均丢弃不完整列表，只允许整批重试或退出，不允许手输分支绕过。静默模式不调用分支 API。本地来源也不调用分支 API；交互模式第 2 步选择在线或本地，再选择在线分支或填写后续更新分支。
 
-输出由安装器负责阶段及状态，子脚本通过 `_MP_INSTALL_OUTPUT=1` 启用终端状态颜色；颜色按输出 fd 的 TTY 独立判断，NO_COLOR/TERM=dumb 禁用，syslog 始终纯文本。订阅 URL、密码和代理输入关闭回显，退出时恢复终端状态。
+输出由安装器负责阶段及状态，子脚本通过 `_MP_INSTALL_OUTPUT=1` 启用终端状态颜色；颜色按输出 fd 的 TTY 独立判断，NO_COLOR/TERM=dumb 禁用，syslog 始终纯文本。所有交互输入统一使用 `prompt_to`，沿用终端正常回显，不再调用 stty 隐藏输入；代理地址、订阅 URL 和密码哈希与其它字段一样可见，默认值也直接显示，空输入保留默认值。输入仍使用 `IFS= read -r`，保留 URL、哈希中的特殊字符。下载日志的凭据脱敏规则保持不变。
 
 `inst.sh` 的主要顺序如下：
 
 ```text
-解析参数 → 检查 jq/curl、root 和终端
+解析参数 → 检查 root、终端或静默基本参数 → 识别平台 → 检查并补装系统依赖
     ↓
 交互收集输入（代理 → 仓库来源及分支 → 必填信息 → DNS），或使用静默参数
     ↓
-校验全部输入及本地来源必需文件、识别平台、确定安装目录
+校验全部输入及本地来源必需文件、确定安装目录
     ↓
 立即启用并持久化 net.ipv4.ip_forward
     ↓
@@ -254,7 +255,7 @@ bootstrap 从所选来源获取 env.conf/common.sh
     → 启用并重启 Core → 等待 Core API → 启用并重启 AGH
     （首次安装跳过停止 AGH，使用 start）
     ↓
-仅交互模式按用户选择写入 03:00 脚本更新和 03:05 配置更新 cron
+仅交互模式按用户选择补装 crontab，再写入 03:00 脚本更新和 03:05 配置更新 cron
     （静默模式自动启用服务，不读写 cron）
 ```
 
@@ -275,6 +276,28 @@ bootstrap 从所选来源获取 env.conf/common.sh
 AGH 依赖 Core，因为部分域名上游指向 Core DNS，且 AGH 自身的 `http_proxy` 从 Core 配置生成。
 
 安装器还会开启 `net.ipv4.ip_forward`：systemd 系统持久化到较晚加载的 `/etc/sysctl.d/99-zz-myproxy.conf`，OpenWrt 持久化到 `/etc/sysctl.conf`，并读取 `/proc/sys/net/ipv4/ip_forward` 验证是否已经即时生效。LXC 等受限环境无法修改内核参数时会明确警告，但不会中断安装，需要在宿主机侧放行。
+
+### 5.1 系统依赖自举
+
+依赖检查在首次联网下载及交互分支查询之前进行，不假设脚本通过 curl 下载：浏览器下载或手动复制的独立 `inst.sh` 同样可用。前置平台识别只用 shell 内建读取 `/etc/os-release`；root 检查优先用 `id`，缺少时读取 `/proc/self/status` 的有效 UID。不自动安装或切换系统服务管理器。
+
+| 检查项 | Debian/Ubuntu 软件包 | OpenWrt 软件包 |
+|---|---|---|
+| `curl`、`jq`、`tar`、`sed`、`grep` | 同名包 | 同名包 |
+| 系统 CA bundle | `ca-certificates` | `ca-bundle` |
+| `gzip`、`gunzip` | `gzip` | `gzip` |
+| `ip` / `sysctl` / `logger` | `iproute2` / `procps` / `bsdutils` | `ip-tiny` / `procps-ng-sysctl` / `logger` |
+| `awk` / `find` | `mawk` / `findutils` | `gawk` / `findutils-find` |
+| `cat chmod cp mv rm mkdir mktemp dirname basename readlink date sleep head sort tr wc ln uname id` | `coreutils` | 各自的 `coreutils-<命令>` |
+| `crontab` / `flock`（用户选择定时任务时） | `cron` / `util-linux` | `busybox` / `flock` |
+
+按 `command -v` 检查命令，已有 BusyBox applet 可直接满足依赖，不因包名不同重复安装。证书检查系统 `/etc/ssl/certs/ca-certificates.crt` 或 `/etc/ssl/cert.pem` 是否可读且非空；不执行联网探测。只对缺失项映射包名、去重后批量安装，再清除 shell 命令缓存并复查全部依赖。包管理器返回成功但工具或证书仍缺失时，也返回失败；例如定制 OpenWrt 的 BusyBox 禁用了 crontab 时，需使用提供该功能的固件或包，不能将安装 busybox 成功视为功能已可用。
+
+OpenWrt 优先选择可用的 apk，否则 opkg；Debian/Ubuntu（含通过 `ID_LIKE` 识别的衍生系统）使用 apt-get。其它 systemd 系统在依赖齐全时仍可继续，缺失时提示手工补齐。软件包操作仅刷新索引并安装缺失项，不执行整体 upgrade、不修改软件源或永久代理配置，也不关闭 TLS/签名校验。操作使用包管理器自身的网络配置；用户提供的 `MP_PROXY` 不参与这一阶段。apt-get 使用非交互模式，所有包管理器均从 `/dev/null` 读取标准输入，避免吞掉管道中的脚本或向导输入。
+
+刷新索引或安装失败时保留原始错误输出，打印退出码及手动安装命令并停止。软件包补装不提供回滚，已安装的包会保留；定时任务依赖检查发生在服务配置之后，失败也不会撤销此前完成的安装。未选择任何定时任务或静默安装时，不检查或安装 crontab/flock。
+
+包管理器命令参照 [OpenWrt opkg/apk 对照](https://openwrt.org/docs/guide-user/additional-software/opkg-to-apk-cheatsheet)，基础命令拆包参照 [OpenWrt coreutils 定义](https://github.com/openwrt/packages/blob/master/utils/coreutils/Makefile)。`unzip` 仅用于用户在运行安装器前解压 GitHub ZIP，不是脚本自身的运行依赖，安装方法放在 README。
 
 ## 6. 更新体系
 
@@ -380,19 +403,20 @@ fi
 
 ### 6.6 定时任务
 
-交互安装的第 8、9 步会依次询问“脚本更新”和“配置更新”的每月日期步长，默认 3。输入 `n` 可单独跳过某一项的写入（已有任务不会删除）。安装器会在 root crontab 中维护以下两个带 marker 的任务：03:00 触发脚本更新，03:05 触发配置更新并重启服务；重装不会重复追加。这是两个独立任务，时间错开不保证前一个任务已完成：
+交互安装只询问两项：“每隔几天更新脚本？”和“每隔几天更新配置？”，默认 3 天，范围 1–365，输入 n 跳过并保留对应旧任务。选中任一任务后补齐 crontab/flock，再写 root crontab：
 
 ```cron
-0 3 */N * * sh /etc/proxy/sh/update-scripts.sh # MyProxy:update-scripts
-5 3 */N * * sh /etc/proxy/sh/update-all-configs-restart-services.sh # MyProxy:update-configs
+0 3 * * * sh '/etc/proxy/sh/run-scheduled-update.sh' scripts 3 # MyProxy:update-scripts
+5 3 * * * sh '/etc/proxy/sh/run-scheduled-update.sh' configs 3 # MyProxy:update-configs
 ```
 
-其中 `N` 是向导输入的日期步长。例如 `N=3` 表示每月 1、4、7……日执行，每月重新从 1 日计算，跨月不是固定间隔 3 天。OpenWrt 写入至少一项任务后，安装器还会启用并重启 cron 服务。下面两项不会由安装器自动添加，需要时再手工配置，不会与上述任务重复：
+第三个参数位置的数字是用户填写的间隔（上例均为 3）；cron 每天触发检查，到期才执行。调度器以 `date +%s / 86400` 的 UTC 连续日编号计算日期差，跨月不重置，不承诺精确到小时的 N×24 小时间隔。首次设置时写入当前日作为起点；之后只有目标更新成功才原子更新 `sh/.schedule/scripts.last` 或 `configs.last`，失败则次日重试，关机错过的任务在下次定时检查补做一次。系统时钟回拨时等待日期重新达到间隔。
 
-```cron
-*/5 * * * * sh /etc/proxy/sh/keeplive.sh
-0 5 1 * * sh /etc/proxy/sh/update-bin.sh && systemctl restart proxy_core agh
-```
+间隔保存在 cron 参数里，成功日记录随本机状态保留；重复安装保留已有日期记录，调整间隔后在下次检查按新值判断。安装器仅替换匹配本安装目录、命令和 marker 的对应任务，兼容清理旧的直接调用更新脚本的 cron；读取 crontab 异常时停止该项写入，不覆盖未知任务。卸载同时识别新旧形式。
+
+两个任务共享 `sh/.schedule/lock` 的非阻塞 flock，自动更新相互串行；锁忙时跳过本次检查，次日再试。例如脚本更新超过 5 分钟，配置更新可能顺延一天。手动更新、安装和卸载不加入此锁，仍不支持与自动更新并发操作。调度器通过整体函数执行以应对自身文件在脚本更新时被替换；对子进程设置 `_MP_NONINTERACTIVE=1`，不询问下载重试。脚本更新调用 `update-scripts.sh`，配置更新调用 `update-all-configs-restart-services.sh`，仅后者重启 Core/AGH。
+
+OpenWrt 写入至少一项任务后会启用并重启 cron 服务。`.schedule/` 不属于仓库内容，脚本同步不会覆盖；普通卸载保留，purge 随 sh/ 删除。静默安装不修改定时设置。按用户要求，本次间隔调整未运行测试，真实日期推进、跨月和并发行为待验证。
 
 ## 7. AGH 域名分流配置
 
@@ -409,6 +433,19 @@ fi
 该脚本第二个可选参数指定输出文件。安装器使用 `dns.conf.pending`，日常更新省略该参数，仍替换正式 dns.conf。最终写入失败必须返回非零。Core 的 `rule_gpt.url` 同样通过 `{MP_REPO_RAW_URL}` 渲染，确保 Core 与 AGH 使用同一分支的 GPT 域名清单。
 
 ## 8. fake-ip 与路由
+
+### 8.1 客户端接入与主路由
+
+当前模板中，AGH 监听 TCP/UDP 53，代理域名上游为本机 Core DNS `127.0.0.1:253`。Core 的 `dns.fake-ip-range: 198.18.0.1/16` 对应路由网络 `198.18.0.0/16`，TUN 接口为 `utun`；`auto-route` 和 `auto-redir` 均关闭。DNS 返回 fake-ip 与后续客户端数据连接是两个阶段，客户端必须能把这个网段的流量送达 TUN。
+
+- 安装在主路由时：DHCP 向客户端下发本机 AGH 地址，客户端网关仍为主路由，本机路由将 fake-ip 流量送往 TUN。
+- 安装在同一 LAN 的独立设备时：DHCP 下发独立设备的 AGH 地址，客户端网关仍为主路由；主路由需配置 `198.18.0.0/16 via <安装设备 LAN IP>`，安装设备再将该网段路由到 TUN。真实 IP 流量仍按主路由原有路由转发。安装设备需有正常的上网路由及返回客户端的路径。
+
+脚本仅维护安装设备上的 fake-ip → TUN 路由，并由安装器开启 IPv4 转发；不会配置主路由 DHCP、远端静态路由、防火墙或解决已有 DNS 服务的端口冲突。AGH 与 dnsmasq 等服务不能争用同一监听地址的 53 端口；调整 DNS 监听不等于关闭 DHCP。客户端使用外部 DNS（包括外部 DoH）可能绕过 AGH 分流。
+
+README 的接入示例限定为上述 IPv4 拓扑；跨网段、容器 NAT 或其它策略路由环境需另外确认可达性和回程。修改 Core fake-ip 网段后，外部主路由的静态路由也需要人工同步，不能假定本机更新脚本会覆盖它。
+
+### 8.2 本机路由维护与防火墙
 
 `setup-fake-ip-route.sh` 从 Core 配置读取：
 

@@ -1,5 +1,6 @@
 # 本地覆盖（设备侧或开发机侧），不进仓库
 sh/env.local.conf
+sh/.schedule/
 
 # 运行时产物：仓库里只放模板/规则源，部署后会在设备上生成下面这些文件
 agh/dns.conf

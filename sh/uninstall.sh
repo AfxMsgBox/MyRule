@@ -167,6 +167,11 @@ un_prepare_cron() {
                 marker=(i==1 ? "MyProxy:update-scripts" : "MyProxy:update-configs")
                 if (ends(line," sh \047" dir "/sh/" script "\047 # " marker) ||
                     ends(line," sh " dir "/sh/" script " # " marker)) next
+                n=split(line,a,/[ \t]+/)
+                runner=dir "/sh/run-scheduled-update.sh"
+                kind=(i==1 ? "scripts" : "configs")
+                if (a[n]==marker && a[n-1]=="#" && a[n-2] ~ /^[0-9]+$/ &&
+                    a[n-3]==kind && (a[n-4]==runner || a[n-4]=="\047" runner "\047") && a[n-5]=="sh") next
             }
             print
         }

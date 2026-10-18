@@ -176,9 +176,12 @@ fi
 
     def test_cron_removes_only_generated_entries_for_target(self):
         managed = [f"0 3 */3 * * sh '{self.target}/sh/update-scripts.sh' # MyProxy:update-scripts",
-                   f"5 3 */3 * * sh {self.target}/sh/update-all-configs-restart-services.sh # MyProxy:update-configs"]
+                   f"5 3 */3 * * sh {self.target}/sh/update-all-configs-restart-services.sh # MyProxy:update-configs",
+                   f"0 3 * * * sh '{self.target}/sh/run-scheduled-update.sh' scripts 3 # MyProxy:update-scripts",
+                   f"5 3 * * * sh {self.target}/sh/run-scheduled-update.sh configs 7 # MyProxy:update-configs"]
         retained = ["MAILTO=root", "# keep comments", "# " + managed[0],
                     "0 3 * * * sh /other/sh/update-scripts.sh # MyProxy:update-scripts",
+                    "0 3 * * * sh /other/sh/run-scheduled-update.sh scripts 3 # MyProxy:update-scripts",
                     f"*/5 * * * * sh {self.target}/sh/keeplive.sh", "0 0 * * * echo unrelated"]
         self.file("crontab", "\n".join(managed + retained) + "\n")
         self.assert_ok(self.run_uninstall())
