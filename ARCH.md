@@ -39,7 +39,10 @@ agh/agh.yaml                  AGH 配置模板
 agh/myupstream.txt            AGH 固定格式的自定义上游片段
 domain/*.txt                  Clash payload 格式的域名清单
 
-sh/inst.sh                    安装和重装入口
+sh/inst.sh                    精简自举入口（独立下载 / 本地仓库定位）
+sh/install-lib.sh             参数、交互、依赖、prepare、apply 与流程编排
+sh/install-remote.sh          SSH 探测、上传、远端执行与清理
+sh/portable.sh                便携路径解析、SHA-256、安装资源缓存
 sh/uninstall.sh               独立卸载入口，默认保留安装数据
 sh/env.conf                   全局默认值、环境加载及派生路径
 sh/common.sh                  公共解析、下载、渲染、服务控制函数
@@ -98,7 +101,7 @@ AGH 运行时可能回写 `agh.yaml`，但仓库模板仍是权威来源。完�
 
 `MP_LOCAL_DNS` 未设置时使用 `223.5.5.5 119.29.29.29`，明确为空时读取 `/etc/resolv.conf`。交互安装可保留原空值，向导输入 `-` 表示清空；静默安装省略 `--dns` 使用默认值，显式 `--dns ''` 才表示空值。
 
-安装入口的优先级与日常脚本不同：无参数才交互，有任意参数即静默（仅 `--help` 单独退出）。静默安装的公开参数由命名参数及默认值确定，忽略调用环境和旧配置中的同名值，三个必填项必须显式提供；解析后导出本次值，防止子脚本重载旧配置时覆盖。交互安装读取 `/etc/proxy/sh/env.local.conf`，调用环境可覆盖，用作输入默认值；分支默认选 main，外部代理默认不启用。其它自定义配置行保留。
+安装入口的优先级与日常脚本不同：无参数交互，有参数默认静默，`--interactive` 可显式进入向导。公开参数由命名参数及默认值确定，不从调用环境或旧配置补齐；向导使用本次参数作为默认值。静默模式必填订阅，并明确选择 bcrypt 哈希或 `--no-auth`；用户名默认 admin。解析后导出本次值，防止子脚本重载旧配置时覆盖。分支默认 main，外部代理默认空；独立自举输入的本次下载代理传给向导。写入本机配置时保留其它自定义行。
 
 `MP_REPO_RAW_URL` 仅为内部派生变量，不再接受配置输入。`env.conf` 在本机配置和调用环境加载后强制重算地址，旧 URL 不迁移；安装器保存时删除旧 URL 行。`MP_REPO_BRANCH_PATH` 使用 jq 对分支名按 `/` 分段编码，再拼接固定 Raw 与 codeload 地址。脚本、模板和仓库规则使用同一分支。jq 是安装和运行更新脚本的依赖；安装器会自动补装，日常更新缺少时仍提示并退出，不用文本替换解析分支 JSON。
 
@@ -135,7 +138,9 @@ AGH 运行时可能回写 `agh.yaml`，但仓库模板仍是权威来源。完�
   - 临时调试用 `MP_FOO=xxx sh script.sh` 即可压过 env.local.conf。
 - 重复运行 inst.sh 时第 3.1 节中各项被 upsert（已存在则替换，不存在则追加），用户加的其它行不动。
 
-AGH 密码要求 bcrypt 哈希（`$2a$`、`$2b$`、`$2y$` 前缀）；安装器校验前缀，不校验完整哈希长度。
+AGH 用户名默认 admin。选择设置密码时要求 bcrypt 哈希（`$2a$`、`$2b$`、`$2y$` 前缀）；安装器校验前缀，不校验完整哈希长度，不生成哈希或新增密码工具。向导明确询问是否设置；静默模式要求 `--agh-password` 与 `--no-auth` 二选一。临时 `INST_NO_AUTH` 标志随安装包参数 JSON 传递并校验，但不持久化；持久化的空 `MP_AGH_PASSWORD` 表示免登录。
+
+`mp_prepare_agh_config` 使用 `mp_render_template` 的 AGH 模式重建顶层 users 块：免登录生成 `users: []`；启用认证时用 jq 生成包含 name/password 的 JSON 数组（合法 YAML），正确转义用户名。必须恰好有一个 users 块，否则保留目标文件并失败。安装与后续配置更新共用此逻辑，空密码不会生成带空哈希的账号。
 
 ## 4. 公共能力边界
 
@@ -168,22 +173,17 @@ MP_PROXY 外部代理
 
 curl 的首个参数为 `--disable`，避免读取用户配置。代理通道使用显式 `--proxy URL --noproxy ''`，直连使用 `--proxy '' --noproxy '*'`，消除系统代理变量与 NO_PROXY 干扰。日志只输出目标文件名、通道、curl 退出码、大小和耗时，不打印远端 URL、代理凭据或 curl 原始错误。
 
-安装器内部的 `bootstrap_download` 用于分支 API、env.conf 与 common.sh 下载，其最小端口解析和 Core → 外部代理 → 直连顺序与公共函数一致。bootstrap 完成后使用公共函数。两份端口解析和下载顺序必须有一致性测试。
+安装模块的 `bootstrap_download` 用于分支 API 和仓库归档。独立 inst.sh 在模块尚不存在时含最小下载自举，优先读取本机 mixed-port，然后发起端代理及直连。模块加载后 bootstrap 和公共下载函数均按 mixed-port → port → socks-port 查找端口。
 
-安装器向子进程传递 `_MP_NONINTERACTIVE=1`（静默）或 0（交互），不写入本机配置。静默安装即使有 TTY 也禁止下载重试提示；其它情况下整轮失败且可打开终端时询问重试，无终端则返回非零。分支 API 的单页下载只执行一轮，由分支选择流程负责整批重试。
+安装资源准备及目标应用的子进程设置 `_MP_NONINTERACTIVE=1`，失败退出，可重新运行安装器；交互分支查询允许整批重试。日常手动更新保留原终端重试机制。临时变量不写入本机配置。
 
 ### 4.3 本地仓库来源
 
-安装器新增 `--source-dir DIR`；无参数交互时第 2 步可选择本地目录。`inst_validate_source` 在系统写入前将源路径转成物理绝对路径，并检查必需脚本、两套平台服务模板、Core/AGH 模板及仓库规则；目标安装目录不能是源目录或其子目录，以免覆盖源模板。源路径支持空格。
+`--local` 根据 inst.sh 的真实路径定位根目录，不依赖当前工作目录；`--source-dir DIR` 显式指定来源。交互本地模式默认填入推断结果。本地源包含未提交修改，但不包含 `env.local.conf`、`.install-state/`、`.schedule/` 或 core/agh 运行数据。
 
-来源通过仅在安装进程及子进程中导出的 `_MP_SOURCE_DIR` 传递，参数解析时清空旧环境值，不持久化。`MP_REPO_RAW_URL` 仍由 `MP_REPO_BRANCH` 派生为在线地址，确保渲染后的 provider URL 及以后独立执行的更新脚本继续在线更新。
+prepare 将 sh/、domain/、core/config.yaml、agh/agh.yaml、agh/myupstream.txt 复制为快照；检查必需文件与路径边界。本机目标不能在源目录内；SSH 模式的源和目标属于不同机器，不作本地路径重叠判断。源根目录支持空格，仓库内文件名及目标安装路径限制为安全字符。
 
-- `inst_bootstrap_file`：本地模式直接原子复制 `sh/env.conf`、`sh/common.sh`，在线模式使用原有 bootstrap 下载。
-- `mp_fetch_repo_sh`：本地模式跳过 codeload，枚举本地 `sh/`，复用逐文件原子同步；两种来源都排除 `env.local.conf`、`.install-state/`、`.schedule/`。
-- `download_file`：仅当本地来源非空且 URL 以当前 `MP_REPO_RAW_URL/` 开头时，映射为本地仓库相对路径，调用 `mp_copy_repo_file`。检查路径边界、可读性及大小，复制后原子替换；失败直接返回，不混入远端版本。
-- 其它 URL，包括外部 GFW/TLD 规则、订阅、过滤器、二进制及 UI，仍使用 Core → 外部代理 → 直连。本地来源不是离线安装，不跳过 curl/jq 检查。
-
-本地目录不携带可靠的分支信息，因此不自动猜测分支；交互填写或 `--branch` 指定的分支仅决定后续在线地址，安装时始终使用选定本地文件。
+`_MP_SOURCE_DIR` 仅传递给本次准备和应用子进程。`mp_fetch_repo_sh` 同步快照脚本并保留私有配置及安装状态。`download_file` 遇到当前仓库 Raw URL 时映射为快照文件，失败不回退远端；其它 URL 在 prepare 下载并缓存，在 apply 只读缓存。本地安装仍需在发起端联网获取外部文件。分支参数始终保存为后续 GitHub 更新来源，不从本地 git 状态推测。
 
 ### 4.4 模板与资源预下载
 
@@ -222,48 +222,50 @@ GFW 域名列表使用 Loyalsoldier/clash-rules 已整理的 Clash payload，直
 
 ## 5. 安装流程
 
-`inst.sh` 仅提供命名参数，支持 `--key value`/`--key=value`。默认目录 `/etc/proxy`，默认分支 main，默认 DNS `223.5.5.5 119.29.29.29`，默认无外部代理。`--subscribe-url`、`--agh-user`、`--agh-password` 必填。未知、重复、缺值及静默模式基本字段的非法值在软件包安装前拒绝；分支名的 jq 校验、本地文件检查在补齐依赖后执行，失败时尚未写入项目配置，但可能已安装系统依赖。安装路径限定安全字符以匹配现有服务文件和 cron 模板。
+入口与模块职责：
 
-无参数时必须能打开 `/dev/tty`；交互输入走独立 fd 3，支持脚本从管道输入。先选择外部代理，再调用 GitHub `/repos/AfxMsgBox/MyRule/branches?per_page=100&page=N`，通过 jq 验证响应并逐页获取，直到页面少于 100 条；完整列表排序去重，main 置顶。任何页面失败或响应异常均丢弃不完整列表，只允许整批重试或退出，不允许手输分支绕过。静默模式不调用分支 API。本地来源也不调用分支 API；交互模式第 2 步选择在线或本地，再选择在线分支或填写后续更新分支。
+| 文件 | 职责 |
+|---|---|
+| `inst.sh` | 定位本地模块；独立脚本补齐最小工具、下载分支归档并加载模块 |
+| `install-lib.sh` | 统一编排、参数与向导、依赖、来源和缓存、目标应用、恢复快照与定时任务 |
+| `install-remote.sh` | SSH 探测、连接复用、传输、远端预检及清理 |
 
-输出由安装器负责阶段及状态，子脚本通过 `_MP_INSTALL_OUTPUT=1` 启用终端状态颜色；颜色按输出 fd 的 TTY 独立判断，NO_COLOR/TERM=dumb 禁用，syslog 始终纯文本。所有交互输入统一使用 `prompt_to`，沿用终端正常回显，不再调用 stty 隐藏输入；代理地址、订阅 URL 和密码哈希与其它字段一样可见，默认值也直接显示，空输入保留默认值。输入仍使用 `IFS= read -r`，保留 URL、哈希中的特殊字符。下载日志的凭据脱敏规则保持不变。
+安装器归并为以上三个文件；`portable.sh` 是安装与日常更新共用的运行库。`install-lib.sh` 被 source 时仅定义函数，只有显式 `--installer-run` 才执行入口。独立 inst.sh 自动下载仓库并调用库入口，本机在线和 SSH 在线均不要求事先下载其它文件。CLI 自举使用 `--branch`，未指定时使用 main；完整向导随后查询分支列表，选择其它分支会重新下载该分支的仓库快照。所选分支须包含这套安装器。
 
-`inst.sh` 的主要顺序如下：
+支持三条路径：本机在线、SSH 在线、SSH 本地仓库；另保留本机本地仓库安装。发起端适配 Linux/macOS/OpenWrt；安装目标为 OpenWrt/procd 和 Linux/systemd。macOS 仅作为资源下载与 SSH 部署发起端，不安装或运行代理服务，无需实现 launchd、macOS TUN、路由及服务卸载适配。
+
+命令行支持 `--key value` / `--key=value`，无参数交互，有参数默认静默；`--interactive` 可带预设参数进入向导。必填订阅，认证选择 bcrypt 哈希或 `--no-auth`，用户名默认 admin，目录默认 /etc/proxy、分支 main、DNS 默认值保持原样。安装路径要求安全绝对路径。SSH 参数含用户@主机、端口、私钥、auto/password/key。间隔参数 `--scripts-days` / `--configs-days` 为 1–365，省略保留已有任务；`--no-start` 延后配置启用。
 
 ```text
-解析参数 → 检查 root、终端或静默基本参数 → 识别平台 → 检查并补装系统依赖
+入口定位/获取模块 → 检查发起端依赖 → 收集并校验参数
     ↓
-交互收集输入（代理 → 仓库来源及分支 → 必填信息 → DNS），或使用静默参数
+本机识别或 SSH 只读探测目标 OS、CPU、UID、sudo 可用性
     ↓
-校验全部输入及本地来源必需文件、确定安装目录
+prepare：固定仓库快照 → 按目标 CPU 下载全部外部资源
+    → 保存参数 JSON → 生成并核对逐文件 SHA-256 清单
     ↓
-立即启用并持久化 net.ipv4.ip_forward
+本机 apply，或 SSH 上传归档和依赖预检脚本
     ↓
-写入本次参数到 env.local.conf，移除旧 Raw URL 项
+目标补齐软件源依赖 → 校验归档哈希 → 解包 → 校验清单、参数、OS/CPU
     ↓
-bootstrap 从所选来源获取 env.conf/common.sh
+创建安装目录、记录并设置 IPv4 转发、写 env.local.conf、同步脚本
     ↓
-从在线 tarball 或本地目录同步 sh/，处理服务文件路径
+只读快照/缓存，复用既有更新脚本生成 pending 配置、安装程序和 UI
     ↓
-生成 Core config.yaml.pending 并预下载全部 HTTP providers
-    ↓
-下载 Mihomo、AGH、metacubexd UI（UI 路径取自 pending Core 配置）
-    ↓
-生成 agh.yaml.pending 并预下载全部 filters
-    ↓
-生成 AGH dns.conf.pending
-    ↓
-选择启用：安装服务文件 → 停止 AGH → 提交三份 pending 配置
-    → 启用并重启 Core → 等待 Core API → 启用并重启 AGH
-    （首次安装跳过停止 AGH，使用 start）
-    ↓
-仅交互模式按用户选择补装 crontab，再写入 03:00 脚本更新和 03:05 配置更新 cron
-    （静默模式自动启用服务，不读写 cron）
+清除缓存/来源临时环境 → 按原顺序切换服务 → 设置所选更新任务
 ```
 
-首次安装阶段 Core 尚未启动，公共下载函数无法使用本机 Core 代理时尝试 `MP_PROXY`，最后直连。重装期间保留原正式配置，仍从中派生下载代理。所有 Core 启动必需文件、AGH filters 和二进制必须在切换服务前准备完成；任何必需步骤失败都停止安装。
+prepare 在私有临时目录运行既有配置/二进制更新器，以 `_MP_TARGET_ARCH` 指定目标 CPU，不执行下载的目标程序。`_MP_CACHE_WRITE` 按 URL 的 SHA-256 保存响应正文及内容校验值。目标 apply 设置 `_MP_RESOURCE_DIR` 后，外部资源缺失或校验失败立即退出，绝不联网回退；配置在目标重新渲染，因此路径和空 DNS 的 `/etc/resolv.conf` 使用目标值。日常更新不继承这些临时选项。
 
-外部下载来源、文件名与落盘位置统一维护在 [README 下载列表](README.md#下载列表)。清单由 `update-bin.sh`（版本元数据、程序与 UI）、`update-agh-config.sh`（TLD/GFW）、Core 模板的 HTTP providers 及 AGH 模板的 filters/whitelist_filters 决定。本地来源仅替换本仓库文件，不缓存或跳过这些外部请求。修改上述入口或模板时须同步核对该表；运行期健康检查和 DNS 查询不属于安装文件下载。
+完整安装包包含 repo/、resources/、config.json、manifest；仅快照代码、模板及规则进入 repo。清单核对文件集合、内容哈希及类型，拒绝符号链接、额外文件、路径跳转。包含订阅与管理员参数的临时目录使用 0700，参数文件受 umask 077 保护。哈希用于完整性检查，传输身份和保密性由 SSH 负责，不将其描述为发行签名。
+
+SSH 使用 OpenSSH ControlMaster 复用连接，原生支持默认密钥、agent、指定私钥及交互密码。保留主机密钥检查，不提供明文密码命令行选项。上传通过 SSH 标准输入完成，不依赖远端 SFTP/scp。非 root 目标要求 sudo；远端安装分配 TTY，允许原生 sudo 密码提示。只将经过限制的临时路径和哈希拼入远端命令，敏感安装参数走文件；结束时清理私有临时目录及连接。异常断线/断电可能遗留临时目录，真实恢复行为待验证。
+
+`--download-proxy` 只属于发起端，SSH 模式默认空；`--proxy` 保存为目标机后备代理。本机安装未显式给 download-proxy 时沿用 proxy。资源准备读取发起端现有 Core（本机目标目录，SSH 发起端 /etc/proxy）；在 staging 中用 `_MP_DOWNLOAD_CORE_CONFIG` 指向它，不能误用目标地址或 staging 配置。后续目标更新仍为自己的 Core → MP_PROXY → 直连。
+
+向导走 /dev/tty 的 fd 3，可见输入、空行保留默认值，DNS 输入 `-` 清空。所有来源均分页获取 GitHub 分支列表，main 置顶；本地来源所选分支用于后续在线更新。密码选择默认不设置，选择设置后输入用户名及 bcrypt 哈希。颜色仅对 TTY 启用，NO_COLOR/TERM=dumb 禁用，日志不显示订阅或代理凭据；SSH 自身管理密码输入。
+
+外部下载清单保留在 [README 下载列表](README.md#下载列表)。每次安装重新准备最新资源，不因目标已有文件跳过。只有下载与包校验成功才开始覆盖目标项目文件；软件依赖补装不在此保证范围内。覆盖应用不承诺整批事务回滚。
 
 安装开始时若已存在 Core 主配置、AGH 主配置或 dns.conf，则按重装处理。选择不启用服务时，重装保留三份 pending 配置及原正式配置；首次安装则直接提交三份配置，不启动服务。安装器会打印相应手动应用命令。此选择不撤销此前的 IPv4 转发、本机参数、脚本、二进制/UI 和 provider/filter 资源更新。
 
@@ -283,7 +285,7 @@ AGH 依赖 Core，因为部分域名上游指向 Core DNS，且 AGH 自身的 `h
 
 ### 5.1 系统依赖自举
 
-依赖检查在首次联网下载及交互分支查询之前进行，不假设脚本通过 curl 下载：浏览器下载或手动复制的独立 `inst.sh` 同样可用。前置平台识别只用 shell 内建读取 `/etc/os-release`；root 检查优先用 `id`，缺少时读取 `/proc/self/status` 的有效 UID。不自动安装或切换系统服务管理器。
+独立 inst.sh 先补齐 curl/jq/tar/CA，随后加载模块执行完整检查；浏览器下载也适用。发起端只检查下载、解压、校验及 SSH 工具，不安装 ip/sysctl 等目标工具。目标执行完整依赖检查，并在写入项目文件前按需补齐 cron/flock。未识别的软件包管理器提示手动补齐；不安装或切换服务管理器。独立自举尚未加载完整解析器，某些无效参数可能在自举下载后才被拒绝。
 
 | 检查项 | Debian/Ubuntu 软件包 | OpenWrt 软件包 |
 |---|---|---|
@@ -293,13 +295,15 @@ AGH 依赖 Core，因为部分域名上游指向 Core DNS，且 AGH 自身的 `h
 | `ip` / `sysctl` / `logger` | `iproute2` / `procps` / `bsdutils` | `ip-tiny` / `procps-ng-sysctl` / `logger` |
 | `awk` / `find` | `mawk` / `findutils` | `gawk` / `findutils-find` |
 | `cat chmod cp mv rm mkdir mktemp dirname basename readlink date sleep head sort tr wc ln uname id` | `coreutils` | 各自的 `coreutils-<命令>` |
+| `ssh`（SSH 发起端） | `openssh-client` | `openssh-client` |
+| `sha256sum`（无 shasum 时） | `coreutils` | `coreutils-sha256sum` |
 | `crontab` / `flock`（用户选择定时任务时） | `cron` / `util-linux` | `busybox` / `flock` |
 
 按 `command -v` 检查命令，已有 BusyBox applet 可直接满足依赖，不因包名不同重复安装。证书检查系统 `/etc/ssl/certs/ca-certificates.crt` 或 `/etc/ssl/cert.pem` 是否可读且非空；不执行联网探测。只对缺失项映射包名、去重后批量安装，再清除 shell 命令缓存并复查全部依赖。包管理器返回成功但工具或证书仍缺失时，也返回失败；例如定制 OpenWrt 的 BusyBox 禁用了 crontab 时，需使用提供该功能的固件或包，不能将安装 busybox 成功视为功能已可用。
 
 OpenWrt 优先选择可用的 apk，否则 opkg；Debian/Ubuntu（含通过 `ID_LIKE` 识别的衍生系统）使用 apt-get。其它 systemd 系统在依赖齐全时仍可继续，缺失时提示手工补齐。软件包操作仅刷新索引并安装缺失项，不执行整体 upgrade、不修改软件源或永久代理配置，也不关闭 TLS/签名校验。操作使用包管理器自身的网络配置；用户提供的 `MP_PROXY` 不参与这一阶段。apt-get 使用非交互模式，所有包管理器均从 `/dev/null` 读取标准输入，避免吞掉管道中的脚本或向导输入。
 
-刷新索引或安装失败时保留原始错误输出，打印退出码及手动安装命令并停止。软件包补装不提供回滚，已安装的包会保留；定时任务依赖检查发生在服务配置之后，失败也不会撤销此前完成的安装。未选择任何定时任务或静默安装时，不检查或安装 crontab/flock。
+刷新索引或安装失败时保留原始错误输出，打印退出码及手动安装命令并停止。软件包补装不提供回滚，已安装的包保留。没有选择定时任务时不检查 crontab/flock。macOS 使用系统 shasum；缺少其它工具时调用已有 Homebrew，未安装 Homebrew 时提示手动补齐。非 root Linux 发起端补包使用 sudo。
 
 包管理器命令参照 [OpenWrt opkg/apk 对照](https://openwrt.org/docs/guide-user/additional-software/opkg-to-apk-cheatsheet)，基础命令拆包参照 [OpenWrt coreutils 定义](https://github.com/openwrt/packages/blob/master/utils/coreutils/Makefile)。`unzip` 仅用于用户在运行安装器前解压 GitHub ZIP，不是脚本自身的运行依赖，安装方法放在 README。
 
@@ -420,7 +424,7 @@ fi
 
 两个任务共享 `sh/.schedule/lock` 的非阻塞 flock，自动更新相互串行；锁忙时跳过本次检查，次日再试。例如脚本更新超过 5 分钟，配置更新可能顺延一天。手动更新、安装和卸载不加入此锁，仍不支持与自动更新并发操作。调度器通过整体函数执行以应对自身文件在脚本更新时被替换；对子进程设置 `_MP_NONINTERACTIVE=1`，不询问下载重试。脚本更新调用 `update-scripts.sh`，配置更新调用 `update-all-configs-restart-services.sh`，仅后者重启 Core/AGH。
 
-OpenWrt 写入至少一项任务后会启用并重启 cron 服务。`.schedule/` 不属于仓库内容，脚本同步不会覆盖；普通卸载保留，purge 随 sh/ 删除。静默安装不修改定时设置。按用户要求，本次间隔调整未运行测试，真实日期推进、跨月和并发行为待验证。
+OpenWrt 写入至少一项任务后会启用并重启 cron 服务。`.schedule/` 不属于仓库内容，脚本同步不会覆盖；普通卸载保留，purge 随 sh/ 删除。命令行未给出间隔时保留定时设置。按用户要求，本次间隔调整未运行测试，真实日期推进、跨月和并发行为待验证。
 
 ## 7. AGH 域名分流配置
 
@@ -503,7 +507,7 @@ README 的接入示例限定为上述 IPv4 拓扑；跨网段、容器 NAT 或�
 4. 提交 cron 清理，按 AGH → Core 顺序停止服务；检查 `/proc/*/exe` 是否仍指向目标二进制（包括已删除但运行中的旧文件），有残留则保留文件和数据并失败。读取路由记录，仅在同一 boot_id、TUN 的 ifindex 仍一致、路由仍为记录的 CIDR 与设备且没有 via 网关时清理残留；接口不存在表示内核已随接口销毁清理，跨启动周期或同名接口重建则保留其路由。无记录时不猜测路由归属。
 5. OpenWrt 禁用服务；移除已核对的自启动链接、服务文件和 hotplug。systemd 直接删除启用链接再 daemon-reload，避免 systemctl disable 触发旧 SysV 兼容同步。
 6. 有恢复凭据时恢复安装前的转发配置文件，原文件不存在则删除安装器新增文件；运行值仅在仍为安装器设置的 1 且原值为 0 时恢复为 0。成功后写入 `restored` 标记，重复卸载不重放恢复操作。失败保留记录和数据供重试；旧安装没有记录时提示并保留转发设置。
-7. 默认保留数据。显式 purge 或无参数交互选择删除时，在重查路径及进程后仅删除目标的 core/、agh/、sh/；安装根目录及其它文件保留。清理顺序将 sh/ 放最后，整个卸载流程位于函数中，支持删除当前执行的脚本。
+7. 默认保留数据。显式 purge 或无参数交互选择删除时，在重查路径及进程后仅删除目标的 core/、agh/、sh/；随后用 rmdir 删除已空的安装根目录；若仍有其它文件则保留并提示。空目录因权限或挂载原因无法删除时返回失败；不会递归删除根目录中的其它内容。清理顺序将 sh/ 放最后，整个卸载流程位于函数中，支持删除当前执行的脚本。
 
 `env.local.conf` 仅作为安装凭据以文本匹配 MP_INST_DIR，不执行其中内容。服务命令失败、链接/文件删除失败、daemon-reload 失败都返回非零，后续数据清理不执行；流程不承诺回滚已经移除的 cron 或停止的服务。
 
@@ -531,7 +535,7 @@ README 的接入示例限定为上述 IPv4 拓扑；跨网段、容器 NAT 或�
 | 需求 | 优先检查的文件 |
 |---|---|
 | 修改卸载与清理范围 | `sh/uninstall.sh`、`tests/test_uninstall.py`、README、本文 |
-| 修改安装交互或安装顺序 | `sh/inst.sh`、`README.md` |
+| 修改安装交互或安装顺序 | `sh/inst.sh`、`sh/install-lib.sh`、`sh/install-remote.sh`、`README.md` |
 | 修改下载代理或失败处理 | `sh/common.sh` 的 `download_file`、bootstrap 逻辑 |
 | 增删本机变量 | `sh/env.conf`、`sh/inst.sh`、模板、`README.md`、本文 |
 | 修改 Core 字段或层级 | `core/config.yaml`、所有 `mp_core_*`、配置验证、本文映射表 |

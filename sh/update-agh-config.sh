@@ -1,6 +1,6 @@
 #!/bin/sh
 # 生成 AGH dns.conf：默认上游 + myupstream 原样段 + 各域名清单转发到 Core dns.listen
-. "$(dirname "$(readlink -f "$0")")/common.sh"
+. "$(dirname "$(readlink -f "$0" 2>/dev/null || printf '%s\n' "$0")")/common.sh"
 
 # 第二个参数供安装器暂存 dns.conf，默认仍直接更新正式文件。
 agh_dns="${2:-$MP_AGH_DIR/dns.conf}"

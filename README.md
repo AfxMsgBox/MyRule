@@ -4,13 +4,14 @@
 
 ## 安装前准备
 
-- 使用 root；安装器会检查所需工具和 CA 证书，列出缺失项并自动安装，然后重新检查。
-- 准备节点订阅 URL、AdGuardHome 管理员用户名和密码的 **bcrypt 哈希**。
+- 安装目标为 OpenWrt 或使用 systemd 的 Linux；目标机需能访问自己的软件源。
+- 可以从 Linux、macOS、OpenWrt 发起安装；macOS 仅用于下载资源和通过 SSH 部署到目标机。SSH 登录使用 root，或拥有 sudo 权限的用户；本机安装使用 root。安装器会提示并补装缺失依赖。
+- 准备节点订阅 URL。安装时选择是否设置 AdGuardHome 登录密码；用户名默认 `admin`，设置密码时填写 **bcrypt 哈希**。
 - 首次安装无法访问下载源时，准备一个 HTTP 或 SOCKS 代理地址。
 
-依赖安装使用系统配置的软件源：Debian/Ubuntu 使用 `apt-get`，OpenWrt 使用 `opkg` 或 `apk`，只补齐缺失依赖。**软件包下载遵循包管理器自身的代理配置，不使用安装器的 `--proxy`**；失败时会显示错误和手动安装命令，并停止安装。启用定时更新时会按需补装 `crontab` 和防止任务重叠的 `flock`。
+依赖安装使用系统配置的软件源：Debian/Ubuntu 使用 `apt-get`，OpenWrt 使用 `opkg` 或 `apk`，只补齐缺失依赖。macOS 发起端缺少工具时使用已安装的 Homebrew；没有 Homebrew 时提示手动补齐。SSH 发起端需要 OpenSSH 客户端（OpenWrt 可安装 `openssh-client`）。**软件包下载遵循包管理器自身的代理配置，不使用安装器的 `--proxy`**；失败时会显示错误和手动安装命令，并停止安装。启用定时更新时会按需补装 `crontab` 和防止任务重叠的 `flock`。
 
-如果系统已有 `htpasswd`，可交互生成密码哈希：
+如果选择设置密码，可用已有的 `htpasswd` 生成哈希（安装器不自动安装密码生成工具）：
 
 ```sh
 htpasswd -nB -C 10 admin
@@ -27,9 +28,9 @@ curl -fL -o /tmp/myrule-inst.sh https://raw.githubusercontent.com/AfxMsgBox/MyRu
 sh /tmp/myrule-inst.sh
 ```
 
-无参数运行即进入向导，安装到 `/etc/proxy`。按提示填写代理、分支、订阅和管理员信息，并选择是否启动服务、设置自动更新。在线分支按编号选择，默认 `main`。
+无参数运行即进入向导，选择本机或 SSH 安装、在线或本地仓库来源，然后填写代理、分支和订阅，并选择是否设置 AGH 登录密码。选择设置时填写用户名（默认 `admin`）和 bcrypt 哈希；选择不设置时免登录，能访问管理端口的人均可修改配置。可选择是否启动服务，以及每隔几天自动更新。默认目录 `/etc/proxy`；所有交互安装均从 GitHub 获取分支列表，按编号选择，默认 `main`。
 
-所有输入均可见，包括代理地址、订阅 URL 和密码哈希，支持直接粘贴后按回车；方括号内显示当前默认值，直接回车保留。
+安装配置输入均可见，包括代理地址、订阅 URL 和密码哈希（SSH/sudo 密码使用系统提示），支持直接粘贴后按回车；方括号内显示当前默认值，直接回车保留。
 
 下载脚本本身也需要代理时，在上面的 curl 命令中添加 `--proxy 'socks5h://127.0.0.1:1080'`；运行安装器后仍需按提示填写代理。
 
@@ -37,7 +38,7 @@ sh /tmp/myrule-inst.sh
 
 ### 静默安装
 
-有任意参数即进入静默模式，以下三个参数每次都必须提供；替换示例中的订阅和哈希：
+有参数默认进入命令行模式（加 `--interactive` 可继续使用向导）。订阅必填；认证必须明确选择 `--agh-password HASH` 或 `--no-auth`，用户名默认 `admin`：
 
 ```sh
 sh /tmp/myrule-inst.sh \
@@ -46,18 +47,28 @@ sh /tmp/myrule-inst.sh \
   --agh-password '$2b$10$你的完整bcrypt哈希'
 ```
 
-静默安装成功后自动启用服务，重装时重启服务；不会修改自动更新任务。支持 `--参数 值` 和 `--参数=值`，使用 `--help` 查看帮助。
+不设置密码时，将示例中的 `--agh-user` 和 `--agh-password` 两项替换为 `--no-auth`。
+
+静默安装成功后自动启用服务，重装时重启服务；未指定更新间隔时保留原自动更新任务。支持 `--参数 值` 和 `--参数=值`，使用 `--help` 查看帮助。
 
 | 参数 | 用途 / 默认值 |
 |---|---|
 | `--subscribe-url URL` | 必填，HTTP/HTTPS 节点订阅地址 |
-| `--agh-user USER` | 必填，管理员用户名 |
-| `--agh-password HASH` | 必填，bcrypt 哈希，用单引号包裹 |
+| `--agh-user USER` | 管理员用户名，默认 `admin` |
+| `--agh-password HASH` | 设置登录密码，填写 bcrypt 哈希并用单引号包裹；与 `--no-auth` 二选一 |
+| `--no-auth` | 关闭 AGH 登录认证，无需用户名和密码即可进入管理页面 |
 | `--install-dir DIR` | 安装目录，默认 `/etc/proxy`；路径不要包含空格或中文 |
-| `--source-dir DIR` | 本地仓库根目录，省略则从 GitHub 下载 |
+| `--local` | 自动使用 inst.sh 所在的本地仓库（含未提交修改） |
+| `--source-dir DIR` | 显式指定本地仓库根目录 |
+| `--target USER@HOST` | SSH 目标；省略则安装到本机 |
+| `--ssh-port PORT` / `--ssh-key FILE` | SSH 端口（默认 22）/ 私钥路径 |
+| `--ssh-auth auto\|password\|key` | 认证方式；默认 auto，使用默认密钥、agent 或密码提示 |
 | `--branch NAME` | GitHub 分支名，省略或为空使用 `main` |
 | `--dns 'DNS1 DNS2'` | 默认 `223.5.5.5 119.29.29.29`；传 `--dns ''` 使用系统 DNS |
-| `--proxy URL` | 外部后备代理，省略则不使用外部代理；已有 Core 代理仍会优先尝试 |
+| `--proxy URL` | 保存到目标机的外部后备代理，默认空；Core 仍优先 |
+| `--download-proxy URL` | 发起端本次下载代理，不保存到目标机 |
+| `--scripts-days N` / `--configs-days N` | 脚本 / 配置更新间隔，1–365 天；省略保留已有任务 |
+| `--no-start` | 暂不启用新配置及启动服务 |
 
 可在上面的命令末尾添加 `--branch dev --proxy 'socks5h://127.0.0.1:1080'` 等可选参数。静默模式不会沿用旧配置补齐参数；重装时不传 `--proxy` 会清空原外部代理。
 
@@ -73,28 +84,59 @@ sh sh/inst.sh
 
 下载其它分支时，替换 ZIP 文件名及解压后的目录名。解压需先有 `unzip`；缺少时，Debian/Ubuntu 执行 `apt-get update && apt-get install -y unzip`，OpenWrt 执行 `opkg update && opkg install unzip`（使用 apk 的系统执行 `apk update && apk add unzip`）。也可以在电脑上解压后，将整个目录复制到设备。
 
-在向导中选择“本地仓库目录”，填写解压目录和**后续 GitHub 更新分支**。源目录与安装目录必须分开，安装目录不能放在源目录里面。
+在向导中选择“本机安装（使用本地仓库）”，仓库根目录自动按 inst.sh 的真实位置识别，从 GitHub 列表选择**后续更新分支**。源目录与安装目录必须分开，安装目录不能放在源目录里面。
 
 也可以静默安装：
 
 ```sh
 sh /path/to/MyRule-main/sh/inst.sh \
-  --source-dir /path/to/MyRule-main --branch main \
+  --local --branch main \
   --subscribe-url 'https://example.com/subscription' \
   --agh-user admin --agh-password '$2b$10$你的完整bcrypt哈希'
 ```
 
 **本地安装仍需联网**下载程序、面板、订阅及外部规则，需要代理时添加 `--proxy`。以后更新从指定的 GitHub 分支获取仓库文件，本地源目录可在安装后删除。[完整下载清单](#下载列表)。
 
+### 通过 SSH 安装
+
+目标机无法访问 GitHub 时，在能访问下载源的 Linux、macOS 或 OpenWrt 设备上运行安装器。所有仓库文件、程序、订阅和规则先下载到发起端，再上传安装；目标机只需能访问自己的软件源来补装系统依赖。
+
+**本机在线安装和 SSH 在线安装都只需先下载一个 `inst.sh`**（使用上面的 curl 命令或浏览器）；其余安装代码和资源由脚本自动获取，不需要手工下载辅助脚本。
+
+```sh
+# 使用 GitHub 分支文件
+sh /tmp/myrule-inst.sh --target root@192.168.1.2 --branch main \
+  --subscribe-url 'https://example.com/subscription' \
+  --agh-user admin --agh-password '$2b$10$你的完整bcrypt哈希'
+
+# 开发调试：使用 inst.sh 所在仓库，包括未提交的修改
+sh /path/to/MyRule/sh/inst.sh --local --target admin@192.168.1.2 \
+  --ssh-key "$HOME/.ssh/id_ed25519" --branch main \
+  --subscribe-url 'https://example.com/subscription' \
+  --agh-user admin --agh-password '$2b$10$你的完整bcrypt哈希'
+```
+
+也可直接无参数运行，在向导中选择 SSH 安装。用户名放在 `--target` 中；密码认证使用 `--ssh-auth password`，由 SSH 提示输入。首次连接按 SSH 提示核对主机指纹；非 root 用户安装时可能需要输入 sudo 密码。全自动运行需提前配置密钥、已知主机及免密码 sudo（或 root 登录）。
+
+下载的是**目标机架构**的程序，因此可以从 Mac 或不同 CPU 架构的开发机安装。安装后更新从指定 GitHub 分支下载，不再依赖发起端或原本地仓库。
+
 ### 下载代理与重装
 
-安装和更新的项目资源下载依次尝试：**已有 Core 代理 → 指定的外部代理 → 直连**。首次安装可指定外部代理；之后通常可使用运行中的 Core。外部代理支持 `http://`、`https://`、`socks5://`、`socks5h://`。系统依赖软件包使用包管理器自身的代理配置。
+下载顺序为：**下载所在机器的 Core 代理 → 外部后备代理 → 直连**。
 
-交互重装选择“不启动服务”时，新配置不会立即启用，但脚本和程序等文件可能已经更新。以后可重新运行安装器并选择启动，或按安装器打印的命令操作。
+| 场景 | 外部代理参数 |
+|---|---|
+| 本机安装 | `--proxy`；可用 `--download-proxy` 单独覆盖本次下载代理 |
+| SSH 安装，在发起端下载 | `--download-proxy`；不会使用目标机的代理地址 |
+| 目标机以后的更新 | 保存的 `--proxy`；省略为空，通常使用已启动的本机 Core |
+
+例如从开发机部署时，添加 `--download-proxy 'socks5h://127.0.0.1:1080'`，不会把开发机的代理地址写入目标机。外部代理支持 HTTP、HTTPS、SOCKS5、SOCKS5H。系统依赖使用包管理器自身的代理配置。
+
+三种方式都覆盖安装器管理的脚本、程序、面板和生成的配置及规则，保留运行数据、原卸载恢复记录和未调整的定时任务。先完成下载及校验，再安装并切换服务。选择“不启动服务”或 `--no-start` 时，重装保留原正式配置，新配置暂存为 `.pending`；脚本和程序等文件仍会更新。
 
 ### 下载列表
 
-除本仓库文件外，在线安装和本地安装都会获取以下资源，其中系统依赖仅在缺失时补装。项目资源的安装位置相对于安装目录（默认 `/etc/proxy`）；`<版本>` 为最新发行版本，`<架构>` 按设备 CPU 自动选择。
+除本仓库文件外，安装还需要以下资源。SSH 模式的项目资源全部在发起端下载、上传，系统依赖则在各自机器缺失时从软件源补装。项目资源的安装位置相对于安装目录（默认 `/etc/proxy`）；`<版本>` 为最新发行版本，`<架构>` 按设备 CPU 自动选择。
 
 | 内容 / 用途 | 下载来源 | 下载文件或响应 | 安装位置 / 处理方式 |
 |---|---|---|---|
@@ -117,7 +159,7 @@ sh /path/to/MyRule-main/sh/inst.sh \
 
 | 用途 | 地址 |
 |---|---|
-| AdGuardHome 管理页面 | `http://设备IP:180`，使用安装时设置的用户名和原密码登录 |
+| AdGuardHome 管理页面 | `http://设备IP:180`，使用设置的用户名和原密码登录；未设置密码则直接进入 |
 | Mihomo 面板 | `http://设备IP:3721/ui/` |
 | DNS 服务 | `设备IP:53` |
 
@@ -181,7 +223,7 @@ systemctl restart proxy_core agh
 
 仅在更新成功后执行重启。查看服务状态可用 `systemctl status proxy_core agh`（Debian/Ubuntu），或分别运行 `/etc/init.d/proxy_core status`、`/etc/init.d/agh status`（OpenWrt）。
 
-交互安装只需分别填写“每隔几天更新脚本”和“每隔几天更新配置”，回车默认 3 天，支持 1–365 天；输入 `n` 跳过设置，已有任务保留。脚本每天 03:00、配置每天 03:05 检查是否到期，按连续天数计算，跨月不重置；失败后次日重试。配置更新成功后自动重启服务。用 `crontab -l` 查看任务，重新运行交互安装可调整间隔。静默安装不修改这些设置。
+交互安装只需分别填写“每隔几天更新脚本”和“每隔几天更新配置”，回车默认 3 天，支持 1–365 天；输入 `n` 跳过设置，已有任务保留。脚本每天 03:00、配置每天 03:05 检查是否到期，按连续天数计算，跨月不重置；失败后次日重试。配置更新成功后自动重启服务。用 `crontab -l` 查看任务，重新运行交互安装可调整间隔。命令行安装可用 `--scripts-days` / `--configs-days` 设置间隔；省略则保留原设置。
 
 ## 修改配置
 
@@ -192,8 +234,8 @@ systemctl restart proxy_core agh
 | 变量 | 用途 |
 |---|---|
 | `MP_SUBSCRIBE_URL` | 节点订阅 URL |
-| `MP_AGH_USER_NAME` | 管理员用户名 |
-| `MP_AGH_PASSWORD` | 管理员密码的 bcrypt 哈希 |
+| `MP_AGH_USER_NAME` | 管理员用户名，默认 `admin`；免登录时不启用账号 |
+| `MP_AGH_PASSWORD` | 管理员密码的 bcrypt 哈希；空值表示免登录，后续更新沿用 |
 | `MP_REPO_BRANCH` | 后续更新分支，默认 `main` |
 | `MP_PROXY` | 外部后备代理，空值表示不使用 |
 | `MP_LOCAL_DNS` | 上游 DNS，多个地址以空格分隔；空值使用系统 DNS |
@@ -213,7 +255,7 @@ sh /etc/proxy/sh/update-all-configs-restart-services.sh
 # 交互卸载：询问是否删除安装文件，回车默认保留
 sh /etc/proxy/sh/uninstall.sh
 
-# 同时删除安装目录中的 sh/、core/、agh/，包括配置和运行数据
+# 删除 sh/、core/、agh/（含配置和运行数据），并删除清理后已空的安装目录
 sh /etc/proxy/sh/uninstall.sh --purge
 ```
 
@@ -222,6 +264,8 @@ sh /etc/proxy/sh/uninstall.sh --purge
 ```sh
 sh /opt/myproxy/sh/uninstall.sh --install-dir /opt/myproxy --purge
 ```
+
+选择删除时，清理后已空的安装目录也会删除；若目录内仍有其它文件，则保留目录并提示。
 
 自动化执行可加 `--yes` 跳过询问。卸载清理安装器创建的 Core/AGH 服务、自启动链接、hotplug 路由修复脚本及自动更新任务；本项目记录的残留 fake-ip 路由也会清理。
 

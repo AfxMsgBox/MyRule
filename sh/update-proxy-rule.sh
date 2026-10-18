@@ -1,6 +1,6 @@
 #!/bin/sh
 # 触发 mihomo 增量刷新所有 proxy-providers 与 rule-providers（PUT /providers/...）
-. "$(dirname "$(readlink -f "$0")")/common.sh"
+. "$(dirname "$(readlink -f "$0" 2>/dev/null || printf '%s\n' "$0")")/common.sh"
 
 config_yaml="$MP_CORE_DIR/config.yaml"
 [ -f "$config_yaml" ] || { echo_log "未找到 $config_yaml，跳过"; exit 0; }

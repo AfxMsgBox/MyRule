@@ -2,6 +2,7 @@
 import os
 import gzip
 import io
+import json
 from pathlib import Path
 import shlex
 import shutil
@@ -112,8 +113,41 @@ mp_sync_etc_files() { printf 'sync %s\n' "$1" >> "$TEST_ROOT/events"; }
                 self.assert_ok(result)
                 self.assertEqual(result.stdout, expected)
 
+    def test_agh_auth_rendering_and_escaping(self):
+        self.file("template", (ROOT / "agh/agh.yaml").read_text())
+        username = "a\"b\\c{MP_INST_DIR}"
+        for password in ("", "$2b$10$test"):
+            result = self.run_shell('mp_render_template "$TEST_ROOT/template" "$TEST_ROOT/rendered" agh',
+                                    extra={"MP_AGH_PASSWORD": password, "MP_AGH_USER_NAME": username})
+            self.assert_ok(result)
+            rendered = (self.root / "rendered").read_text()
+            users = next(line[7:] for line in rendered.splitlines() if line.startswith("users: "))
+            self.assertEqual(json.loads(users), [] if not password else [{"name": username, "password": password}])
+            self.assertNotIn("{MP_AGH_PASSWORD}", rendered)
+
+    def test_agh_invalid_auth_or_users_block_preserves_destination(self):
+        cases = [("users: []\n", "plaintext"), ("dns: {}\n", ""),
+                 ("users: []\nusers: []\n", "")]
+        for template, password in cases:
+            self.file("template", template)
+            self.file("rendered", "old configuration")
+            result = self.run_shell('mp_render_template "$TEST_ROOT/template" "$TEST_ROOT/rendered" agh',
+                                    extra={"MP_AGH_PASSWORD": password})
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual((self.root / "rendered").read_text(), "old configuration")
+
+    def test_agh_update_keeps_persisted_no_auth(self):
+        self.configure_downloads()
+        self.file("sh/env.local.conf", "MP_AGH_PASSWORD=''\nMP_AGH_USER_NAME='admin'\n")
+        self.env.pop("MP_AGH_PASSWORD")
+        self.env.pop("MP_AGH_USER_NAME")
+        result = self.run_shell('sh "$MP_INST_DIR/sh/update-core-config.sh" && '
+                                'mp_prepare_agh_config "$MP_AGH_DIR/agh.yaml" "$MP_CORE_DIR/config.yaml"')
+        self.assert_ok(result)
+        self.assertIn("users: []\n", (self.root / "agh/agh.yaml").read_text())
+
     def test_installer_dns_prompt_preserves_or_clears(self):
-        source = (ROOT / "sh/inst.sh").read_text()
+        source = (ROOT / "sh/install-lib.sh").read_text()
         start = source.index('    prompt_to MP_LOCAL_DNS')
         block = source[start:source.index('    return 0', start)]
         for current, answer, expected in [("", "", ""), ("1.1.1.1", "", "1.1.1.1"),
@@ -129,7 +163,7 @@ mp_sync_etc_files() { printf 'sync %s\n' "$1" >> "$TEST_ROOT/events"; }
     def test_config_persistence_preserves_quotes_backslashes_and_hash(self):
         value = "$2a$10$test'quoted\\text"
         result = self.run_shell(
-            function_source(ROOT / "sh/inst.sh", "upsert_conf") + r'''
+            function_source(ROOT / "sh/install-lib.sh", "upsert_conf") + r'''
 upsert_conf TEST_VALUE "$TEST_VALUE" "$TEST_ROOT/local.conf" || exit 1
 upsert_conf TEST_VALUE "$TEST_VALUE" "$TEST_ROOT/local.conf" || exit 1
 unset TEST_VALUE
@@ -285,14 +319,14 @@ printf '%s' "$TEST_VALUE"
         self.file("sh/update-bin.sh", 'test "$1" = "$MP_INST_DIR/core/config.yaml.pending"\n')
         if fail_download:
             self.add_common('download_file() { return 1; }')
-        source = (ROOT / "sh/inst.sh").read_text()
-        flow = source[source.index('# === 三份配置'):source.index('# === 定时更新')]
+        source = (ROOT / "sh/install-lib.sh").read_text()
+        flow = source[source.index('# === 三份配置'):source.index('    inst_apply_schedule')]
         setup = r'''
 DIR_INST="$MP_INST_DIR"; DIR_SH="$MP_INST_DIR/sh"
 os_type=systemd; etc_rels='systemd/system/agh.service'
 say_section() { :; }; say_step() { :; }; say_dim() { :; }
 say_ok() { :; }; say_err() { echo "$*"; }
-prompt_to() { autostart="$TEST_AUTOSTART"; }
+autostart="$TEST_AUTOSTART"
 reinstall="$TEST_REINSTALL"
 '''
         return self.run_shell(setup + flow, extra={"TEST_AUTOSTART": answer,

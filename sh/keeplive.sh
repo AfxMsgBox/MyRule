@@ -1,6 +1,6 @@
 #!/bin/sh
 # 周期保活：通过本地代理触发出口流量，避免节点长连接 idle 断流
 # 推荐 cron：*/5 * * * * sh /etc/proxy/sh/keeplive.sh
-. "$(dirname "$(readlink -f "$0")")/common.sh"
+. "$(dirname "$(readlink -f "$0" 2>/dev/null || printf '%s\n' "$0")")/common.sh"
 core_proxy=$(mp_core_proxy_url) || exit 1
 curl --silent --max-time 5 --proxy "$core_proxy" -I https://www.chatgpt.com >/dev/null 2>&1

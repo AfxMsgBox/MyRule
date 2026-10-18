@@ -1,7 +1,7 @@
 #!/bin/sh
 # 拉取 core/config.yaml 模板，把 {MP_*} 占位符按当前环境替换后原子写入。
 # 可选参数指定目标文件；省略时更新正式 config.yaml。
-. "$(dirname "$(readlink -f "$0")")/common.sh"
+. "$(dirname "$(readlink -f "$0" 2>/dev/null || printf '%s\n' "$0")")/common.sh"
 
 echo_log "更新代理内核 config.yaml"
 mkdir -p "$MP_CORE_DIR"

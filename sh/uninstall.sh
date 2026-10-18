@@ -8,7 +8,7 @@ un_usage() {
     cat <<'USAGE'
 用法：sh uninstall.sh [--install-dir DIR] [--purge] [--yes]
   --install-dir DIR   安装目录，默认 /etc/proxy（绝对路径）
-  --purge             删除该目录内的 sh/、core/、agh/，包括配置和运行数据
+  --purge             删除 sh/、core/、agh/ 及其配置和数据，再删除已空的安装目录
   --yes               跳过交互确认；不跳过归属和安全检查
   --help              显示帮助
 无参数时询问是否删除安装文件，回车默认保留；随后确认卸载。
@@ -345,7 +345,15 @@ un_execute() {
         un_check_dir && un_check_processes || return 1
         rm -rf -- "$un_dir/core" "$un_dir/agh" "$un_dir/sh" \
             || { un_fail '删除安装数据失败，请检查残留文件'; return 1; }
-        un_log '已删除 sh/、core/、agh/；安装根目录及其它文件保留'
+        if [ ! -e "$un_dir" ]; then
+            un_log '安装目录已不存在'
+        elif rmdir -- "$un_dir" 2>/dev/null; then
+            un_log "已删除安装文件及空的安装目录：$un_dir"
+        elif [ -n "$(find "$un_dir" -mindepth 1 -maxdepth 1 -print 2>/dev/null)" ]; then
+            un_log "项目文件已删除；目录内仍有其它文件，已保留：$un_dir"
+        else
+            un_fail "无法删除空的安装目录，请检查权限或挂载状态：$un_dir"; return 1
+        fi
     else
         un_log "安装文件已保留：$un_dir"
     fi
@@ -391,7 +399,7 @@ un_main() {
         un_check_dir || return 1
     fi
     if [ "$un_purge" -eq 1 ]; then
-        un_log '将永久删除 sh/、core/、agh/，包括密码、配置、订阅及运行数据。'
+        un_log '将永久删除 sh/、core/、agh/ 及清理后已空的安装目录，包括密码、配置、订阅及运行数据。'
     else
         un_log '保留安装文件和数据。'
     fi

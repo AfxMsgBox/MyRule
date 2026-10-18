@@ -18,7 +18,12 @@ import test_scripts
 
 ROOT = test_scripts.ROOT
 SOURCE = (ROOT / "sh/inst.sh").read_text()
-PREFIX = SOURCE.split("# === 主流程：", 1)[0]
+LIB = ROOT / "sh"
+LIBRARY = LIB / "install-lib.sh"
+APPLY = LIBRARY.read_text()
+PREFIX = APPLY.split('if [ "${1:-}" = --installer-run ]; then', 1)[0]
+PREFIX += "\n" + (LIB / "install-remote.sh").read_text()
+PREFIX += "\n" + (LIB / "portable.sh").read_text() + "\n"
 REQUIRED = ["--subscribe-url", "https://example.invalid/sub?token=private",
             "--agh-user", "admin", "--agh-password", "$2b$10$private"]
 
@@ -55,24 +60,25 @@ class InstallerTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("sh/update-bin.sh", result.stdout)
 
-    def test_local_source_interaction_skips_branch_api(self):
+    def test_local_source_interaction_lists_github_branches(self):
         source = self.local_source()
         result = self.installer(r'''
 DIR_INST="$TEST_ROOT/installed"
 prompt_to() {
     case "$1" in
-        _ics_mode) _ics_mode=2 ;;
+        _ici_mode) _ici_mode=4 ;;
         _MP_SOURCE_DIR) _MP_SOURCE_DIR="$TEST_SOURCE" ;;
-        MP_REPO_BRANCH) MP_REPO_BRANCH=feature/local ;;
-        *) return 99 ;;
+        _ica_answer) _ica_answer=n ;;
+        *) : ;;
     esac
 }
-inst_choose_branch() { echo unexpected-branch-api; return 99; }
-inst_choose_source || exit 1
+inst_choose_branch() { echo branch-api-called; MP_REPO_BRANCH=feature/local; }
+inst_parse_args --interactive || exit 1
+inst_collect_inputs || exit 1
 test "$_MP_SOURCE_DIR" = "$TEST_SOURCE" && test "$MP_REPO_BRANCH" = feature/local
 ''', {"TEST_SOURCE": str(source)})
         self.assert_ok(result)
-        self.assertNotIn("unexpected", result.stdout)
+        self.assertIn("branch-api-called", result.stdout)
 
     def test_local_repo_file_copy_and_no_network_fallback(self):
         source = self.local_source()
@@ -132,10 +138,63 @@ test "$_MP_SOURCE_DIR" = "$TEST_SOURCE" && test "$MP_REPO_BRANCH" = feature/loca
         self.assertFalse((self.root / "sh/.schedule/private-state").exists())
 
     def test_local_install_end_to_end_with_external_downloads(self):
+        self.exercise_install()
+
+    def test_remote_local_source_cross_arch_install_and_proxy_separation(self):
+        self.exercise_install(remote=True)
+
+    def test_standalone_online_download_and_apply(self):
+        self.exercise_install(online=True)
+
+    def test_remote_online_download_and_apply(self):
+        self.exercise_install(remote=True, online=True)
+
+    def test_standalone_no_auth_download_and_apply(self):
+        self.exercise_install(online=True, no_auth=True)
+
+    def test_remote_standalone_no_auth_download_and_apply(self):
+        self.exercise_install(remote=True, online=True, no_auth=True)
+
+    def test_auth_requires_explicit_choice_and_defaults_to_admin(self):
+        cases = [([], False), (["--no-auth"], True),
+                 (["--agh-password", "$2b$10$test"], True),
+                 (["--agh-password", ""], False),
+                 (["--no-auth", "--agh-password", ""], False),
+                 (["--agh-password", "$2b$10$test", "--no-auth"], False)]
+        for options, valid in cases:
+            with self.subTest(options=options):
+                args = ["--subscribe-url", "https://example.invalid/sub", *options]
+                result = self.installer("inst_parse_args " + shlex.join(args)
+                                        + ' && inst_validate_basic && test "$MP_AGH_USER_NAME" = admin')
+                self.assertEqual(result.returncode == 0, valid, result.stdout + result.stderr)
+
+    def test_auth_prompt_can_clear_or_set_password(self):
+        for answer in ("y", "n"):
+            result = self.installer(r'''
+inst_parse_args --interactive || exit 1
+MP_AGH_PASSWORD='$2b$10$old'
+prompt_to() {
+    case "$1" in
+        _ica_answer) _ica_answer=$TEST_ANSWER ;;
+        MP_AGH_USER_NAME) MP_AGH_USER_NAME=$2 ;;
+        MP_AGH_PASSWORD) MP_AGH_PASSWORD='$2b$10$new' ;;
+    esac
+}
+inst_choose_auth || exit 1
+printf 'auth=%s user=%s hash=%s' "$INST_NO_AUTH" "$MP_AGH_USER_NAME" "$MP_AGH_PASSWORD"
+''', {"TEST_ANSWER": answer})
+            self.assert_ok(result)
+            expected = "auth=0 user=admin hash=$2b$10$new" if answer == "y" else "auth=1 user=admin hash="
+            self.assertIn(expected, result.stdout)
+            self.assertNotIn("$2b$10$old", result.stdout)
+
+    def exercise_install(self, remote=False, online=False, no_auth=False):
         source = self.local_source()
         # Only replace host mutations; run actual bootstrap, template rendering and resource deployment.
-        safe = SOURCE[:SOURCE.index('# === 开启 IPv4 转发')] + SOURCE[SOURCE.index('# === 写 env.local.conf'):]
-        script = self.file("safe-inst.sh", safe)
+        # Only replace system mutations; the actual prepare/cache/apply pipeline runs.
+        state = source / "sh/install-lib.sh"
+        state.write_text(state.read_text().replace('if [ "${1:-}" = --installer-run ]; then', 'inst_enable_forward() { :; }\nif [ "${1:-}" = --installer-run ]; then'))
+        script = source / "sh/inst.sh"
         with (source / "sh/common.sh").open("a") as stream:
             stream.write(r'''
 mp_sync_etc_files() { printf 'sync %s\n' "$1" >> "$TEST_ROOT/events"; }
@@ -151,7 +210,7 @@ mp_wait_core_ready() { printf 'ready\n' >> "$TEST_ROOT/events"; }
                 info.size = len(b"test-binary")
                 info.mode = 0o755
                 tar.addfile(info, io.BytesIO(b"test-binary"))
-        self.command("uname", "echo x86_64\n")
+        self.command("uname", 'case "$1" in -s) echo Linux ;; *) echo "${REMOTE_CPU:-x86_64}" ;; esac\n')
         self.command("id", "echo 0\n")
         self.command("curl", r'''
 while [ "$#" -gt 0 ]; do
@@ -164,6 +223,7 @@ while [ "$#" -gt 0 ]; do
 done
 printf '%s %s\n' "$proxy" "$url" >> "$TEST_ROOT/downloads"
 case "$url" in
+    *codeload.github.com*) fixture=repo.tgz ;;
     *AfxMsgBox/MyRule*) echo unexpected-repository-download >&2; exit 99 ;;
     */releases/latest) fixture=release.json ;;
     *mihomo-linux-*) fixture=mihomo.gz ;;
@@ -174,13 +234,44 @@ esac
 cp "$TEST_ROOT/fixtures/$fixture" "$out"
 ''')
         target = self.root / "installed"
-        args = ["sh", str(script), *REQUIRED, "--source-dir", str(source), "--install-dir", str(target),
+        auth_args = REQUIRED[:2] + ["--no-auth"] if no_auth else REQUIRED
+        args = ["sh", str(script), *auth_args, "--source-dir", str(source), "--install-dir", str(target),
                 "--proxy", "http://proxy.invalid:1080", "--branch", "feature/local"]
+        if online:
+            with tarfile.open(self.root / "fixtures/repo.tgz", "w:gz") as tar:
+                tar.add(source, arcname="MyRule-test")
+            i = args.index("--source-dir")
+            del args[i:i + 2]
+            script = self.file("standalone-inst.sh", SOURCE)
+            args[1] = str(script)
+        if remote:
+            ssh = self.file("commands/ssh", "#!" + sys.executable + "\n" + r'''
+import os, subprocess, sys
+args = sys.argv[1:]
+if args == ["-V"]:
+    print("OpenSSH_test"); sys.exit(0)
+if "-O" in args: sys.exit(0)
+command = args[-1]
+with open(os.environ["TEST_ROOT"] + "/ssh-commands", "a") as out: out.write(command + "\n")
+if command.startswith("uname -s;"):
+    print("Linux\naarch64\n0\nsystemd"); sys.exit(0)
+sys.exit(subprocess.run(["sh", "-c", command], env=os.environ | {"REMOTE_CPU": "aarch64"}).returncode)
+''')
+            ssh.chmod(0o755)
+            args += ["--target", "installer@example.invalid", "--download-proxy", "http://proxy.invalid:1080"]
+            args[args.index("--proxy") + 1] = "http://target-proxy.invalid:1080"
         result = subprocess.run(args, cwd=self.root, env=self.env, text=True, capture_output=True, timeout=10)
         self.assert_ok(result)
         self.assertTrue((target / "core/mihomo").exists())
         self.assertTrue((target / "core/ui/index.html").exists())
         self.assertTrue((target / "agh/AdGuardHome").exists())
+        users = next(line[7:] for line in (target / "agh/agh.yaml").read_text().splitlines()
+                     if line.startswith("users: "))
+        self.assertEqual(json.loads(users), [] if no_auth else [{"name": "admin", "password": "$2b$10$private"}])
+        if no_auth:
+            conf = (target / "sh/env.local.conf").read_text()
+            self.assertIn("MP_AGH_PASSWORD=''", conf)
+            self.assertIn("MP_AGH_USER_NAME='admin'", conf)
         self.assertIn("feature/local/domain/gpt.txt", (target / "core/config.yaml").read_text())
         self.assertEqual((target / "core/ruleset/gpt.yaml").read_bytes(), (source / "domain/gpt.txt").read_bytes())
         self.assertNotIn("_MP_SOURCE_DIR", (target / "sh/env.local.conf").read_text())
@@ -189,8 +280,18 @@ cp "$TEST_ROOT/fixtures/$fixture" "$out"
         self.assertTrue(any("/gfw.txt" in line for line in downloads))
         self.assertTrue(any("example.invalid/sub" in line for line in downloads))
         self.assertTrue(all(line.startswith("http://proxy.invalid:1080 ") for line in downloads))
+        self.assertEqual(sum("codeload.github.com" in line for line in downloads), int(online))
         self.assertEqual((self.root / "events").read_text().splitlines(),
                          ["sync never", "sync always", "enable_start proxy_core", "ready", "enable_start agh"])
+        if remote:
+            self.assertTrue(any("mihomo-linux-arm64-" in line for line in downloads))
+            self.assertTrue(any("AdGuardHome_linux_arm64" in line for line in downloads))
+            conf = (target / "sh/env.local.conf").read_text()
+            self.assertIn("MP_PROXY='http://target-proxy.invalid:1080'", conf)
+            self.assertNotIn("http://proxy.invalid:1080", conf)
+            ssh_commands = (self.root / "ssh-commands").read_text()
+            self.assertNotIn("private", ssh_commands)
+            self.assertNotIn("target-proxy", ssh_commands)
         # Subsequent independent updates must use the configured online branch, not the old source path.
         result = self.run_shell('download_file "$MP_REPO_RAW_URL/domain/gpt.txt" "$TEST_ROOT/later"',
                                 extra={"MP_INST_DIR": str(target), "_MP_NONINTERACTIVE": "1"})
@@ -234,12 +335,20 @@ cp "$TEST_ROOT/fixtures/$fixture" "$out"
 exec 3<&0
 inst_colors
 INSTALL_MODE=interactive
+inst_parse_args --interactive
 MP_PROXY=$TEST_PROXY; MP_SUBSCRIBE_URL=$TEST_SUB; MP_AGH_USER_NAME=$TEST_USER
 MP_AGH_PASSWORD=$TEST_HASH; MP_LOCAL_DNS=$TEST_DNS
-inst_choose_source() { return 0; }
+inst_choose_branch() { return 0; }
+# Exercise the real wizard; only unrelated choices accept their defaults automatically.
+PROMPT_REAL
+prompt_to() {
+    case "$1" in _ica_answer) _ica_answer=y ;; MP_PROXY|MP_SUBSCRIBE_URL|MP_AGH_USER_NAME|MP_AGH_PASSWORD|MP_LOCAL_DNS) prompt_visible "$@" ;;
+        *) eval "$1=\$2" ;;
+    esac
+}
 inst_collect_inputs || exit 1
 printf '%s\n' "$MP_PROXY" "$MP_SUBSCRIBE_URL" "$MP_AGH_USER_NAME" "$MP_AGH_PASSWORD" "$MP_LOCAL_DNS" > "$TEST_ROOT/inputs"
-'''
+'''.replace('PROMPT_REAL', test_scripts.function_source(LIBRARY, 'prompt_to').replace('prompt_to()', 'prompt_visible()', 1))
         for retain_defaults in (False, True):
             with self.subTest(retain_defaults=retain_defaults):
                 extra = dict(zip(('TEST_PROXY', 'TEST_SUB', 'TEST_USER', 'TEST_HASH', 'TEST_DNS'),
@@ -268,10 +377,6 @@ printf '%s\n' "$MP_PROXY" "$MP_SUBSCRIBE_URL" "$MP_AGH_USER_NAME" "$MP_AGH_PASSW
                     return before
 
                 try:
-                    read_until(b'] > ')
-                    os.write(master, b'2')
-                    read_until(b'2')  # Visible before submitting, not a later value dump.
-                    os.write(master, b'\n')
                     for value in values:
                         prompt = read_until(b'] > ')
                         if retain_defaults:
@@ -300,7 +405,7 @@ printf '%s\n' "$MP_PROXY" "$MP_SUBSCRIBE_URL" "$MP_AGH_USER_NAME" "$MP_AGH_PASSW
                          ["silent", "/etc/proxy", "main", "223.5.5.5 119.29.29.29", "proxy="])
 
     def test_named_empty_and_equals_values(self):
-        result = self.installer(self.args(["--branch=", "--dns=", "--proxy=", "--install-dir=custom"])
+        result = self.installer(self.args(["--branch=", "--dns=", "--proxy=", "--install-dir=" + str(self.root / "custom")])
                                 + 'inst_validate || exit 1\n'
                                 'printf "%s|%s|%s|%s" "$MP_REPO_BRANCH" "$MP_LOCAL_DNS" "$MP_PROXY" "$DIR_INST"')
         self.assert_ok(result)
@@ -320,7 +425,7 @@ printf '%s\n' "$MP_PROXY" "$MP_SUBSCRIBE_URL" "$MP_AGH_USER_NAME" "$MP_AGH_PASSW
                 self.assertNotIn("private", result.stdout + result.stderr)
 
     def test_required_values_cannot_be_filled_by_environment(self):
-        for missing in range(0, len(REQUIRED), 2):
+        for missing in (0, 4):
             args = REQUIRED[:missing] + REQUIRED[missing + 2:]
             result = self.installer("inst_parse_args " + shlex.join(args) + "\ninst_validate")
             self.assertNotEqual(result.returncode, 0)
@@ -350,7 +455,7 @@ printf '%s\n' "$MP_PROXY" "$MP_SUBSCRIBE_URL" "$MP_AGH_USER_NAME" "$MP_AGH_PASSW
         self.assertIn("opkg/apk", result.stdout)
 
     def test_silent_with_terminal_never_prompts_or_changes_cron(self):
-        cron = SOURCE[SOURCE.index("# === 定时更新"):SOURCE.index('say_section "安装完成"')]
+        cron = "os_type=systemd\ninst_apply_schedule"
         result = self.tty(PREFIX + self.args() + '\ninst_colors\n'
                           'prompt_to autostart Y "must-not-prompt"\n'
                           'test "$autostart" = Y || exit 1\n' + cron)
@@ -362,7 +467,7 @@ printf '%s\n' "$MP_PROXY" "$MP_SUBSCRIBE_URL" "$MP_AGH_USER_NAME" "$MP_AGH_PASSW
         local = self.file("sh/env.local.conf", "# custom\nCUSTOM='keep'\n"
                           "MP_REPO_RAW_URL='https://old.invalid/a'\nexport MP_REPO_RAW_URL='old'\n"
                           "MP_PROXY='old'\n  export MP_PROXY='also-old'\n  export MP_REPO_BRANCH='old'\n")
-        persist = SOURCE[SOURCE.index("# === 写 env.local.conf"):SOURCE.index("# === Bootstrap")]
+        persist = APPLY[APPLY.index('    say_section "写入 env.local.conf"'):APPLY.index("    # === Bootstrap")]
         options = ["--install-dir", str(self.root), "--branch", "feature/quote'&name", "--dns", ""]
         result = self.installer(self.args(options) + 'inst_validate || exit 1\nDIR_SH="$DIR_INST/sh"\n'
                                 + persist + '\n. "$DIR_SH/env.local.conf"\n'
@@ -512,14 +617,20 @@ with open(args[args.index("-o") + 1], "w") as out:
         self.assertFalse(list(self.root.glob("result.tmp.*")))
 
     def test_noninteractive_mode_reaches_child_scripts(self):
-        # Run validation/export, stopping before project writes; package managers are mocked.
-        entry = SOURCE[:SOURCE.index("say_section '安装概览'")]
-        entry += '\nsh -c \'test "$_MP_NONINTERACTIVE" = 1 && test "$MP_PROXY" = "" && test "$MP_REPO_BRANCH" = main\'\n'
-        script = self.file("safe-inst.sh", entry)
-        result = subprocess.run(["sh", str(script), *REQUIRED], env=self.env | {"MP_PROXY": "http://old"},
-                                cwd=self.root, text=True, capture_output=True, timeout=5)
+        # Prepare runs in a child process and explicitly exports the chosen values.
+        source = self.local_source()
+        for name in ("update-core-config.sh", "update-bin.sh", "update-agh-config.sh"):
+            (source / "sh" / name).write_text('test "$_MP_NONINTERACTIVE" = 1 && test "$MP_PROXY" = "" && test "$MP_REPO_BRANCH" = main\n')
+        with (source / "sh/common.sh").open("a") as stream:
+            stream.write('\nmp_prepare_agh_config() { :; }\n')
+        result = self.installer(self.args(["--source-dir", str(source)]) + r'''
+inst_validate || exit 1
+_inst_tmp="$TEST_ROOT/work"; mkdir "$_inst_tmp"
+INST_CORE_CONFIG=/nonexistent; INST_TARGET_ARCH=x86_64; INST_TARGET_OS=systemd
+_MP_NONINTERACTIVE=1; export _MP_NONINTERACTIVE
+inst_prepare "$_inst_tmp/bundle"
+''')
         self.assert_ok(result)
-        self.assertNotIn("private", result.stdout + result.stderr)
 
     def test_colors_are_terminal_only_and_syslog_is_plain(self):
         self.command("logger", 'printf "%s\\n" "$@" >> "$TEST_ROOT/syslog"\n')

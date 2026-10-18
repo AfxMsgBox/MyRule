@@ -15,6 +15,7 @@ elif [ -f /etc/proxy/sh/env.conf ]; then
 else
     echo "缺少 env.conf" >&2; exit 1
 fi
+. "$MP_INST_DIR/sh/portable.sh" || exit 1
 
 # 日志：终端 + 系统 log
 echo_log() {
@@ -228,7 +229,7 @@ mp_copy_repo_file() {
     case "/$_mcr_rel/" in *'/../'*|*'/./'*|*'//'*)
         echo_log '无效的本地仓库相对路径'; return 1 ;;
     esac
-    _mcr_src=$(readlink -f "$_MP_SOURCE_DIR/$_mcr_rel") || return 1
+    _mcr_src=$(mp_realpath "$_MP_SOURCE_DIR/$_mcr_rel") || return 1
     case "$_mcr_src" in "$_MP_SOURCE_DIR/"*) ;; *)
         echo_log '本地仓库文件超出源目录'; return 1 ;;
     esac
@@ -260,6 +261,11 @@ download_file() {
             return $? ;;
         esac
     fi
+    if [ -n "${_MP_RESOURCE_DIR:-}" ]; then
+        [ "$_df_verbose" != true ] || echo_log "读取安装包：$(basename "$_df_dst")"
+        mp_cache_read "$_df_url" "$_df_dst" "$_df_min_size"
+        return $?
+    fi
     [ "$_df_verbose" = "true" ] && echo_log "下载文件：$(basename "$_df_dst")"
     _df_t0=$(date +%s)
     _df_dir=$(dirname "$_df_dst")
@@ -287,7 +293,7 @@ download_file() {
     }
 
     while :; do
-        _df_primary_proxy=$(mp_core_proxy_url 2>/dev/null || :)
+        _df_primary_proxy=$(mp_core_proxy_url "${_MP_DOWNLOAD_CORE_CONFIG:-$MP_CORE_DIR/config.yaml}" 2>/dev/null || :)
         _df_ok=0
         if [ -n "$_df_primary_proxy" ] && _df_attempt "$_df_primary_proxy" "Core 本机代理"; then
             _df_ok=1
@@ -307,7 +313,7 @@ download_file() {
         fi
     done
     [ "$_df_verbose" = "true" ] && echo_log "完成：$(get_file_size "$_df_tmp") 字节 / $(($(date +%s) - _df_t0))s"
-    mv "$_df_tmp" "$_df_dst"
+    mv "$_df_tmp" "$_df_dst" && mp_cache_write "$_df_url" "$_df_dst"
 }
 
 # OS 探测：直接输出 openwrt/systemd，不保存全局状态。
@@ -710,7 +716,7 @@ mp_prepare_agh_config() {
         rm -f "$_mpac_tpl" "$_mpac_rendered"
         return 1
     fi
-    if ! mp_render_template "$_mpac_tpl" "$_mpac_rendered"; then
+    if ! mp_render_template "$_mpac_tpl" "$_mpac_rendered" agh; then
         echo_log "渲染 agh.yaml 失败"
         rm -f "$_mpac_tpl" "$_mpac_rendered"
         return 1
@@ -736,10 +742,30 @@ mp_prepare_agh_config() {
 }
 
 # 模板渲染：用环境里同名 MP_* 变量替换文件中的 {MP_xxx} 占位符；原子替换
-# mp_render_template <src> <dst>
+# mp_render_template <src> <dst> [agh]
+# AGH users 单独生成 JSON（也是合法 YAML），避免空哈希及用户名转义问题。
 mp_render_template() {
+    _mrt_users=
+    if [ "${3:-}" = agh ]; then
+        case "$MP_AGH_PASSWORD" in
+            '') _mrt_users='[]' ;;
+            '$2a$'?*|'$2b$'?*|'$2y$'?*)
+                [ -n "$MP_AGH_USER_NAME" ] || { echo_log 'AGH 用户名不能为空'; return 1; }
+                _mrt_users=$(jq -cn '[{name:env.MP_AGH_USER_NAME,password:env.MP_AGH_PASSWORD}]') || return 1 ;;
+            *) echo_log 'AGH 密码必须为 bcrypt 哈希；空值表示免登录'; return 1 ;;
+        esac
+    fi
     _mrt_tmp=$(mktemp "$2.tmp.XXXXXX") || return 1
-    awk '{
+    _MP_RENDER_AGH_USERS="$_mrt_users" awk '
+    BEGIN { users = ENVIRON["_MP_RENDER_AGH_USERS"] }
+    users != "" && /^users:/ {
+        print "users: " users; user_blocks++; in_users=1; next
+    }
+    in_users {
+        if ($0 !~ /^[^[:space:]#]/) next
+        in_users=0
+    }
+    {
         out = ""
         while (match($0, /\{MP_[A-Za-z0-9_]+\}/)) {
             ph  = substr($0, RSTART, RLENGTH)
@@ -749,7 +775,9 @@ mp_render_template() {
             $0 = substr($0, RSTART + RLENGTH)
         }
         print out $0
-    }' "$1" > "$_mrt_tmp" && mv "$_mrt_tmp" "$2" \
+    }
+    END { if (users != "" && user_blocks != 1) exit 1 }
+    ' "$1" > "$_mrt_tmp" && mv "$_mrt_tmp" "$2" \
         || { rm -f "$_mrt_tmp"; return 1; }
 }
 

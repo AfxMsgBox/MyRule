@@ -4,14 +4,15 @@
 # 单跑升级用法：
 #   sh /etc/proxy/sh/update-bin.sh
 #   sh /etc/proxy/sh/update-bin.sh && systemctl restart proxy_core agh   # 升级后需重启
-. "$(dirname "$(readlink -f "$0")")/common.sh"
+. "$(dirname "$(readlink -f "$0" 2>/dev/null || printf '%s\n' "$0")")/common.sh"
 
 # 安装时传入 pending Core 配置，仅用于确定 UI 路径；下载仍使用正式配置的代理。
 core_config="${1:-$MP_CORE_DIR/config.yaml}"
 mkdir -p "$MP_CORE_DIR" "$MP_AGH_DIR" || exit 1
 
-echo_log "更新内核二进制（CPU: linux-$(uname -m)）"
-case "$(uname -m)" in
+binary_arch=${_MP_TARGET_ARCH:-$(uname -m)}
+echo_log "更新内核二进制（CPU: linux-$binary_arch）"
+case "$binary_arch" in
     x86_64)         mihomo_arch=amd64;            agh_arch=amd64 ;;
     aarch64)        mihomo_arch=arm64;            agh_arch=arm64 ;;
     armv7l)         mihomo_arch=armv7;            agh_arch=armv7 ;;
@@ -24,7 +25,7 @@ case "$(uname -m)" in
     mips64el)       mihomo_arch=mips64le;         agh_arch=mips64le ;;
     *) mihomo_arch=; agh_arch= ;;
 esac
-[ -z "$mihomo_arch$agh_arch" ] && { echo_log "未识别架构 $(uname -m)，跳过"; exit 1; }
+[ -z "$mihomo_arch$agh_arch" ] && { echo_log "未识别架构 $binary_arch，跳过"; exit 1; }
 
 rc=0
 

@@ -114,7 +114,7 @@ inst_require_tools "${TEST_MODE:-}"
         manager.write_text('''#!/bin/sh
 printf '%s\n' "$*" >> "$TEST_ROOT/minimal-calls"
 if [ "$1" = install ]; then
-    for tool in curl jq tar gzip gunzip ip sysctl logger awk sed grep find cat chmod cp mv rm mkdir mktemp dirname basename readlink date sleep head sort tr wc ln uname id; do
+    for tool in curl jq tar gzip gunzip ip sysctl logger awk sed grep find cat chmod cp mv rm mkdir mktemp dirname basename readlink date sleep head sort tr wc ln uname id sha256sum; do
         printf '#!/bin/sh\nexit 0\n' > "$TEST_ROOT/minimal/$tool"
         /bin/chmod +x "$TEST_ROOT/minimal/$tool"
     done
@@ -146,24 +146,23 @@ inst_require_tools
                 self.assertEqual(calls[-1].split('|')[1].split()[-1], package)
 
     def test_skip_cron_does_not_install_or_write(self):
-        cron = test_installer.SOURCE.split('# === 定时更新', 1)[1]
-        cron = '# === 定时更新' + cron.split('say_section "安装完成"', 1)[0]
         result = self.installer('''
-INSTALL_MODE=interactive
-prompt_to() { eval "$1=n"; }
+os_type=systemd; cron_script_days=n; cron_config_days=n
 inst_require_tools() { echo unexpected-dependency-install; return 99; }
-''' + cron)
+inst_apply_schedule
+''')
         self.assert_ok(result)
         self.assertNotIn('unexpected', result.stdout + result.stderr)
 
     def test_chosen_cron_dependency_failure_prevents_writes(self):
-        cron = test_installer.SOURCE.split('# === 定时更新', 1)[1]
-        cron = '# === 定时更新' + cron.split('say_section "安装完成"', 1)[0]
+        # Apply preflight checks cron dependencies before mkdir or configuration writes.
+        apply = test_installer.APPLY
+        apply = apply[apply.index('inst_apply() ('):]
+        preflight = apply[apply.index('    inst_require_tools ||'):apply.index('    DIR_SH=')]
         result = self.installer('''
-INSTALL_MODE=interactive
-prompt_to() { eval "$1=3"; }
-inst_require_tools() { echo dependency-install-failed; return 1; }
-''' + cron)
+cron_script_days=3; cron_config_days=n
+inst_require_tools() { [ "$1" != cron ] || { echo dependency-install-failed; return 1; }; }
+''' + preflight)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('dependency-install-failed', result.stdout)
         self.assertNotIn('unexpected', result.stdout + result.stderr)

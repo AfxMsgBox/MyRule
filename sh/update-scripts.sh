@@ -9,7 +9,7 @@
 #
 # 自更新安全性：tarball 已 mktemp + mv 落地后再 exec；新进程从干净状态跑阶段 2，
 # 即便旧进程的 shell 缓冲对自身脚本有任何疑虑，exec 后都不再相关。
-. "$(dirname "$(readlink -f "$0")")/common.sh"
+. "$(dirname "$(readlink -f "$0" 2>/dev/null || printf '%s\n' "$0")")/common.sh"
 
 dir_sh="$MP_INST_DIR/sh"
 

@@ -80,7 +80,7 @@ fi
         if before is not None:
             self.file(relative, before)
         self.file("proc/sys/net/ipv4/ip_forward", runtime + "\n")
-        source = test_scripts.function_source(ROOT / "sh/inst.sh", "inst_record_forward_state")
+        source = test_scripts.function_source(ROOT / "sh/install-lib.sh", "inst_record_forward_state")
         source = source.replace("/proc/sys/net/ipv4/ip_forward", str(self.proc / "sys/net/ipv4/ip_forward"))
         # A new installation has not written env.local.conf yet.
         local = self.target / "sh/env.local.conf"
@@ -135,7 +135,7 @@ printf '0\n' > "$TEST_ROOT/proc/sys/net/ipv4/ip_forward"
 
     def test_reinstall_preserves_first_snapshot_and_rebases_after_uninstall(self):
         config, state = self.forward_snapshot()
-        source = test_scripts.function_source(ROOT / "sh/inst.sh", "inst_record_forward_state")
+        source = test_scripts.function_source(ROOT / "sh/install-lib.sh", "inst_record_forward_state")
         source = source.replace("/proc/sys/net/ipv4/ip_forward", str(self.proc / "sys/net/ipv4/ip_forward"))
         call = source + '''
 say_err() { echo "$*" >&2; }; say_warn() { echo "$*"; }
@@ -293,6 +293,20 @@ esac
         self.assertEqual(sorted(path.name for path in self.target.iterdir()), ["keep.txt"])
         self.assertEqual((self.target / "keep.txt").read_text(), "unrelated")
         self.assert_ok(self.run_uninstall("--purge"))
+
+    def test_purge_removes_empty_install_root_and_can_repeat(self):
+        (self.target / "keep.txt").unlink()
+        self.assert_ok(self.run_uninstall("--purge", script=self.target / "sh/uninstall.sh"))
+        self.assertFalse(self.target.exists())
+        self.assert_ok(self.run_uninstall("--purge"))
+
+    def test_purge_reports_failure_to_remove_empty_root(self):
+        (self.target / "keep.txt").unlink()
+        self.command("rmdir", "exit 1\n")
+        result = self.run_uninstall("--purge")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("无法删除空的安装目录", result.stdout + result.stderr)
+        self.assertEqual(list(self.target.iterdir()), [])
 
     def test_no_terminal_requires_explicit_yes_before_mutation(self):
         result = self.run_uninstall("--purge", yes=False)

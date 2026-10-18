@@ -1,6 +1,6 @@
 #!/bin/sh
 # 串跑所有文件刷新：Core 配置/providers + AGH 配置/dns.conf/filters。
-. "$(dirname "$(readlink -f "$0")")/common.sh"
+. "$(dirname "$(readlink -f "$0" 2>/dev/null || printf '%s\n' "$0")")/common.sh"
 
 echo_log "============ update all configs ============"
 

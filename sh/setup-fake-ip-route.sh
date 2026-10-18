@@ -1,7 +1,7 @@
 #!/bin/sh
 # 修复 mihomo TUN 路由 /30 bug：先删错路由，再加正确网段。
 # 触发器：OpenWrt hotplug（99-meta-route）/ Debian systemd ExecStartPost。
-. "$(dirname "$(readlink -f "$0")")/common.sh"
+. "$(dirname "$(readlink -f "$0" 2>/dev/null || printf '%s\n' "$0")")/common.sh"
 
 # hotplug 只对 add 事件响应；其它调用方不传 ACTION，视为 add
 [ "${ACTION:-add}" = "add" ] || exit 0
