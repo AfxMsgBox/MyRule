@@ -219,7 +219,7 @@ rule-providers:
     path: ./ruleset/gpt.yaml
     type: http
     proxy: fastHongKong
-    url: "https://raw.githubusercontent.com/AfxMsgBox/MyRule/main/domain/gpt.txt"
+    url: "{MP_REPO_RAW_URL}/domain/gpt.txt"
 
 rules:
  - RULE-SET,rule_gpt,gptProxy

@@ -6,7 +6,9 @@
 #   sh /etc/proxy/sh/update-bin.sh && systemctl restart proxy_core agh   # 升级后需重启
 . "$(dirname "$(readlink -f "$0")")/common.sh"
 
-mkdir -p "$MP_CORE_DIR" "$MP_AGH_DIR"
+# 安装时传入 pending Core 配置，仅用于确定 UI 路径；下载仍使用正式配置的代理。
+core_config="${1:-$MP_CORE_DIR/config.yaml}"
+mkdir -p "$MP_CORE_DIR" "$MP_AGH_DIR" || exit 1
 
 echo_log "更新内核二进制（CPU: linux-$(uname -m)）"
 case "$(uname -m)" in
@@ -29,7 +31,7 @@ rc=0
 # mihomo：版本号在文件名里，先通过公共下载函数获取 latest release 元数据
 if [ -n "$mihomo_arch" ]; then
     while :; do
-        release_meta=$(mktemp)
+        release_meta=$(mktemp) || exit 1
         if download_file "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest" \
                 "$release_meta" false; then
             ver=$(sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
@@ -43,20 +45,19 @@ if [ -n "$mihomo_arch" ]; then
         download_retry_prompt || break
     done
     if [ -n "$ver" ]; then
-        gz=$(mktemp)
+        gz=$(mktemp) || exit 1
+        mihomo_stage=$(mktemp) || { rm -f "$gz"; exit 1; }
         url="https://github.com/MetaCubeX/mihomo/releases/download/$ver/mihomo-linux-$mihomo_arch-$ver.gz"
         if download_file "$url" "$gz" true \
-           && gunzip -c "$gz" > "$MP_CORE_DIR/mihomo.tmp" \
-           && [ -s "$MP_CORE_DIR/mihomo.tmp" ]; then
-            mv "$MP_CORE_DIR/mihomo.tmp" "$MP_CORE_DIR/mihomo"
-            chmod +x "$MP_CORE_DIR/mihomo"
+           && gunzip -c "$gz" > "$mihomo_stage" \
+           && [ -s "$mihomo_stage" ] \
+           && mp_install_binary "$mihomo_stage" "$MP_CORE_DIR/mihomo"; then
             echo_log "mihomo $ver / linux-$mihomo_arch 已就位：$MP_CORE_DIR/mihomo"
         else
-            echo_log "mihomo 下载或解压失败"
-            rm -f "$MP_CORE_DIR/mihomo.tmp"
+            echo_log "mihomo 下载、解压或安装失败"
             rc=$((rc+1))
         fi
-        rm -f "$gz"
+        rm -f "$gz" "$mihomo_stage"
     else rc=$((rc+1)); fi
 fi
 
@@ -64,19 +65,18 @@ fi
 # 安装目录从 core/config.yaml 的 external-ui 动态读取并限制在 Core home 内。
 # tarball 内容直接在顶层（./index.html ./_nuxt/...），没有 dist/ 包一层；
 # 故解压到子目录避免和 ui.tgz 同位
-core_ui_dir=$(mp_core_external_ui_path 2>/dev/null || :)
+core_ui_dir=$(mp_core_external_ui_path "$core_config" 2>/dev/null || :)
 if [ -n "$core_ui_dir" ]; then
-    ui_tmp=$(mktemp -d); mkdir -p "$ui_tmp/extract"
+    ui_tmp=$(mktemp -d) || exit 1
     ui_url="https://github.com/MetaCubeX/metacubexd/releases/latest/download/compressed-dist.tgz"
-    if download_file "$ui_url" "$ui_tmp/ui.tgz" true \
+    if mkdir -p "$ui_tmp/extract" \
+       && download_file "$ui_url" "$ui_tmp/ui.tgz" true \
        && tar -xzf "$ui_tmp/ui.tgz" -C "$ui_tmp/extract" 2>/dev/null \
-       && [ -f "$ui_tmp/extract/index.html" ]; then
-        rm -rf "$core_ui_dir"
-        mkdir -p "$core_ui_dir"
-        cp -rf "$ui_tmp/extract/." "$core_ui_dir/"
+       && [ -f "$ui_tmp/extract/index.html" ] \
+       && mp_install_ui "$ui_tmp/extract" "$core_ui_dir"; then
         echo_log "metacubexd UI 已就位：$core_ui_dir"
     else
-        echo_log "metacubexd UI 下载或解压失败"
+        echo_log "metacubexd UI 下载、解压或安装失败"
         rc=$((rc+1))
     fi
     rm -rf "$ui_tmp"
@@ -87,16 +87,15 @@ fi
 
 # AdGuardHome：/releases/latest/download/ 直接给到最新 tar.gz
 if [ -n "$agh_arch" ]; then
-    tmp=$(mktemp -d)
+    tmp=$(mktemp -d) || exit 1
     url="https://github.com/AdguardTeam/AdGuardHome/releases/latest/download/AdGuardHome_linux_${agh_arch}.tar.gz"
     if download_file "$url" "$tmp/agh.tar.gz" true \
        && tar -xzf "$tmp/agh.tar.gz" -C "$tmp" \
-       && [ -x "$tmp/AdGuardHome/AdGuardHome" ]; then
-        mv "$tmp/AdGuardHome/AdGuardHome" "$MP_AGH_DIR/AdGuardHome"
-        chmod +x "$MP_AGH_DIR/AdGuardHome"
+       && [ -x "$tmp/AdGuardHome/AdGuardHome" ] \
+       && mp_install_binary "$tmp/AdGuardHome/AdGuardHome" "$MP_AGH_DIR/AdGuardHome"; then
         echo_log "AdGuardHome / linux-$agh_arch 已就位：$MP_AGH_DIR/AdGuardHome"
     else
-        echo_log "AdGuardHome 下载或解压失败"
+        echo_log "AdGuardHome 下载、解压或安装失败"
         rc=$((rc+1))
     fi
     rm -rf "$tmp"

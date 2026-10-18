@@ -2,10 +2,11 @@
 # 生成 AGH dns.conf：默认上游 + myupstream 原样段 + 各域名清单转发到 Core dns.listen
 . "$(dirname "$(readlink -f "$0")")/common.sh"
 
-agh_dns="$MP_AGH_DIR/dns.conf"
+# 第二个参数供安装器暂存 dns.conf，默认仍直接更新正式文件。
+agh_dns="${2:-$MP_AGH_DIR/dns.conf}"
 dl_dir="$MP_AGH_DIR/download"
 core_config="${1:-$MP_CORE_DIR/config.yaml}"
-mkdir -p "$MP_AGH_DIR" "$dl_dir"
+mkdir -p "$MP_AGH_DIR" "$dl_dir" || exit 1
 agh_dns_staged=$(mktemp "$MP_AGH_DIR/dns.conf.tmp.XXXXXX") || exit 1
 core_dns=$(mp_core_dns_endpoint "$core_config") \
     || { echo_log "无法从 Core 配置读取有效的 dns.listen"; rm -f "$agh_dns_staged"; exit 1; }
@@ -23,26 +24,27 @@ fetch_payload() {
     if ! download_file "$_url" "$dl_dir/$_bn"; then
         echo_log "$_bn 失败，跳过"; return 1
     fi
-    printf '\n# %s\n' "$_hdr" >> "$agh_dns_staged"
+    printf '\n# %s\n' "$_hdr" >> "$agh_dns_staged" || return 1
     payload_to_agh "$dl_dir/$_bn" >> "$agh_dns_staged"
 }
 
 echo_log "生成 $agh_dns"
-echo "# Generated at $(date '+%F %T')" > "$agh_dns_staged"
+echo "# Generated at $(date '+%F %T')" > "$agh_dns_staged" \
+    || { rm -f "$agh_dns_staged"; exit 1; }
 rc=0
 
 # 默认上游：MP_LOCAL_DNS 空时退化为 /etc/resolv.conf 的 nameserver
 if [ -n "$MP_LOCAL_DNS" ]; then
-    for ns in $MP_LOCAL_DNS; do echo "$ns" >> "$agh_dns_staged"; done
+    for ns in $MP_LOCAL_DNS; do echo "$ns" >> "$agh_dns_staged" || rc=1; done
 else
-    awk '/^nameserver/ {print $2}' /etc/resolv.conf >> "$agh_dns_staged"
+    awk '/^nameserver/ {print $2}' /etc/resolv.conf >> "$agh_dns_staged" || rc=1
 fi
 
 # myupstream.txt 已是 [/domain/]server 格式，整段直接 cat
 echo_log ">>> 拉取 myupstream"
 if download_file "$MP_REPO_RAW_URL/agh/myupstream.txt" "$dl_dir/myupstream.txt"; then
-    printf '\n# My Up Stream\n' >> "$agh_dns_staged"
-    cat "$dl_dir/myupstream.txt" >> "$agh_dns_staged"
+    { printf '\n# My Up Stream\n' >> "$agh_dns_staged" \
+        && cat "$dl_dir/myupstream.txt" >> "$agh_dns_staged"; } || rc=$((rc+1))
 else
     echo_log "myupstream 失败"
     rc=$((rc+1))
@@ -58,8 +60,9 @@ echo_log ">>> 拉取 notcn.txt"
 if download_file \
         "https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/tld-not-cn.txt" \
         "$dl_dir/notcn.txt"; then
-    printf '\n# Not China Domain\n' >> "$agh_dns_staged"
-    payload_to_agh "$dl_dir/notcn.txt" | sed -E '/^\[\/bj\/\]/d' >> "$agh_dns_staged"
+    { printf '\n# Not China Domain\n' >> "$agh_dns_staged" \
+        && payload_to_agh "$dl_dir/notcn.txt" | sed -E '/^\[\/bj\/\]/d' >> "$agh_dns_staged"; } \
+        || rc=$((rc+1))
 else
     echo_log "notcn.txt 失败"
     rc=$((rc+1))
@@ -71,8 +74,9 @@ fetch_payload gfwlist.txt \
 
 if [ "$rc" -ne 0 ]; then
     rm -f "$agh_dns_staged"
-    echo_log "AGH dns.conf 更新失败，保留原文件（$rc 项下载失败）"
+    echo_log "AGH dns.conf 更新失败，保留原文件（$rc 项下载或写入失败）"
     exit 1
 fi
-mv "$agh_dns_staged" "$agh_dns"
+mv "$agh_dns_staged" "$agh_dns" \
+    || { echo_log "写入 $agh_dns 失败"; rm -f "$agh_dns_staged"; exit 1; }
 echo_log "生成完成：$(wc -l < "$agh_dns") 行"

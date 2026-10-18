@@ -31,6 +31,8 @@ AGH :53
 ```text
 README.md                     用户文档
 ARCH.md                       内部架构与维护约束
+TODO.md                       待办、暂缓事项及验证限制
+tests/test_*.py               无联网、无真实服务操作的回归测试
 
 core/config.yaml              Mihomo 配置模板
 agh/agh.yaml                  AGH 配置模板
@@ -38,6 +40,7 @@ agh/myupstream.txt            AGH 固定格式的自定义上游片段
 domain/*.txt                  Clash payload 格式的域名清单
 
 sh/inst.sh                    安装和重装入口
+sh/uninstall.sh               独立卸载入口，默认保留安装数据
 sh/env.conf                   全局默认值、环境加载及派生路径
 sh/common.sh                  公共解析、下载、渲染、服务控制函数
 sh/update-*.sh                各类更新入口
@@ -86,11 +89,17 @@ AGH 运行时可能回写 `agh.yaml`，但仓库模板仍是权威来源。完�
 当前持久化参数：
 
 - `MP_INST_DIR`：安装根目录。
-- `MP_REPO_RAW_URL`：仓库 Raw 根 URL。
-- `MP_PROXY`：唯一外部代理；安装时用于自举，日常作为后备。
+- `MP_REPO_BRANCH`：固定仓库 AfxMsgBox/MyRule 的分支名，省略或空值为 main。
+- `MP_PROXY`：唯一外部后备代理；安装、自举和日常更新均排在 Core 之后。
 - `MP_SUBSCRIBE_URL`：Core provider 订阅模板参数。
 - `MP_AGH_USER_NAME`、`MP_AGH_PASSWORD`：AGH 管理员信息。
 - `MP_LOCAL_DNS`：AGH 默认直连上游 DNS。
+
+`MP_LOCAL_DNS` 未设置时使用 `223.5.5.5 119.29.29.29`，明确为空时读取 `/etc/resolv.conf`。交互安装可保留原空值，向导输入 `-` 表示清空；静默安装省略 `--dns` 使用默认值，显式 `--dns ''` 才表示空值。
+
+安装入口的优先级与日常脚本不同：无参数才交互，有任意参数即静默（仅 `--help` 单独退出）。静默安装的公开参数由命名参数及默认值确定，忽略调用环境和旧配置中的同名值，三个必填项必须显式提供；解析后导出本次值，防止子脚本重载旧配置时覆盖。交互安装读取 `/etc/proxy/sh/env.local.conf`，调用环境可覆盖，用作输入默认值；分支默认选 main，外部代理默认不启用。其它自定义配置行保留。
+
+`MP_REPO_RAW_URL` 仅为内部派生变量，不再接受配置输入。`env.conf` 在本机配置和调用环境加载后强制重算地址，旧 URL 不迁移；安装器保存时删除旧 URL 行。`MP_REPO_BRANCH_PATH` 使用 jq 对分支名按 `/` 分段编码，再拼接固定 Raw 与 codeload 地址。脚本、模板和仓库规则使用同一分支。jq 是安装和运行更新脚本的依赖，缺少时提示并退出，不能自动安装或用脆弱的文本替换解析分支 JSON。
 
 `MP_CORE_DIR` 与 `MP_AGH_DIR` 只能由 `MP_INST_DIR` 派生，不能独立持久化，否则会与服务文件和运行目录失配。
 
@@ -139,23 +148,44 @@ MP_PROXY 外部代理
 强制直连
 ```
 
-`download_file` 使用目标目录内的临时文件，检查 curl 状态与最小文件大小，成功后以 `mv` 原子替换。交互终端下整轮失败会询问重试，cron 等非交互环境直接失败。
+`download_file` 使用目标目录内的临时文件，检查 curl 状态与最小文件大小，成功后以 `mv` 原子替换。不做进程、API 或网站预探测，由真实下载决定回退；Core 只读当前正式配置，端口按 mixed-port → port → socks-port 选择首个有效值。相同的 Core/外部代理不重复尝试。
 
-唯一例外是 `inst.sh` 的 bootstrap：此时 `common.sh` 尚不存在，只能用安装器内部的 `bootstrap_download`，顺序是 `MP_PROXY → 直连`。bootstrap 完成后所有下载都回到公共函数。
+curl 的首个参数为 `--disable`，避免读取用户配置。代理通道使用显式 `--proxy URL --noproxy ''`，直连使用 `--proxy '' --noproxy '*'`，消除系统代理变量与 NO_PROXY 干扰。日志只输出目标文件名、通道、curl 退出码、大小和耗时，不打印远端 URL、代理凭据或 curl 原始错误。
 
-### 4.3 模板与资源预下载
+安装器内部的 `bootstrap_download` 用于分支 API、env.conf 与 common.sh 下载，其最小端口解析和 Core → 外部代理 → 直连顺序与公共函数一致。bootstrap 完成后使用公共函数。两份端口解析和下载顺序必须有一致性测试。
+
+安装器向子进程传递 `_MP_NONINTERACTIVE=1`（静默）或 0（交互），不写入本机配置。静默安装即使有 TTY 也禁止下载重试提示；其它情况下整轮失败且可打开终端时询问重试，无终端则返回非零。分支 API 的单页下载只执行一轮，由分支选择流程负责整批重试。
+
+### 4.3 本地仓库来源
+
+安装器新增 `--source-dir DIR`；无参数交互时第 2 步可选择本地目录。`inst_validate_source` 在系统写入前将源路径转成物理绝对路径，并检查必需脚本、两套平台服务模板、Core/AGH 模板及仓库规则；目标安装目录不能是源目录或其子目录，以免覆盖源模板。源路径支持空格。
+
+来源通过仅在安装进程及子进程中导出的 `_MP_SOURCE_DIR` 传递，参数解析时清空旧环境值，不持久化。`MP_REPO_RAW_URL` 仍由 `MP_REPO_BRANCH` 派生为在线地址，确保渲染后的 provider URL 及以后独立执行的更新脚本继续在线更新。
+
+- `inst_bootstrap_file`：本地模式直接原子复制 `sh/env.conf`、`sh/common.sh`，在线模式使用原有 bootstrap 下载。
+- `mp_fetch_repo_sh`：本地模式跳过 codeload，枚举本地 `sh/`，复用逐文件原子同步；两种来源都排除 `env.local.conf`。
+- `download_file`：仅当本地来源非空且 URL 以当前 `MP_REPO_RAW_URL/` 开头时，映射为本地仓库相对路径，调用 `mp_copy_repo_file`。检查路径边界、可读性及大小，复制后原子替换；失败直接返回，不混入远端版本。
+- 其它 URL，包括外部 GFW/TLD 规则、订阅、过滤器、二进制及 UI，仍使用 Core → 外部代理 → 直连。本地来源不是离线安装，不跳过 curl/jq 检查。
+
+本地目录不携带可靠的分支信息，因此不自动猜测分支；交互填写或 `--branch` 指定的分支仅决定后续在线地址，安装时始终使用选定本地文件。
+
+### 4.4 模板与资源预下载
 
 - `mp_render_template`：用环境中同名 `MP_*` 替换 `{MP_*}`。
 - `mp_fetch_core_providers`：预下载 Core 配置中 HTTP providers。
 - `mp_prepare_agh_config`：下载并渲染 AGH 模板、同步 Core 代理、预下载 filters。
 - `mp_fetch_agh_filters`：将过滤器下载到 AGH 约定目录。
+- `mp_install_binary`：在目标文件系统中完成复制及权限设置后，再替换二进制。
+- `mp_install_ui`：先准备完整 UI 目录，再切换；切换失败尽力恢复旧目录，恢复失败保留备份路径。
 
 所有目标路径解析都应限制在对应工作目录内，避免配置中的路径导致任意文件覆盖或删除。
 
-### 4.4 平台与服务
+### 4.5 平台与服务
 
 - `mp_detect_os`：即时识别 `openwrt` 或 `systemd`，不持久化 OS 类型。
 - `mp_service_op`：统一启停和重启服务。
+- `mp_activate_configs`：安装/重装与日常更新共用的服务切换流程；停止 AGH、提交待切换配置、重启 Core、等待 API、重启 AGH。重装使用 `enable_restart`，确保已运行的服务也重新加载；首次安装使用 `enable_start`，无需停止尚未运行的 AGH。
+- `mp_commit_pending_configs`：仅提交配置，供上述流程或首次安装选择不启动服务时使用；运行中的 AGH 必须先停止。
 - `mp_sync_etc_files`：处理服务文件中的安装路径并按策略同步到 `/etc`。
 - `mp_wait_core_ready`：按当前 Core 配置等待 API 可用。
 
@@ -163,35 +193,50 @@ systemd 的启用逻辑直接创建 `multi-user.target.wants` 链接，不调用
 
 ## 5. 安装流程
 
+`inst.sh` 仅提供命名参数，支持 `--key value`/`--key=value`。默认目录 `/etc/proxy`，默认分支 main，默认 DNS `223.5.5.5 119.29.29.29`，默认无外部代理。`--subscribe-url`、`--agh-user`、`--agh-password` 必填。未知、重复、缺值、非法值在系统写入前拒绝。安装路径限定安全字符以匹配现有服务文件和 cron 模板。
+
+无参数时必须能打开 `/dev/tty`；交互输入走独立 fd 3，支持脚本从管道输入。先选择外部代理，再调用 GitHub `/repos/AfxMsgBox/MyRule/branches?per_page=100&page=N`，通过 jq 验证响应并逐页获取，直到页面少于 100 条；完整列表排序去重，main 置顶。任何页面失败或响应异常均丢弃不完整列表，只允许整批重试或退出，不允许手输分支绕过。静默模式不调用分支 API。本地来源也不调用分支 API；交互模式第 2 步选择在线或本地，再选择在线分支或填写后续更新分支。
+
+输出由安装器负责阶段及状态，子脚本通过 `_MP_INSTALL_OUTPUT=1` 启用终端状态颜色；颜色按输出 fd 的 TTY 独立判断，NO_COLOR/TERM=dumb 禁用，syslog 始终纯文本。订阅 URL、密码和代理输入关闭回显，退出时恢复终端状态。
+
 `inst.sh` 的主要顺序如下：
 
 ```text
-检查 root、识别平台、确定安装目录
+解析参数 → 检查 jq/curl、root 和终端
+    ↓
+交互收集输入（代理 → 仓库来源及分支 → 必填信息 → DNS），或使用静默参数
+    ↓
+校验全部输入及本地来源必需文件、识别平台、确定安装目录
     ↓
 立即启用并持久化 net.ipv4.ip_forward
     ↓
-加载旧 env.local.conf 和显式环境变量
+写入本次参数到 env.local.conf，移除旧 Raw URL 项
     ↓
-交互收集参数并写 env.local.conf
+bootstrap 从所选来源获取 env.conf/common.sh
     ↓
-bootstrap 下载 env.conf/common.sh
+从在线 tarball 或本地目录同步 sh/，处理服务文件路径
     ↓
-下载仓库 sh/ tarball，处理服务文件路径
+生成 Core config.yaml.pending 并预下载全部 HTTP providers
     ↓
-渲染 Core 配置并预下载全部 HTTP providers
+下载 Mihomo、AGH、metacubexd UI（UI 路径取自 pending Core 配置）
     ↓
-下载 Mihomo、AGH、metacubexd UI
+生成 agh.yaml.pending 并预下载全部 filters
     ↓
-渲染 AGH 配置并预下载全部 filters
+生成 AGH dns.conf.pending
     ↓
-生成 AGH dns.conf
+选择启用：安装服务文件 → 停止 AGH → 提交三份 pending 配置
+    → 启用并重启 Core → 等待 Core API → 启用并重启 AGH
+    （首次安装跳过停止 AGH，使用 start）
     ↓
-安装并启动 Core → 等待 Core API → 启动 AGH
-    ↓
-按用户选择写入 03:00 脚本更新和 03:05 配置更新 cron
+仅交互模式按用户选择写入 03:00 脚本更新和 03:05 配置更新 cron
+    （静默模式自动启用服务，不读写 cron）
 ```
 
-安装阶段 Core 尚未启动，因此公共下载函数对本机 Core 代理的首次尝试通常失败，然后使用 `MP_PROXY`，最后直连。所有 Core 启动必需文件、AGH filters 和二进制必须在启动服务前准备完成；任何必需步骤失败都停止安装。
+首次安装阶段 Core 尚未启动，公共下载函数无法使用本机 Core 代理时尝试 `MP_PROXY`，最后直连。重装期间保留原正式配置，仍从中派生下载代理。所有 Core 启动必需文件、AGH filters 和二进制必须在切换服务前准备完成；任何必需步骤失败都停止安装。
+
+安装开始时若已存在 Core 主配置、AGH 主配置或 dns.conf，则按重装处理。选择不启用服务时，重装保留三份 pending 配置及原正式配置；首次安装则直接提交三份配置，不启动服务。安装器会打印相应手动应用命令。此选择不撤销此前的 IPv4 转发、本机参数、脚本、二进制/UI 和 provider/filter 资源更新。
+
+提交配置按文件依次替换，不是整批原子事务。若 AGH 停止失败，正式配置保持不变；停止后的配置提交或 Core 启动失败，则保留 AGH 停止状态并报错，避免使用混合配置自动恢复服务。
 
 服务依赖方向始终为：
 
@@ -209,7 +254,7 @@ AGH 依赖 Core，因为部分域名上游指向 Core DNS，且 AGH 自身的 `h
 
 入口：`update-scripts.sh`
 
-1. 通过 `mp_fetch_repo_sh` 下载仓库 tarball。
+1. 通过 `mp_fetch_repo_sh` 下载仓库 tarball（本地来源标志只由安装器传给本次子进程）。
 2. 只覆盖 `$MP_INST_DIR/sh/`，不覆盖 `core/`、`agh/`、`domain/`。
 3. `exec` 新版自身，避免旧进程继续执行已被替换的脚本。
 4. 重新替换服务文件路径；仅当 `/etc` 中已有对应文件时同步。
@@ -220,7 +265,7 @@ AGH 依赖 Core，因为部分域名上游指向 Core DNS，且 AGH 自身的 `h
 
 入口分为：
 
-- `update-all-configs.sh`：只完成下载、渲染和暂存，不重启服务。
+- `update-all-configs.sh`：下载、渲染并写入 Core 正式配置、dns.conf、providers 和 filters；只有 AGH 主配置暂存，不重启服务。
 - `update-all-configs-restart-services.sh`：调用前者，并按依赖顺序切换服务。
 
 完整更新事务：
@@ -245,7 +290,7 @@ AGH 依赖 Core，因为部分域名上游指向 Core DNS，且 AGH 自身的 `h
 启动 AGH
 ```
 
-关键设计是：下载期间正式 Core 配置不变，所以 `download_file` 始终优先使用当前正在运行的旧 Core 代理。任何下载失败都会删除 pending 配置并跳过服务重启。
+关键设计是：本轮下载期间正式 Core 配置不变，所以 `download_file` 仍从旧配置派生本机代理。任何下载失败都会删除 Core/AGH pending 配置并跳过服务重启。单独执行下载入口并退出后，Core 正式配置已经更新，运行进程却可能仍使用旧配置；后续下载不保证能连接从新配置派生的代理端口。常规运维应使用带服务切换的完整入口。
 
 注意当前事务边界并非完整回滚事务：`dns.conf` 和 provider/filter 数据文件可能已在正式目录中更新；Core 正式配置也会在服务切换脚本停止 AGH 前完成替换。修改此流程时必须明确“下载完成”“配置落盘”“服务切换”三个阶段，不能提前重启 Core，否则后续下载可能失去本机代理。
 
@@ -255,7 +300,7 @@ AGH 依赖 Core，因为部分域名上游指向 Core DNS，且 AGH 自身的 `h
 - `update-agh-config.sh`：下载域名清单并重新生成 `dns.conf`。
 - `update-proxy-rule.sh`：通过当前 Core API 增量刷新 providers。
 
-单独更新 Core 配置不会同步 AGH 的 Core DNS 地址或 `http_proxy`。涉及 Core 端口、DNS、TUN、fake-ip 或 UI 路径时，应使用完整配置更新入口。
+单独更新 Core 配置不会同步 AGH 的 Core DNS 地址或 `http_proxy`。涉及 Core 端口、DNS、TUN 或 fake-ip 时，应使用完整配置更新入口。修改 `external-ui` 还需通过 `update-bin.sh` 部署 UI 到新目录；配置更新不会迁移 UI，操作顺序见 README。
 
 ### 6.3 二进制更新
 
@@ -263,8 +308,9 @@ AGH 依赖 Core，因为部分域名上游指向 Core DNS，且 AGH 自身的 `h
 
 - 根据 `uname -m` 选择 Mihomo 与 AGH 发布架构。
 - 从 GitHub latest release 下载 Mihomo、AGH 和 metacubexd。
-- UI 目录从当前 Core 配置的 `external-ui` 派生。
+- UI 目录默认从当前 Core 配置的 `external-ui` 派生；可选第一参数指定目标 Core 配置，安装器用它传入 pending 文件。该参数不改变下载代理来源。
 - 脚本只替换文件，不自动重启服务。
+- 二进制先在目标目录准备临时文件并设为可执行，再原子替换；UI 先复制完整目录，再保留旧目录并切换。任一步安装失败都返回非零，不打印该组件的成功消息。
 
 二进制更新和配置更新相互独立；需要使用新二进制时由调用方安排服务重启。
 
@@ -280,6 +326,8 @@ AGH 依赖 Core，因为部分域名上游指向 Core DNS，且 AGH 自身的 `h
 
 转换后的代理域名规则指向从目标 Core 配置读取的 `dns.listen`。因此完整配置更新时必须把 `core/config.yaml.pending` 传入该脚本，确保生成内容和即将启用的 Core 配置一致。
 
+该脚本第二个可选参数指定输出文件。安装器使用 `dns.conf.pending`，日常更新省略该参数，仍替换正式 dns.conf。最终写入失败必须返回非零。Core 的 `rule_gpt.url` 同样通过 `{MP_REPO_RAW_URL}` 渲染，确保 Core 与 AGH 使用同一分支的 GPT 域名清单。
+
 ## 8. fake-ip 与路由
 
 `setup-fake-ip-route.sh` 从 Core 配置读取：
@@ -288,6 +336,8 @@ AGH 依赖 Core，因为部分域名上游指向 Core DNS，且 AGH 自身的 `h
 - `tun.device`：TUN 接口名。
 
 在 TUN 已存在时，它会删除 Mihomo 可能产生的错误 `<base>/30` 路由，再把完整 fake-ip CIDR 路由到 TUN。
+
+旧 `/30` 路由不存在可忽略，但完整网段路由设置失败会记录错误并返回非零。现有服务触发器如何处理退出码保持不变。
 
 触发方式：
 
@@ -318,13 +368,32 @@ AGH 依赖 Core，因为部分域名上游指向 Core DNS，且 AGH 自身的 `h
 
 所有平台差异应收敛在公共服务函数和 `sh/etc/` 模板中，业务更新脚本不应直接分叉 OpenWrt/systemd 命令。
 
+### 9.3 卸载流程
+
+`uninstall.sh` 独立于 common.sh/env.conf，不加载或执行本机配置，不联网。默认目录为 `/etc/proxy`；支持 `--install-dir DIR`（或等号形式）、`--purge`、`--yes`、`--help`。除单独帮助外要求 root；默认终端确认，回车取消，自动化必须显式传 `--yes`。不继承 MP_INST_DIR，以命令行目标为准。
+
+执行顺序：
+
+1. 检查目标路径；purge 额外检查安装凭据、三个子目录的符号链接和 `/proc/self/mountinfo` 中的挂载点。
+2. 预检 systemd、init.d、hotplug 和自启动链接归属。unit 要求项目 Documentation 及 ExecStart 中的精确安装路径；init.d 要求 MP_INST_DIR、env.conf 加载及 procd 标记；hotplug 要求目标脚本路径。systemd 另检查实际 FragmentPath、LoadState、DropInPaths，避免停止被其它 unit 或覆盖配置接管的服务。冲突时整体中止，不修改 cron 或服务。
+3. 读取 root crontab，生成仅剔除目标安装器任务的新版本。注释、其它安装路径及手工任务保留；读取失败中止，不能将错误当作空 crontab。交互确认后重新检查归属和 crontab。
+4. 提交 cron 清理，按 AGH → Core 顺序停止服务；检查 `/proc/*/exe` 是否仍指向目标二进制（包括已删除但运行中的旧文件），有残留则保留文件和数据并失败。
+5. OpenWrt 禁用服务；移除已核对的自启动链接、服务文件和 hotplug。systemd 直接删除启用链接再 daemon-reload，避免 systemctl disable 触发旧 SysV 兼容同步。
+6. 默认保留数据。显式 purge 在重查路径及进程后仅删除目标的 core/、agh/、sh/；安装根目录及其它文件保留。清理顺序将 sh/ 放最后，整个卸载流程位于函数中，支持删除当前执行的脚本。
+
+`env.local.conf` 仅作为安装凭据以文本匹配 MP_INST_DIR，不执行其中内容。服务命令失败、链接/文件删除失败、daemon-reload 失败都返回非零，后续数据清理不执行；流程不承诺回滚已经移除的 cron 或停止的服务。
+
+IPv4 转发及持久化 sysctl 设置不变，因为安装器未保存旧值。卸载不新增全局路由清理或关闭转发，不停止 cron 服务，不清理用户手工任务和系统日志；不与安装/更新并发执行。平台开机就绪机制保持原样。
+
+安装器本地来源检查包含 uninstall.sh，在线及本地 sh/ 同步会一起部署卸载脚本。测试只在临时脚本副本替换固定 /etc、/proc 根路径，用模拟服务管理器和 crontab 检查行为；生产脚本不提供系统根目录环境覆盖选项。
+
 ## 10. 修改时必须保持的约束
 
 1. 修改前先确定变更属于脚本、配置还是二进制更新，不得隐式跨越边界。
-2. 常规远程文件下载统一走 `download_file`；只有安装 bootstrap 可保留独立实现。
-3. 日常下载优先使用当前正式 Core 配置派生的本机代理，然后 `MP_PROXY`，最后直连。
+2. 常规远程文件下载统一走 `download_file`；只有安装 bootstrap（含分支 API）可保留同策略的最小实现。
+3. 所有安装和日常下载优先使用当前正式 Core 配置派生的本机代理，然后 `MP_PROXY`，最后直连。
 4. 完整更新的全部下载完成前不得重启或停止 Core。
-5. AGH 必须在 Core API 就绪后启动；切换 Core 配置时先停 AGH。
+5. 安装及完整更新的服务切换流程须等待 Core API 就绪后启动 AGH。重装提交正式配置前先停 AGH；日常更新的 Core 落盘边界见第 6.2 节。平台开机启动仍使用现有依赖/顺序机制，本轮未增加 API 检查。
 6. Core 端口、API、DNS、fake-ip、TUN、UI 等参数只能从目标 Core 配置读取。
 7. 新配置必须先写临时或 pending 文件，验证并完成依赖下载后再原子替换。
 8. AGH 模板完整更新会覆盖运行期修改，不能假定 Web UI 状态是权威来源。
@@ -337,6 +406,7 @@ AGH 依赖 Core，因为部分域名上游指向 Core DNS，且 AGH 自身的 `h
 
 | 需求 | 优先检查的文件 |
 |---|---|
+| 修改卸载与清理范围 | `sh/uninstall.sh`、`tests/test_uninstall.py`、README、本文 |
 | 修改安装交互或安装顺序 | `sh/inst.sh`、`README.md` |
 | 修改下载代理或失败处理 | `sh/common.sh` 的 `download_file`、bootstrap 逻辑 |
 | 增删本机变量 | `sh/env.conf`、`sh/inst.sh`、模板、`README.md`、本文 |
@@ -350,13 +420,14 @@ AGH 依赖 Core，因为部分域名上游指向 Core DNS，且 AGH 自身的 `h
 
 ## 12. 修改后的最低检查
 
-仓库目前没有独立测试套件。提交前至少应执行：
+测试使用 Python 3 标准库、POSIX shell 与 jq，在临时安装目录中运行 shell 函数及脚本，以模拟命令替代下载和服务操作。覆盖两平台卸载、确认取消、归属检查、cron 精确清理、purge 边界和失败保留数据，以及本地来源校验、路径边界、缺文件失败、私有配置保留、本地安装结合外部代理的完整流程，以及参数解析及空值、无 TTY 拒绝交互、有 TTY 静默不提示、缺失 jq、分支分页与异常响应、代理通道顺序和环境隔离、终端颜色与日志脱敏，以及重装接受/拒绝启动、首次安装、失败中止、参数优先级及空值、特殊字符持久化、分支一致性、配置落盘边界、二进制/UI 安装失败、路由失败，以及两个平台的服务命令派发。提交前至少应执行：
 
 ```sh
-for f in sh/*.sh sh/etc/init.d/* sh/etc/hotplug.d/net/*; do
+python3 -B -m unittest discover -s tests -v
+for f in sh/*.sh sh/env.conf sh/etc/init.d/* sh/etc/hotplug.d/net/*; do
     sh -n "$f" || exit 1
 done
 git diff --check
 ```
 
-涉及配置解析、模板渲染、代理回退或 pending 切换时，还应在临时目录构造最小配置进行针对性验证；涉及服务文件时分别检查 OpenWrt 与 systemd 路径，不能只验证当前宿主平台。
+新增行为应补充相应的失败场景测试。模拟测试不等于真实 OpenWrt/systemd 部署验证；待验证事项记录在 TODO.md。

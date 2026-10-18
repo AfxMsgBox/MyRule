@@ -24,8 +24,11 @@ base_ip="${fake_ip_cidr%/*}"
 
 # 仅操作配置里声明且已经创建的 TUN 设备。
 if ip link show "$tun_device" >/dev/null 2>&1; then
-    ip route del "$base_ip/30" 2>/dev/null
-    ip route replace "$fake_ip_cidr" dev "$tun_device"
+    ip route del "$base_ip/30" 2>/dev/null || :
+    if ! ip route replace "$fake_ip_cidr" dev "$tun_device"; then
+        logger -t MyProxy "fake-ip 路由设置失败：$fake_ip_cidr -> $tun_device"
+        exit 1
+    fi
     logger -t MyProxy "fake-ip 路由 $fake_ip_cidr -> $tun_device"
     exit 0
 fi

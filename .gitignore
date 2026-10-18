@@ -3,6 +3,7 @@ sh/env.local.conf
 
 # 运行时产物：仓库里只放模板/规则源，部署后会在设备上生成下面这些文件
 agh/dns.conf
+agh/dns.conf.pending
 agh/agh.yaml.pending
 agh/download/
 agh/data/
@@ -13,3 +14,6 @@ core/config.yaml.pending
 core/ui/
 core/mihomo
 core/cache.db
+
+# Python 单元测试缓存
+__pycache__/

@@ -9,16 +9,20 @@ _path_self=$(readlink -f "$0" 2>/dev/null || echo "$0")
 MP_INST_DIR="${MP_INST_DIR:-$(dirname "$(dirname "$_path_self")")}"
 
 if [ -f "$MP_INST_DIR/sh/env.conf" ]; then
-    . "$MP_INST_DIR/sh/env.conf"
+    . "$MP_INST_DIR/sh/env.conf" || exit 1
 elif [ -f /etc/proxy/sh/env.conf ]; then
-    . /etc/proxy/sh/env.conf
+    . /etc/proxy/sh/env.conf || exit 1
 else
     echo "缺少 env.conf" >&2; exit 1
 fi
 
 # 日志：终端 + 系统 log
 echo_log() {
-    echo "$1"
+    if [ "${_MP_INSTALL_OUTPUT:-0}" = 1 ] && [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != dumb ]; then
+        printf '\033[36m  [信息]\033[0m %s\n' "$1"
+    else
+        printf '%s\n' "$1"
+    fi
     logger -t MyProxy -- "$1" 2>/dev/null || :
 }
 
@@ -167,9 +171,50 @@ mp_core_external_ui_path() {
     printf '%s/%s\n' "$MP_CORE_DIR" "$_mceu_rel"
 }
 
+# 在目标文件系统内准备可执行文件，chmod/cp 失败不会破坏现有二进制。
+mp_install_binary() {
+    _mib_src="$1"; _mib_dst="$2"
+    mkdir -p "$(dirname "$_mib_dst")" || return 1
+    _mib_stage=$(mktemp "$_mib_dst.tmp.XXXXXX") || return 1
+    if ! cp "$_mib_src" "$_mib_stage" || ! chmod 0755 "$_mib_stage" \
+       || ! mv "$_mib_stage" "$_mib_dst"; then
+        rm -f "$_mib_stage"
+        return 1
+    fi
+}
+
+# 先完整复制 UI，再切换目录；切换失败尽力恢复旧目录，不删除唯一的备份。
+mp_install_ui() {
+    _miu_src="$1"; _miu_dst="$2"
+    [ -f "$_miu_src/index.html" ] || return 1
+    _miu_parent=$(dirname "$_miu_dst")
+    mkdir -p "$_miu_parent" || return 1
+    _miu_stage=$(mktemp -d "$_miu_parent/.ui-update.XXXXXX") || return 1
+    if ! mkdir "$_miu_stage/new" || ! cp -R "$_miu_src/." "$_miu_stage/new/"; then
+        rm -rf "$_miu_stage"
+        return 1
+    fi
+    if [ -e "$_miu_dst" ] || [ -L "$_miu_dst" ]; then
+        if ! mv "$_miu_dst" "$_miu_stage/previous"; then
+            rm -rf "$_miu_stage"
+            return 1
+        fi
+    fi
+    if ! mv "$_miu_stage/new" "$_miu_dst"; then
+        if [ -e "$_miu_stage/previous" ] || [ -L "$_miu_stage/previous" ]; then
+            mv "$_miu_stage/previous" "$_miu_dst" \
+                || { echo_log "UI 恢复失败，旧目录保存在 $_miu_stage/previous"; return 1; }
+        fi
+        rm -rf "$_miu_stage"
+        return 1
+    fi
+    rm -rf "$_miu_stage"
+}
+
 # 有交互终端时询问是否重试；回车默认重试。无终端或明确拒绝时返回失败。
 download_retry_prompt() {
-    if { : >/dev/tty; } 2>/dev/null && [ -r /dev/tty ]; then
+    [ "${_MP_NONINTERACTIVE:-0}" != 1 ] || return 1
+    if ( : <>/dev/tty ) 2>/dev/null && [ -r /dev/tty ]; then
         printf '下载失败，是否重试？[Y/n] ' >/dev/tty
         IFS= read -r _drp_retry </dev/tty || _drp_retry=n
         case "$_drp_retry" in n|N|no|NO|No) return 1 ;; *) return 0 ;; esac
@@ -177,8 +222,29 @@ download_retry_prompt() {
     return 1
 }
 
+# 本地安装按仓库相对路径取文件；只影响本次安装进程，不持久化源目录。
+mp_copy_repo_file() {
+    _mcr_rel=$1; _mcr_dst=$2; _mcr_min=${3:-0}
+    case "/$_mcr_rel/" in *'/../'*|*'/./'*|*'//'*)
+        echo_log '无效的本地仓库相对路径'; return 1 ;;
+    esac
+    _mcr_src=$(readlink -f "$_MP_SOURCE_DIR/$_mcr_rel") || return 1
+    case "$_mcr_src" in "$_MP_SOURCE_DIR/"*) ;; *)
+        echo_log '本地仓库文件超出源目录'; return 1 ;;
+    esac
+    [ -f "$_mcr_src" ] && [ -r "$_mcr_src" ] \
+        && [ "$(get_file_size "$_mcr_src")" -gt "$_mcr_min" ] \
+        || { echo_log "本地仓库文件缺失、不可读或过小：$_mcr_rel"; return 1; }
+    _mcr_dir=$(dirname "$_mcr_dst")
+    mkdir -p "$_mcr_dir" || return 1
+    _mcr_tmp=$(mktemp "$_mcr_dir/.local-copy.XXXXXX") || return 1
+    if ! cp "$_mcr_src" "$_mcr_tmp" || ! mv "$_mcr_tmp" "$_mcr_dst"; then
+        rm -f "$_mcr_tmp"; return 1
+    fi
+}
+
 # download_file <url> <dst> [verbose=true] [min_size=8]
-# verbose=true 时额外输出 url、完成时的字节数与耗时
+# verbose=true 时输出目标文件名、通道、字节数与耗时；不输出远端 URL 凭据。
 # 每轮依次尝试 Core 配置派生的本机代理、外部后备代理、直连。
 # 一轮全失败时有 tty 则询问是否重试，否则直接返回失败。
 # --fail 让 4xx/5xx 不被当成功；mktemp + mv 原子替换
@@ -186,13 +252,16 @@ download_file() {
     # 所有内部变量加 _df_ 前缀，避免污染调用方同名变量（POSIX sh 无 local）
     _df_url="$1"; _df_dst="$2"; _df_verbose="${3:-true}"
     _df_min_size="${4:-8}"
-    [ "$_df_verbose" = "true" ] && echo_log "下载 $_df_url"
-    _df_t0=$(date +%s)
-    if [ "$_df_verbose" = "true" ] && [ -t 2 ]; then
-        _df_display=--progress-bar
-    else
-        _df_display=--silent
+    if [ -n "${_MP_SOURCE_DIR:-}" ]; then
+        case "$_df_url" in "$MP_REPO_RAW_URL/"*)
+            _df_rel=${_df_url#"$MP_REPO_RAW_URL/"}
+            [ "$_df_verbose" != true ] || echo_log "读取本地仓库：$_df_rel"
+            mp_copy_repo_file "$_df_rel" "$_df_dst" "$_df_min_size"
+            return $? ;;
+        esac
     fi
+    [ "$_df_verbose" = "true" ] && echo_log "下载文件：$(basename "$_df_dst")"
+    _df_t0=$(date +%s)
     _df_dir=$(dirname "$_df_dst")
     mkdir -p "$_df_dir" || return 1
     # 临时文件放在目标目录，保证最后 mv 不跨文件系统，真正原子替换。
@@ -204,13 +273,16 @@ download_file() {
         _df_attempt_proxy="$1"; _df_attempt_label="$2"
         [ "$_df_verbose" = "true" ] && echo_log "尝试：$_df_attempt_label"
         if [ -n "$_df_attempt_proxy" ]; then
-            curl "$_df_display" --show-error --fail -L --connect-timeout 10 --max-time 300 \
-                 --proxy "$_df_attempt_proxy" "$_df_url" -o "$_df_tmp"
+            curl --disable --silent --fail -L --connect-timeout 10 --max-time 300 \
+                 --noproxy '' --proxy "$_df_attempt_proxy" "$_df_url" -o "$_df_tmp"
         else
-            curl "$_df_display" --show-error --fail -L --connect-timeout 10 --max-time 300 \
-                 --noproxy '*' "$_df_url" -o "$_df_tmp"
+            curl --disable --silent --fail -L --connect-timeout 10 --max-time 300 \
+                 --proxy '' --noproxy '*' "$_df_url" -o "$_df_tmp"
         fi
         _df_rc=$?
+        if [ "$_df_rc" -ne 0 ] && [ "$_df_verbose" = true ]; then
+            echo_log "$_df_attempt_label 下载失败（curl 退出码 $_df_rc）"
+        fi
         [ "$_df_rc" -eq 0 ] && [ "$(get_file_size "$_df_tmp")" -gt "$_df_min_size" ]
     }
 
@@ -249,7 +321,7 @@ mp_detect_os() {
     fi
 }
 
-# mp_service_op <op> <svc...>   op: enable_start | restart | stop
+# mp_service_op <op> <svc...>   op: enable_start | enable_restart | restart | stop
 # 按即时探测的系统类型派发到 service / systemctl。
 mp_service_op() {
     _mso_os=$(mp_detect_os) || { echo_log "未识别系统，跳过 $*"; return 1; }
@@ -258,18 +330,21 @@ mp_service_op() {
     for _svc in "$@"; do
         case "$_mso_os-$_op" in
             openwrt-enable_start) service "$_svc" enable && service "$_svc" start ;;
+            openwrt-enable_restart) service "$_svc" enable && service "$_svc" restart ;;
             openwrt-restart)      service "$_svc" restart ;;
             openwrt-stop)         service "$_svc" stop ;;
-            systemd-enable_start)
+            systemd-enable_start|systemd-enable_restart)
                 # systemctl enable 会在 /etc/init.d 存在同名脚本时强制同步 SysV，
                 # 即使原生 unit 已安装也可能因旧脚本头不完整而失败。直接按 unit
                 # 的 WantedBy 建立链接，再启动原生服务，避开 SysV 兼容层。
                 _mso_unit="/etc/systemd/system/$_svc.service"
                 _mso_wants="/etc/systemd/system/multi-user.target.wants"
+                _mso_action=start
+                [ "$_op" != enable_restart ] || _mso_action=restart
                 [ -f "$_mso_unit" ] \
                     && mkdir -p "$_mso_wants" \
                     && ln -sf "$_mso_unit" "$_mso_wants/$_svc.service" \
-                    && systemctl start "$_svc.service"
+                    && systemctl "$_mso_action" "$_svc.service"
                 ;;
             systemd-restart)      systemctl restart "$_svc.service" ;;
             systemd-stop)         systemctl stop "$_svc.service" ;;
@@ -277,6 +352,52 @@ mp_service_op() {
         esac || { echo_log "$_op $_svc 失败"; _mso_rc=1; }
     done
     return "$_mso_rc"
+}
+
+# mp_check_pending_configs [core-pending] [dns-pending]
+# AGH 主配置始终暂存；日常更新已写入 Core/dns，安装器则传入三份待切换配置。
+mp_check_pending_configs() {
+    for _mcpc_file in "$MP_AGH_DIR/agh.yaml.pending" "${1:-}" "${2:-}"; do
+        [ -n "$_mcpc_file" ] || continue
+        [ -f "$_mcpc_file" ] \
+            || { echo_log "缺少待切换配置：$_mcpc_file"; return 1; }
+    done
+}
+
+# 仅在 AGH 已停止或首次安装尚无服务时调用；逐文件替换，不承诺整批回滚。
+mp_commit_pending_configs() {
+    mp_check_pending_configs "${1:-}" "${2:-}" || return 1
+    if [ -n "${1:-}" ]; then
+        mv "$1" "$MP_CORE_DIR/config.yaml" || return 1
+    fi
+    if [ -n "${2:-}" ]; then
+        mv "$2" "$MP_AGH_DIR/dns.conf" || return 1
+    fi
+    mv "$MP_AGH_DIR/agh.yaml.pending" "$MP_AGH_DIR/agh.yaml"
+}
+
+# mp_activate_configs <restart|enable_restart|enable_start> [core-pending] [dns-pending]
+# 安装/重装与日常更新共用切换顺序；不改变平台开机启动机制。
+# enable_start 仅用于首次安装，此时没有已运行的 AGH，不调用 stop。
+mp_activate_configs() {
+    _mac_op="$1"; _mac_core="${2:-}"; _mac_dns="${3:-}"
+    case "$_mac_op" in restart|enable_restart|enable_start) ;; *) return 1 ;; esac
+    mp_check_pending_configs "$_mac_core" "$_mac_dns" || return 1
+    if [ "$_mac_op" != enable_start ]; then
+        mp_service_op stop agh \
+            || { echo_log "AGH 停止失败，取消配置切换"; return 1; }
+    fi
+    if ! mp_commit_pending_configs "$_mac_core" "$_mac_dns"; then
+        echo_log "配置切换失败，AGH 保持停止；请检查正式及 pending 文件后重试"
+        return 1
+    fi
+    mp_service_op "$_mac_op" proxy_core \
+        || { echo_log "Core 启动失败，AGH 保持停止"; return 1; }
+    mp_wait_core_ready 30 \
+        || { echo_log "Core 未就绪，AGH 保持停止"; return 1; }
+    mp_service_op "$_mac_op" agh \
+        || { echo_log "Core 已就绪，但 AGH 启动失败"; return 1; }
+    echo_log "Core / AGH 已按依赖顺序启动"
 }
 
 # 等待 Core 按当前 config.yaml 启动控制 API。端口与 secret 均从 Core 配置读取。
@@ -357,53 +478,34 @@ mp_sync_etc_files() {
 }
 
 # mp_fetch_repo_sh <dst-sh-dir>
-# 从 MP_REPO_RAW_URL 派生 owner/repo + 分支，拉 GitHub codeload tarball，
-# 仅把 sh/ 子树覆盖到 <dst-sh-dir>。env.local.conf 不在 tarball 里所以不会被动。
-# 故意不解压 core/ agh/ domain/——这些有渲染后状态或独立刷新流程。
+# 仓库固定，压缩包地址只从 env.conf 派生的分支路径生成。
+# 本地安装从 _MP_SOURCE_DIR/sh 同步；只覆盖 sh/，保留本机配置及 core/agh 运行状态。
 mp_fetch_repo_sh() {
     _mfr_dst="$1"
-    case "$MP_REPO_RAW_URL" in
-        https://raw.githubusercontent.com/*)
-            _mfr_path=${MP_REPO_RAW_URL#https://raw.githubusercontent.com/}
-            ;;
-        http://raw.githubusercontent.com/*)
-            _mfr_path=${MP_REPO_RAW_URL#http://raw.githubusercontent.com/}
-            ;;
-        *)
-            echo_log "update-scripts 仅支持 raw.githubusercontent.com 仓库根 URL"
-            return 1
-            ;;
-    esac
-    _mfr_owner=${_mfr_path%%/*}
-    _mfr_rest=${_mfr_path#*/}
-    _mfr_repo=${_mfr_rest%%/*}
-    _mfr_tail=${_mfr_rest#*/}
-    [ -n "$_mfr_owner" ] && [ -n "$_mfr_repo" ] \
-        && [ "$_mfr_rest" != "$_mfr_repo" ] && [ -n "$_mfr_tail" ] \
-        || { echo_log "MP_REPO_RAW_URL 缺少 owner/repo/branch"; return 1; }
-    case "$_mfr_tail" in
-        refs/heads/*) _mfr_branch=${_mfr_tail#refs/heads/} ;;
-        *)            _mfr_branch=$_mfr_tail ;;
-    esac
-    [ -n "$_mfr_branch" ] || { echo_log "MP_REPO_RAW_URL 缺少分支"; return 1; }
-    _mfr_url="https://codeload.github.com/$_mfr_owner/$_mfr_repo/tar.gz/refs/heads/$_mfr_branch"
+    _mfr_url="https://codeload.github.com/AfxMsgBox/MyRule/tar.gz/refs/heads/$MP_REPO_BRANCH_PATH"
 
     _mfr_tmp=$(mktemp -d) || return 1
-    if ! download_file "$_mfr_url" "$_mfr_tmp/repo.tar.gz" true; then
-        rm -rf "$_mfr_tmp"; return 1
+    if [ -n "${_MP_SOURCE_DIR:-}" ]; then
+        _mfr_src="$_MP_SOURCE_DIR/sh"
+        [ -d "$_mfr_src" ] || { echo_log '本地仓库缺少 sh/'; rm -rf "$_mfr_tmp"; return 1; }
+        echo_log '从本地仓库同步 sh/'
+    else
+        if ! download_file "$_mfr_url" "$_mfr_tmp/repo.tar.gz" true; then
+            rm -rf "$_mfr_tmp"; return 1
+        fi
+        if ! tar -xzf "$_mfr_tmp/repo.tar.gz" -C "$_mfr_tmp" 2>/dev/null; then
+            echo_log "tar 解压失败"; rm -rf "$_mfr_tmp"; return 1
+        fi
+        # tarball 应只有一个顶层目录，显式计数，避免 glob 拼成带空格的假路径。
+        _mfr_src=; _mfr_src_count=0
+        for _mfr_candidate in "$_mfr_tmp"/*/sh; do
+            [ -d "$_mfr_candidate" ] || continue
+            _mfr_src=$_mfr_candidate
+            _mfr_src_count=$((_mfr_src_count + 1))
+        done
+        [ "$_mfr_src_count" -eq 1 ] \
+            || { echo_log "tarball 结构异常：期望唯一 sh/"; rm -rf "$_mfr_tmp"; return 1; }
     fi
-    if ! tar -xzf "$_mfr_tmp/repo.tar.gz" -C "$_mfr_tmp" 2>/dev/null; then
-        echo_log "tar 解压失败"; rm -rf "$_mfr_tmp"; return 1
-    fi
-    # tarball 应只有一个顶层目录，显式计数，避免 glob 拼成带空格的假路径。
-    _mfr_src=; _mfr_src_count=0
-    for _mfr_candidate in "$_mfr_tmp"/*/sh; do
-        [ -d "$_mfr_candidate" ] || continue
-        _mfr_src=$_mfr_candidate
-        _mfr_src_count=$((_mfr_src_count + 1))
-    done
-    [ "$_mfr_src_count" -eq 1 ] \
-        || { echo_log "tarball 结构异常：期望唯一 sh/"; rm -rf "$_mfr_tmp"; return 1; }
 
     mkdir -p "$_mfr_dst"
     _mfr_files="$_mfr_tmp/files.list"
@@ -412,6 +514,8 @@ mp_fetch_repo_sh() {
     _mfr_failed=0
     while IFS= read -r _mfr_file; do
         _mfr_rel=${_mfr_file#"$_mfr_src"/}
+        # 手工下载或 git 工作目录可能带有本机私有配置，不能覆盖本次安装参数。
+        [ "$_mfr_rel" != env.local.conf ] || continue
         _mfr_target="$_mfr_dst/$_mfr_rel"
         _mfr_target_dir=$(dirname "$_mfr_target")
         mkdir -p "$_mfr_target_dir" || { _mfr_failed=1; break; }
