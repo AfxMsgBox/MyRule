@@ -175,6 +175,7 @@ cp "$TEST_ROOT/fixtures/$fixture" "$out"
         self.assertIn("feature/local/domain/gpt.txt", (target / "core/config.yaml").read_text())
         self.assertEqual((target / "core/ruleset/gpt.yaml").read_bytes(), (source / "domain/gpt.txt").read_bytes())
         self.assertNotIn("_MP_SOURCE_DIR", (target / "sh/env.local.conf").read_text())
+        self.assertIn("MP_REPO_BRANCH='feature/local'", (target / "sh/env.local.conf").read_text())
         downloads = (self.root / "downloads").read_text().splitlines()
         self.assertTrue(any("/gfw.txt" in line for line in downloads))
         self.assertTrue(any("example.invalid/sub" in line for line in downloads))
@@ -186,6 +187,7 @@ cp "$TEST_ROOT/fixtures/$fixture" "$out"
                                 extra={"MP_INST_DIR": str(target), "_MP_NONINTERACTIVE": "1"})
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("unexpected-repository-download", result.stderr)
+        self.assertIn("/refs/heads/feature/local/domain/gpt.txt", (self.root / "downloads").read_text().splitlines()[-1])
 
     def tty(self, script, extra=None):
         master, slave = pty.openpty()

@@ -1,6 +1,6 @@
 # MyRule 架构说明
 
-本文面向后续维护者和代码代理，用于说明项目的真实运行结构、数据流、配置权威关系和修改约束。用户安装与运维命令以 `README.md` 为准；修改代码前应先阅读本文及涉及的具体脚本。
+本文面向后续维护者和代码代理，集中记录技术架构、实现细节、资源处理、高级维护操作和修改约束。用户安装与运维命令以 `README.md` 为准；修改代码前应先阅读本文及涉及的具体脚本。
 
 ## 1. 项目目标
 
@@ -121,6 +121,19 @@ AGH 运行时可能回写 `agh.yaml`，但仓库模板仍是权威来源。完�
 
 `dns.enable`、`dns.enhanced-mode`、TUN 和 fake-ip 在本方案中是必需能力，不通过脚本默认值掩盖错误配置。新 Core 配置写入前必须能派生代理、API、DNS、fake-ip、TUN 和 UI 路径。
 
+### 3.3 本机配置文件写入
+
+`$MP_INST_DIR/sh/env.local.conf` 不入库，由安装器写入。
+
+- 纯 shell 语法，被 `env.conf` `source` 读取。推荐每行 `KEY='value'`，使 `$`、反斜杠等保持原样。bcrypt 哈希必须使用单引号，双引号内的 `$` 仍会被 shell 展开。
+- 值内含单引号时，用 `KEY='前半'\''后半'` 表示；安装向导会自动进行该转义。
+- 可覆盖第 3.1 节列出的本机参数；`core/` 与 `agh/` 路径固定从 `MP_INST_DIR` 派生，不单独配置。
+- 日常更新的优先级（高 → 低）：**系统环境变量 > env.local.conf > env.conf 默认值**（安装器的静默参数规则见第 3.1 节）
+  - 临时调试用 `MP_FOO=xxx sh script.sh` 即可压过 env.local.conf。
+- 重复运行 inst.sh 时第 3.1 节中各项被 upsert（已存在则替换，不存在则追加），用户加的其它行不动。
+
+AGH 密码要求 bcrypt 哈希（`$2a$`、`$2b$`、`$2y$` 前缀）；安装器校验前缀，不校验完整哈希长度。
+
 ## 4. 公共能力边界
 
 所有业务脚本先加载 `common.sh`；`common.sh` 再加载 `env.conf`。公共逻辑主要分为以下几组：
@@ -191,6 +204,19 @@ curl 的首个参数为 `--disable`，避免读取用户配置。代理通道使
 
 systemd 的启用逻辑直接创建 `multi-user.target.wants` 链接，不调用 `systemctl enable`，避免同名旧 SysV 脚本触发兼容层错误。
 
+### 4.6 外部下载资源处理
+
+来源、文件及安装位置见 [README 下载列表](README.md#下载列表)。此处记录资源处理方式。
+
+
+GFW 和非中国顶级域名列表参与生成 `agh/dns.conf.pending`，配置提交后成为 `agh/dns.conf`。程序及面板压缩包解压安装后删除。当前安装流程每次都会请求上述资源，不因本地已有文件而跳过；必需下载失败会阻止后续配置切换和服务启动。
+
+订阅和过滤器清单由 `core/config.yaml` 与 `agh/agh.yaml` 决定；修改模板后，下载项也会变化。当前 `whitelist_filters` 为空，没有额外白名单下载；GPT 规则来自本仓库，不列入 README 下载列表。GitHub Release 下载会跟随 HTTP 重定向，表中列的是脚本使用的入口地址。
+
+README 下载列表统计安装脚本主动下载的文件及版本信息。服务启动后的订阅/过滤器刷新、`www.gstatic.com/generate_204` 节点健康检查和 DNS 查询属于运行期网络访问，未计入；健康检查不下载安装文件。安装器也不会自动下载或安装 curl、jq 等系统依赖。
+
+GFW 域名列表使用 Loyalsoldier/clash-rules 已整理的 Clash payload，直接转换为 AGH 上游规则；不再下载或解析官方 AutoProxy 列表，也不生成跳过规则报告。
+
 ## 5. 安装流程
 
 `inst.sh` 仅提供命名参数，支持 `--key value`/`--key=value`。默认目录 `/etc/proxy`，默认分支 main，默认 DNS `223.5.5.5 119.29.29.29`，默认无外部代理。`--subscribe-url`、`--agh-user`、`--agh-password` 必填。未知、重复、缺值、非法值在系统写入前拒绝。安装路径限定安全字符以匹配现有服务文件和 cron 模板。
@@ -234,6 +260,8 @@ bootstrap 从所选来源获取 env.conf/common.sh
 
 首次安装阶段 Core 尚未启动，公共下载函数无法使用本机 Core 代理时尝试 `MP_PROXY`，最后直连。重装期间保留原正式配置，仍从中派生下载代理。所有 Core 启动必需文件、AGH filters 和二进制必须在切换服务前准备完成；任何必需步骤失败都停止安装。
 
+外部下载来源、文件名与落盘位置统一维护在 [README 下载列表](README.md#下载列表)。清单由 `update-bin.sh`（版本元数据、程序与 UI）、`update-agh-config.sh`（TLD/GFW）、Core 模板的 HTTP providers 及 AGH 模板的 filters/whitelist_filters 决定。本地来源仅替换本仓库文件，不缓存或跳过这些外部请求。修改上述入口或模板时须同步核对该表；运行期健康检查和 DNS 查询不属于安装文件下载。
+
 安装开始时若已存在 Core 主配置、AGH 主配置或 dns.conf，则按重装处理。选择不启用服务时，重装保留三份 pending 配置及原正式配置；首次安装则直接提交三份配置，不启动服务。安装器会打印相应手动应用命令。此选择不撤销此前的 IPv4 转发、本机参数、脚本、二进制/UI 和 provider/filter 资源更新。
 
 提交配置按文件依次替换，不是整批原子事务。若 AGH 停止失败，正式配置保持不变；停止后的配置提交或 Core 启动失败，则保留 AGH 停止状态并报错，避免使用混合配置自动恢复服务。
@@ -245,6 +273,8 @@ bootstrap 从所选来源获取 env.conf/common.sh
 ```
 
 AGH 依赖 Core，因为部分域名上游指向 Core DNS，且 AGH 自身的 `http_proxy` 从 Core 配置生成。
+
+安装器还会开启 `net.ipv4.ip_forward`：systemd 系统持久化到较晚加载的 `/etc/sysctl.d/99-zz-myproxy.conf`，OpenWrt 持久化到 `/etc/sysctl.conf`，并读取 `/proc/sys/net/ipv4/ip_forward` 验证是否已经即时生效。LXC 等受限环境无法修改内核参数时会明确警告，但不会中断安装，需要在宿主机侧放行。
 
 ## 6. 更新体系
 
@@ -300,7 +330,7 @@ AGH 依赖 Core，因为部分域名上游指向 Core DNS，且 AGH 自身的 `h
 - `update-agh-config.sh`：下载域名清单并重新生成 `dns.conf`。
 - `update-proxy-rule.sh`：通过当前 Core API 增量刷新 providers。
 
-单独更新 Core 配置不会同步 AGH 的 Core DNS 地址或 `http_proxy`。涉及 Core 端口、DNS、TUN 或 fake-ip 时，应使用完整配置更新入口。修改 `external-ui` 还需通过 `update-bin.sh` 部署 UI 到新目录；配置更新不会迁移 UI，操作顺序见 README。
+单独更新 Core 配置不会同步 AGH 的 Core DNS 地址或 `http_proxy`。涉及 Core 端口、DNS、TUN 或 fake-ip 时，应使用完整配置更新入口。修改 `external-ui` 还需通过 `update-bin.sh` 部署 UI 到新目录；配置更新不会迁移 UI，操作顺序见本文第 6.4 节。
 
 ### 6.3 二进制更新
 
@@ -314,6 +344,56 @@ AGH 依赖 Core，因为部分域名上游指向 Core DNS，且 AGH 自身的 `h
 
 二进制更新和配置更新相互独立；需要使用新二进制时由调用方安排服务重启。
 
+### 6.4 面板目录迁移
+
+修改 `external-ui` 后，完整配置更新不会迁移或下载面板文件；还需运行 `update-bin.sh` 将 UI 安装到新目录，该命令也会更新两个二进制。可按以下顺序完成下载和切换（任一步失败都不要继续）：
+
+```sh
+MP_INST_DIR='/etc/proxy'
+export MP_INST_DIR
+. "$MP_INST_DIR/sh/common.sh"
+sh "$MP_INST_DIR/sh/update-all-configs.sh" &&
+sh "$MP_INST_DIR/sh/update-bin.sh" &&
+mp_activate_configs restart
+```
+
+这个流程在配置落盘后下载二进制/UI；若同时改了代理端口，需确保外部代理或直连可用。
+
+### 6.5 fake-ip 缓存维护
+
+通过 Core API 清理缓存，按配置携带鉴权信息：
+
+```sh
+# 按实际安装路径设置；不要依赖交互 shell 的 $0 反推路径
+MP_INST_DIR=/etc/proxy
+export MP_INST_DIR
+. "$MP_INST_DIR/sh/common.sh"
+core_api=$(mp_core_api_url) || exit 1
+core_secret=$(mp_core_value "" secret 2>/dev/null || :)
+if [ -n "$core_secret" ]; then
+    curl --noproxy '*' -H "Authorization: Bearer $core_secret" \
+        -X POST "$core_api/cache/fakeip/flush"
+else
+    curl --noproxy '*' -X POST "$core_api/cache/fakeip/flush"
+fi
+```
+
+### 6.6 定时任务
+
+交互安装的第 8、9 步会依次询问“脚本更新”和“配置更新”的每月日期步长，默认 3。输入 `n` 可单独跳过某一项的写入（已有任务不会删除）。安装器会在 root crontab 中维护以下两个带 marker 的任务：03:00 触发脚本更新，03:05 触发配置更新并重启服务；重装不会重复追加。这是两个独立任务，时间错开不保证前一个任务已完成：
+
+```cron
+0 3 */N * * sh /etc/proxy/sh/update-scripts.sh # MyProxy:update-scripts
+5 3 */N * * sh /etc/proxy/sh/update-all-configs-restart-services.sh # MyProxy:update-configs
+```
+
+其中 `N` 是向导输入的日期步长。例如 `N=3` 表示每月 1、4、7……日执行，每月重新从 1 日计算，跨月不是固定间隔 3 天。OpenWrt 写入至少一项任务后，安装器还会启用并重启 cron 服务。下面两项不会由安装器自动添加，需要时再手工配置，不会与上述任务重复：
+
+```cron
+*/5 * * * * sh /etc/proxy/sh/keeplive.sh
+0 5 1 * * sh /etc/proxy/sh/update-bin.sh && systemctl restart proxy_core agh
+```
+
 ## 7. AGH 域名分流配置
 
 `update-agh-config.sh` 生成 `$MP_AGH_DIR/dns.conf`：
@@ -321,7 +401,7 @@ AGH 依赖 Core，因为部分域名上游指向 Core DNS，且 AGH 自身的 `h
 1. 写入 `MP_LOCAL_DNS`；为空时读取 `/etc/resolv.conf`。
 2. 原样追加仓库 `agh/myupstream.txt`。
 3. 将 `domain/myproxylist.txt` 和 `domain/gpt.txt` 从 Clash payload 转成 AGH 上游规则。
-4. 下载并转换外部 `tld-not-cn.txt` 和 `gfw.txt`。
+4. 下载 Loyalsoldier/clash-rules 的 `tld-not-cn.txt` 和 `gfw.txt`，按 Clash payload 转换。
 5. 所有来源成功后才替换正式 `dns.conf`。
 
 转换后的代理域名规则指向从目标 Core 配置读取的 `dns.listen`。因此完整配置更新时必须把 `core/config.yaml.pending` 传入该脚本，确保生成内容和即将启用的 Core 配置一致。
