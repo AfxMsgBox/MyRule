@@ -172,7 +172,7 @@ inst_validate() {
     inst_validate_basic || return 1
     printf '%s' "$MP_REPO_BRANCH" | jq -seR '
         length > 0 and . != "@" and
-        (test("[\u0000-\u0020\u007f~^:?*\\[\\\\]") | not) and
+        (explode | all(. as $c | . > 32 and . != 127 and ([126,94,58,63,42,91,92] | index($c) == null))) and
         (contains("..") or contains("@{") or startswith("-") or endswith(".") | not) and
         (split("/") | all(.[]; length > 0 and (startswith(".") or endswith(".lock") | not)))
     ' >/dev/null 2>&1 || { say_err '无效分支名；请填写分支名字，不是 URL'; return 1; }
@@ -449,7 +449,7 @@ inst_fetch_branches() {
             "$_inst_tmp/branches.json" 0 || return 1
         jq -e 'type == "array" and length <= 100 and all(.[];
             (.name | type == "string") and (.name | length > 0) and
-            (.name | test("[\u0000-\u001f\u007f]") | not))' \
+            (.name | explode | all(. >= 32 and . != 127)))' \
             "$_inst_tmp/branches.json" >/dev/null 2>&1 || return 1
         jq -r '.[].name' "$_inst_tmp/branches.json" >> "$_inst_tmp/branches" || return 1
         _ifb_count=$(jq 'length' "$_inst_tmp/branches.json") || return 1

@@ -268,6 +268,8 @@ prepare 在私有临时目录运行既有配置/二进制更新器，以 `_MP_TA
 
 `inst_load_config` 严格核对参数字段集合与字符串类型，使用 `explode | index(0) == null` 排除 NUL；部分 OpenWrt jq 的 `contains("\u0000")` 会对普通字符串返回 true，不能用于此校验。校验失败须输出脱敏原因，不能静默退出。
 
+OpenWrt 的 jq 可不带 Oniguruma 正则库；安装与更新不得依赖 jq 的 `test/match/sub`。分支名、分支 API 响应和 Mihomo tag_name 使用字符码或字符集合校验，保留原字符约束，不要求额外安装正则库。
+
 SSH 使用 OpenSSH ControlMaster 复用连接，原生支持默认密钥、agent、指定私钥及交互密码。保留主机密钥检查，不提供明文密码命令行选项。上传通过 SSH 标准输入完成，不依赖远端 SFTP/scp。非 root 目标要求 sudo；远端安装分配 TTY，允许原生 sudo 密码提示。只将经过限制的临时路径和哈希拼入远端命令，敏感安装参数走文件；结束时清理私有临时目录及连接。异常断线/断电可能遗留临时目录，真实恢复行为待验证。
 
 SSH 设置 `LogLevel=ERROR`，抑制正常 TTY 结束的 `Shared connection ... closed` 信息，保留错误和认证交互。远程安装返回 0 后，发起端输出明确成功及会话正常结束；非零返回失败，255 单独提示连接异常、结果无法确认，并保留原退出码。`inst_print_result` 仅在部署和定时任务设置成功后调用，区分服务已启动与 `--no-start` 的文件部署成功，维护命令注明须在安装设备上执行。

@@ -36,7 +36,8 @@ trap 'exit 143' TERM
 release_meta="$bin_work/mihomo-release.json"
 download_file 'https://api.github.com/repos/MetaCubeX/mihomo/releases/latest' \
     "$release_meta" true 8 'Mihomo 最新版本信息' 60 || exit 1
-ver=$(jq -er '.tag_name | select(type == "string" and test("^[A-Za-z0-9._-]+$"))' "$release_meta" 2>/dev/null) \
+ver=$(jq -er '.tag_name | select(type == "string" and length > 0 and
+    (explode - ("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-" | explode) | length == 0))' "$release_meta" 2>/dev/null) \
     || { echo_log 'Mihomo 版本响应格式错误或缺少有效 tag_name'; exit 1; }
 url="https://github.com/MetaCubeX/mihomo/releases/download/$ver/mihomo-linux-$mihomo_arch-$ver.gz"
 if ! download_file "$url" "$bin_work/mihomo.gz" true 8 "Mihomo $ver / linux-$mihomo_arch" \

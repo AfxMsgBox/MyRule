@@ -151,7 +151,7 @@ if [ "$_inst_interactive" = 1 ]; then
         _inst_download "https://api.github.com/repos/AfxMsgBox/MyRule/branches?per_page=100&page=$_inst_page" "$_inst_boot/page.json" "GitHub 分支列表（第 $_inst_page 页）" 60 \
             && jq -e 'type == "array" and length <= 100 and all(.[];
                 (.name | type == "string") and (.name | length > 0) and
-                (.name | test("[\u0000-\u001f\u007f]") | not))' "$_inst_boot/page.json" >/dev/null 2>&1 \
+                (.name | explode | all(. >= 32 and . != 127)))' "$_inst_boot/page.json" >/dev/null 2>&1 \
             || { echo '无法获取完整分支列表，请检查网络或 GitHub API 限流后重试' >&2; exit 1; }
         jq -r '.[].name' "$_inst_boot/page.json" >> "$_inst_boot/branches" || exit 1
         [ "$(jq length "$_inst_boot/page.json")" = 100 ] || break

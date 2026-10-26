@@ -155,6 +155,10 @@ test "$_MP_SOURCE_DIR" = "$TEST_SOURCE" && test "$MP_REPO_BRANCH" = feature/loca
     def test_remote_standalone_no_auth_download_and_apply(self):
         self.exercise_install(remote=True, online=True, no_auth=True)
 
+    def test_remote_online_install_without_jq_regex_support(self):
+        test_scripts.ShellTests.jq_without_regex(self)
+        self.exercise_install(remote=True, online=True, no_auth=True)
+
     def test_auth_requires_explicit_choice_and_defaults_to_admin(self):
         cases = [([], False), (["--no-auth"], True),
                  (["--agh-password", "$2b$10$test"], True),
@@ -508,6 +512,7 @@ bootstrap_download() {
 '''
 
     def test_branches_paginate_sort_and_preserve_slashes(self):
+        test_scripts.ShellTests.jq_without_regex(self)
         pages = [[{"name": f"branch-{n}"} for n in range(100)],
                  [{"name": "feature/slash"}, {"name": "main"}]]
         result = self.installer(self.branch_mock(pages) + 'inst_fetch_branches')

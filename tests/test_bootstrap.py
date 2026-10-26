@@ -78,6 +78,7 @@ esac
             os.close(fd)
 
     def test_choose_feature_before_archive_and_reuse_in_wizard(self):
+        test_scripts.ShellTests.jq_without_regex(self)
         rc, output = self.bootstrap([[{"name": "main"}, {"name": "feature/install"}]], b"999\n2\n")
         self.assertEqual(rc, 0, output)
         self.assertEqual((self.root / "selected").read_text(), "feature/install\n")

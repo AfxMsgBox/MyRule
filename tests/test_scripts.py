@@ -24,6 +24,17 @@ def function_source(path, name):
 
 
 class ShellTests(unittest.TestCase):
+    def jq_without_regex(self):
+        """OpenWrt ships jq without optional Oniguruma functions."""
+        import sys
+        real_jq = shutil.which('jq')
+        wrapper = self.file('commands/jq', '#!' + sys.executable + '\n'
+                            'import os, re, sys\n'
+                            'if any(re.search(r"\\b(test|match|capture|sub|gsub|scan|splits)\\s*\\(", a) for a in sys.argv[1:]):\n'
+                            '    print("jq was compiled without ONIGURUMA", file=sys.stderr); sys.exit(5)\n'
+                            f'os.execv({real_jq!r}, [{real_jq!r}]+sys.argv[1:])\n')
+        wrapper.chmod(0o755)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

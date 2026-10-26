@@ -182,6 +182,18 @@ class ResourceFailureTests(unittest.TestCase):
         self.assertIn('tag_name', result.stdout)
         self.assertEqual(len((self.root / 'binary-downloads').read_text().splitlines()), 1)
 
+    def test_version_validation_rejects_control_characters_and_unsafe_paths(self):
+        self.make_binary_fixtures()
+        test_scripts.ShellTests.jq_without_regex(self)
+        for version in ('', 'v1\0', 'v1\n', '../bad', 'v1/other', 'v1?query', '版本', None):
+            with self.subTest(version=version):
+                (self.root / 'binary-downloads').unlink(missing_ok=True)
+                self.file('fixtures/release.json', json.dumps({'tag_name': version}))
+                result = self.run_shell('sh "$MP_INST_DIR/sh/update-bin.sh"')
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('tag_name', result.stdout)
+                self.assertEqual(len((self.root / 'binary-downloads').read_text().splitlines()), 1)
+
     def test_binary_failure_does_not_download_ui_or_agh(self):
         self.make_binary_fixtures()
         self.file('fixtures/mihomo.gz', 'corrupt archive')
