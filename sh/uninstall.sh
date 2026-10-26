@@ -93,7 +93,9 @@ un_check_file() {
             grep -qxF "MP_INST_DIR=$un_dir" "$un_cf_path" \
                 && grep -qxF '. "$MP_INST_DIR/sh/env.conf"' "$un_cf_path" \
                 && grep -qxF 'USE_PROCD=1' "$un_cf_path" ;;
-        hotplug) grep -qxF "exec $un_dir/sh/setup-fake-ip-route.sh" "$un_cf_path" ;;
+        hotplug)
+            grep -qxF "exec /bin/sh $un_dir/sh/setup-fake-ip-route.sh" "$un_cf_path" \
+                || grep -qxF "exec $un_dir/sh/setup-fake-ip-route.sh" "$un_cf_path" ;;
     esac || { un_fail "文件不属于目标安装：$un_cf_path"; return 1; }
     printf '%s\n' "$un_cf_path" >> "$un_tmp/files"
 }

@@ -190,6 +190,9 @@ printf 'auth=%s user=%s hash=%s' "$INST_NO_AUTH" "$MP_AGH_USER_NAME" "$MP_AGH_PA
 
     def exercise_install(self, remote=False, online=False, no_auth=False):
         source = self.local_source()
+        # Browser/ZIP copies may have no execute bits, including the route helper.
+        for path in (source / "sh").glob("*.sh"):
+            path.chmod(0o644)
         # Only replace host mutations; run actual bootstrap, template rendering and resource deployment.
         # Only replace system mutations; the actual prepare/cache/apply pipeline runs.
         state = source / "sh/install-lib.sh"
@@ -265,6 +268,8 @@ sys.exit(subprocess.run(["sh", "-c", command], env=os.environ | {"REMOTE_CPU": "
         self.assertTrue((target / "core/mihomo").exists())
         self.assertTrue((target / "core/ui/index.html").exists())
         self.assertTrue((target / "agh/AdGuardHome").exists())
+        for path in (target / "sh").glob("*.sh"):
+            self.assertEqual(path.stat().st_mode & 0o777, 0o755, str(path))
         users = next(line[7:] for line in (target / "agh/agh.yaml").read_text().splitlines()
                      if line.startswith("users: "))
         self.assertEqual(json.loads(users), [] if no_auth else [{"name": "admin", "password": "$2b$10$private"}])

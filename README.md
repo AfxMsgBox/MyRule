@@ -28,7 +28,9 @@ curl -fL -o /tmp/myrule-inst.sh https://raw.githubusercontent.com/AfxMsgBox/MyRu
 sh /tmp/myrule-inst.sh
 ```
 
-无参数运行即进入向导，选择本机或 SSH 安装、在线或本地仓库来源，然后填写代理、分支和订阅，并选择是否设置 AGH 登录密码。选择设置时填写用户名（默认 `admin`）和 bcrypt 哈希；选择不设置时免登录，能访问管理端口的人均可修改配置。可选择是否启动服务，以及每隔几天自动更新。默认目录 `/etc/proxy`；所有交互安装均从 GitHub 获取分支列表，按编号选择，默认 `main`。
+无参数运行即进入向导。单独下载的 `inst.sh` 会先询问下载代理、列出 GitHub 分支，按选择的分支获取安装模块；随后选择本机或 SSH 安装、在线或本地仓库来源，再填写订阅等信息，并选择是否设置 AGH 登录密码。选择设置时填写用户名（默认 `admin`）和 bcrypt 哈希；选择不设置时免登录，能访问管理端口的人均可修改配置。可选择是否启动服务，以及每隔几天自动更新。默认目录 `/etc/proxy`；所有交互安装均从 GitHub 获取分支列表，按编号选择，默认 `main`。
+
+如果使用开发分支，先将下载命令 URL 中的 `main` 替换为对应分支名，启动后选择包含新版安装器的分支。下载后的文件无法自动识别自己的来源分支；也可用 `sh inst.sh --interactive --branch 分支名` 预设分支列表的默认选项。启动时已选过分支，后续向导不会重复询问。
 
 安装配置输入均可见，包括代理地址、订阅 URL 和密码哈希（SSH/sudo 密码使用系统提示），支持直接粘贴后按回车；方括号内显示当前默认值，直接回车保留。
 
@@ -210,6 +212,8 @@ flowchart TD
 | 下载最新版 Mihomo、AdGuardHome 和面板 | `sh /etc/proxy/sh/update-bin.sh` |
 | 查看 OpenWrt 日志 | `logread -e MyProxy -f` |
 | 查看 Debian/Ubuntu 日志 | `journalctl -t MyProxy -f` |
+
+安装和更新脚本时会自动设置脚本执行权限；设置失败会报错退出。
 
 升级程序后需要重启服务才能生效：
 

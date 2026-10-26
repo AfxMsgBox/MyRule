@@ -97,6 +97,47 @@ mp_wait_core_ready() {
 mp_sync_etc_files() { printf 'sync %s\n' "$1" >> "$TEST_ROOT/events"; }
 ''')
 
+    def test_script_sync_sets_modes_before_replacing_files(self):
+        source = self.root / "source"
+        files = {"route.sh": 0o755, "env.conf": 0o644,
+                 "etc/init.d/proxy_core": 0o755,
+                 "etc/hotplug.d/net/route": 0o755,
+                 "etc/systemd/system/proxy_core.service": 0o644}
+        for name in files:
+            self.file("source/sh/" + name, "payload\n").chmod(0o600)
+        private = self.file("sh/env.local.conf", "# private\n")
+        private.chmod(0o600)
+        result = self.run_shell('set -f\nmp_fetch_repo_sh "$MP_INST_DIR/sh"',
+                                extra={"_MP_SOURCE_DIR": str(source)})
+        self.assert_ok(result)
+        for name, mode in files.items():
+            self.assertEqual((self.root / "sh" / name).stat().st_mode & 0o777, mode, name)
+        self.assertEqual(private.stat().st_mode & 0o777, 0o600)
+
+    def test_script_sync_chmod_failure_preserves_old_script(self):
+        self.file("source/sh/route.sh", "new\n")
+        target = self.file("sh/route.sh", "old\n")
+        target.chmod(0o755)
+        self.command("chmod", "exit 1\n")
+        result = self.run_shell('mp_fetch_repo_sh "$MP_INST_DIR/sh"',
+                                extra={"_MP_SOURCE_DIR": str(self.root / "source")})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(target.read_text(), "old\n")
+        self.assertEqual(target.stat().st_mode & 0o777, 0o755)
+        self.assertFalse(list((self.root / "sh").glob(".sync.*")))
+
+    def test_service_route_hooks_run_without_execute_permission(self):
+        route = self.file("sh/setup-fake-ip-route.sh", 'printf "route-called\\n" >> "$TEST_ROOT/routes"\n')
+        route.chmod(0o644)
+        self.command("sleep", "exit 0\n")
+        unit = (ROOT / "sh/etc/systemd/system/proxy_core.service").read_text()
+        post = next(line.split("=", 1)[1] for line in unit.splitlines() if line.startswith("ExecStartPost="))
+        self.assert_ok(self.run_shell(post.replace("/etc/proxy", str(self.root)), source=False))
+        hotplug = (ROOT / "sh/etc/hotplug.d/net/99-meta-route").read_text()
+        self.assert_ok(self.run_shell(hotplug.replace("/etc/proxy", str(self.root)),
+                                      source=False, extra={"ACTION": "add"}))
+        self.assertEqual((self.root / "routes").read_text().splitlines(), ["route-called", "route-called"])
+
     def test_dns_environment_priority_and_empty(self):
         for local, caller, expected in [
             (None, None, "223.5.5.5 119.29.29.29"),

@@ -833,7 +833,12 @@ inst_collect_inputs() {
     INST_DOWNLOAD_PROXY_SET=1
     inst_set_download_context
     [ -z "$_MP_SOURCE_DIR" ] || say_dim '本地仓库保持原文件；所选分支用于后续 GitHub 更新'
-    inst_choose_branch || return 1
+    if [ -n "${_INST_BOOT_SELECTED:-}" ] && [ -d "${_INST_BOOT_REPO:-}/sh" ]; then
+        MP_REPO_BRANCH=$_INST_BOOT_SELECTED
+        say_dim "GitHub 分支：$MP_REPO_BRANCH（已在启动时选择）"
+    else
+        inst_choose_branch || return 1
+    fi
     prompt_to MP_SUBSCRIBE_URL "$MP_SUBSCRIBE_URL" '节点订阅 URL（可见输入）'
     inst_choose_auth || return 1
     inst_prompt_dns

@@ -287,6 +287,20 @@ esac
         self.assertFalse((self.etc / "hotplug.d/net/99-meta-route").exists())
         self.assertEqual(sysctl.read_text(), "net.ipv4.ip_forward=1\nother=1\n")
 
+    def test_openwrt_legacy_hotplug_still_uninstalls(self):
+        self.platform("openwrt")
+        hook = self.etc / "hotplug.d/net/99-meta-route"
+        hook.write_text(hook.read_text().replace("exec /bin/sh ", "exec "))
+        self.assert_ok(self.run_uninstall())
+        self.assertFalse(hook.exists())
+
+    def test_openwrt_foreign_hotplug_is_rejected(self):
+        self.platform("openwrt")
+        hook = self.etc / "hotplug.d/net/99-meta-route"
+        hook.write_text(hook.read_text().replace(str(self.target), str(self.target) + "-other"))
+        self.assertNotEqual(self.run_uninstall().returncode, 0)
+        self.assertEqual(self.events(), [])
+
     def test_purge_deletes_only_managed_subdirectories_and_can_delete_itself(self):
         result = self.run_uninstall("--purge", script=self.target / "sh/uninstall.sh")
         self.assert_ok(result)

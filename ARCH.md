@@ -230,7 +230,7 @@ GFW 域名列表使用 Loyalsoldier/clash-rules 已整理的 Clash payload，直
 | `install-lib.sh` | 统一编排、参数与向导、依赖、来源和缓存、目标应用、恢复快照与定时任务 |
 | `install-remote.sh` | SSH 探测、连接复用、传输、远端预检及清理 |
 
-安装器归并为以上三个文件；`portable.sh` 是安装与日常更新共用的运行库。`install-lib.sh` 被 source 时仅定义函数，只有显式 `--installer-run` 才执行入口。独立 inst.sh 自动下载仓库并调用库入口，本机在线和 SSH 在线均不要求事先下载其它文件。CLI 自举使用 `--branch`，未指定时使用 main；完整向导随后查询分支列表，选择其它分支会重新下载该分支的仓库快照。所选分支须包含这套安装器。
+安装器归并为以上三个文件；`portable.sh` 是安装与日常更新共用的运行库。`install-lib.sh` 被 source 时仅定义函数，只有显式 `--installer-run` 才执行入口。独立 inst.sh 自动下载仓库并调用库入口，本机在线和 SSH 在线均不要求事先下载其它文件。CLI 静默自举使用 `--branch`，未指定时使用 main。独立交互入口在下载模块前分页获取 GitHub 分支列表（main 置顶），`--branch` 只预设默认编号；API 失败或响应无效时停止，不用不完整列表继续下载。确认分支后下载其归档，以 `_INST_BOOT_SELECTED` 传递原始分支名、`_INST_BOOT_BRANCH` 传递 URL 编码后的分支名；向导沿用选择，prepare 复用同一归档，避免重复选择和下载。独立文件无法推断下载来源分支，所选分支缺少 install-lib.sh 时提示具体分支和缺失文件。本地仓库入口仍在完整向导中查询分支。
 
 支持三条路径：本机在线、SSH 在线、SSH 本地仓库；另保留本机本地仓库安装。发起端适配 Linux/macOS/OpenWrt；安装目标为 OpenWrt/procd 和 Linux/systemd。macOS 仅作为资源下载与 SSH 部署发起端，不安装或运行代理服务，无需实现 launchd、macOS TUN、路由及服务卸载适配。
 
@@ -316,7 +316,7 @@ OpenWrt 优先选择可用的 apk，否则 opkg；Debian/Ubuntu（含通过 `ID_
 入口：`update-scripts.sh`
 
 1. 通过 `mp_fetch_repo_sh` 下载仓库 tarball（本地来源标志只由安装器传给本次子进程）。
-2. 只覆盖 `$MP_INST_DIR/sh/`，不覆盖 `core/`、`agh/`、`domain/`。
+2. 只覆盖 `$MP_INST_DIR/sh/`，不覆盖 `core/`、`agh/`、`domain/`。每个文件在目标目录中暂存，复制后设置权限，再以 mv 替换：`*.sh`、`etc/init.d/*`、`etc/hotplug.d/*` 为 0755，其余配置（包括 systemd unit）为 0644。权限设置失败保留该目标文件并中止同步，先前已完成的文件不回滚；安装也使用同一函数。私有 env.local.conf 及状态文件不参与同步，权限不变。
 3. `exec` 新版自身，避免旧进程继续执行已被替换的脚本。
 4. 重新替换服务文件路径；仅当 `/etc` 中已有对应文件时同步。
 
@@ -468,8 +468,10 @@ README 的接入示例限定为上述 IPv4 拓扑；跨网段、容器 NAT 或�
 
 触发方式：
 
-- systemd：Core 启动后由 `ExecStartPost` 延迟调用。
-- OpenWrt：网络 hotplug 的 add 事件调用。
+- systemd：Core 启动后由 `ExecStartPost` 延迟通过 `/bin/sh` 调用。现有 `|| true` 保持不变，路由失败不让 Core 服务启动失败。
+- OpenWrt：网络 hotplug 的 add 事件通过 `/bin/sh` 调用。
+
+上述调用不依赖路由脚本的执行位；脚本之间通过 sh 调用或 source 加载也不要求执行位。直接运行脚本仍需要执行权限，由安装/更新同步统一设置。
 
 透明转发还依赖：
 
@@ -502,7 +504,7 @@ README 的接入示例限定为上述 IPv4 拓扑；跨网段、容器 NAT 或�
 执行顺序：
 
 1. 检查目标路径；purge 额外检查安装凭据、三个子目录的符号链接和 `/proc/self/mountinfo` 中的挂载点。
-2. 预检 systemd、init.d、hotplug 和自启动链接归属。unit 要求项目 Documentation 及 ExecStart 中的精确安装路径；init.d 要求 MP_INST_DIR、env.conf 加载及 procd 标记；hotplug 要求目标脚本路径。systemd 另检查实际 FragmentPath、LoadState、DropInPaths，避免停止被其它 unit 或覆盖配置接管的服务。冲突时整体中止，不修改 cron 或服务。
+2. 预检 systemd、init.d、hotplug 和自启动链接归属。unit 要求项目 Documentation 及 ExecStart 中的精确安装路径；init.d 要求 MP_INST_DIR、env.conf 加载及 procd 标记；hotplug 要求目标脚本路径，精确兼容旧版 `exec 路径` 和新版 `exec /bin/sh 路径` 两种格式。systemd 另检查实际 FragmentPath、LoadState、DropInPaths，避免停止被其它 unit 或覆盖配置接管的服务。冲突时整体中止，不修改 cron 或服务。
 3. 读取 root crontab，生成仅剔除目标安装器任务的新版本。注释、其它安装路径及手工任务保留；读取失败中止，不能将错误当作空 crontab。有转发恢复记录时校验其目录、平台、格式及当前文件是否等于安装前/后快照；配置被另外修改时整体中止。交互确认后重新检查归属、crontab、转发快照及 purge 边界。
 4. 提交 cron 清理，按 AGH → Core 顺序停止服务；检查 `/proc/*/exe` 是否仍指向目标二进制（包括已删除但运行中的旧文件），有残留则保留文件和数据并失败。读取路由记录，仅在同一 boot_id、TUN 的 ifindex 仍一致、路由仍为记录的 CIDR 与设备且没有 via 网关时清理残留；接口不存在表示内核已随接口销毁清理，跨启动周期或同名接口重建则保留其路由。无记录时不猜测路由归属。
 5. OpenWrt 禁用服务；移除已核对的自启动链接、服务文件和 hotplug。systemd 直接删除启用链接再 daemon-reload，避免 systemctl disable 触发旧 SysV 兼容同步。

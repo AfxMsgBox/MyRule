@@ -527,7 +527,10 @@ mp_fetch_repo_sh() {
         mkdir -p "$_mfr_target_dir" || { _mfr_failed=1; break; }
         _mfr_stage=$(mktemp "$_mfr_target_dir/.sync.XXXXXX") \
             || { _mfr_failed=1; break; }
-        if ! cp -p "$_mfr_file" "$_mfr_stage" || ! mv "$_mfr_stage" "$_mfr_target"; then
+        _mfr_mode=0644
+        case "$_mfr_rel" in *.sh|etc/init.d/*|etc/hotplug.d/*) _mfr_mode=0755 ;; esac
+        if ! cp -p "$_mfr_file" "$_mfr_stage" || ! chmod "$_mfr_mode" "$_mfr_stage" \
+            || ! mv "$_mfr_stage" "$_mfr_target"; then
             rm -f "$_mfr_stage"
             _mfr_failed=1
             break
@@ -538,7 +541,6 @@ mp_fetch_repo_sh() {
         rm -rf "$_mfr_tmp"
         return 1
     fi
-    chmod +x "$_mfr_dst"/*.sh 2>/dev/null || :
     rm -rf "$_mfr_tmp"
     return 0
 }

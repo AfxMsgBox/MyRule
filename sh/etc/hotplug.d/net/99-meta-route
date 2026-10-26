@@ -1,4 +1,4 @@
 #!/bin/sh
 # OpenWrt hotplug：网络接口 add 时调用统一脚本；脚本自行读取并检查 tun.device。
 [ "$ACTION" = "add" ] || exit 0
-exec /etc/proxy/sh/setup-fake-ip-route.sh
+exec /bin/sh /etc/proxy/sh/setup-fake-ip-route.sh

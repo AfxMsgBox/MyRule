@@ -69,23 +69,60 @@ chmod 700 "$_inst_boot" || exit 1
 trap 'rm -rf -- "$_inst_boot"' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
-_inst_branch=$(printf '%s' "${_inst_branch:-main}" | jq -sRr '@uri') || exit 1
-_inst_url="https://codeload.github.com/AfxMsgBox/MyRule/tar.gz/refs/heads/$_inst_branch"
 [ -z "$_inst_target" ] || _inst_install_dir=/etc/proxy
 _inst_port=$(awk '$1=="mixed-port:" {gsub(/[\047\042]/,"",$2); print $2; exit}' "$_inst_install_dir/core/config.yaml" 2>/dev/null)
 _inst_core=
 case "$_inst_port" in ''|*[!0-9]*) ;; *) _inst_core="socks5h://127.0.0.1:$_inst_port" ;; esac
-_inst_ok=0
-for _inst_channel in "$_inst_core" "$_inst_download_proxy" DIRECT; do
-    [ -n "$_inst_channel" ] || continue
-    _inst_noproxy=; [ "$_inst_channel" != DIRECT ] || { _inst_channel=; _inst_noproxy='*'; }
-    if curl --disable --silent --fail -L --connect-timeout 10 --max-time 300 --proxy "$_inst_channel" --noproxy "$_inst_noproxy" "$_inst_url" -o "$_inst_boot/repo.tgz"; then _inst_ok=1; break; fi
-done
-[ "$_inst_ok" = 1 ] || { echo '安装器下载失败，请检查分支、网络或下载代理' >&2; exit 1; }
+_inst_download() {
+    for _inst_channel in "$_inst_core" "$_inst_download_proxy" DIRECT; do
+        [ -n "$_inst_channel" ] || continue
+        _inst_noproxy=; [ "$_inst_channel" != DIRECT ] || { _inst_channel=; _inst_noproxy='*'; }
+        if curl --disable --silent --fail -L --connect-timeout 10 --max-time 300 --proxy "$_inst_channel" --noproxy "$_inst_noproxy" "$1" -o "$2" && [ -s "$2" ]; then return 0; fi
+    done
+    return 1
+}
+# 选择必须发生在下载模块之前；独立文件无法得知自己来自哪个分支。
+if [ "$_inst_interactive" = 1 ]; then
+    _inst_page=1
+    : > "$_inst_boot/branches"
+    while :; do
+        _inst_download "https://api.github.com/repos/AfxMsgBox/MyRule/branches?per_page=100&page=$_inst_page" "$_inst_boot/page.json" \
+            && jq -e 'type == "array" and length <= 100 and all(.[];
+                (.name | type == "string") and (.name | length > 0) and
+                (.name | test("[\u0000-\u001f\u007f]") | not))' "$_inst_boot/page.json" >/dev/null 2>&1 \
+            || { echo '无法获取完整分支列表，请检查网络或 GitHub API 限流后重试' >&2; exit 1; }
+        jq -r '.[].name' "$_inst_boot/page.json" >> "$_inst_boot/branches" || exit 1
+        [ "$(jq length "$_inst_boot/page.json")" = 100 ] || break
+        _inst_page=$((_inst_page + 1))
+    done
+    grep -qxF main "$_inst_boot/branches" || { echo '分支列表缺少 main' >&2; exit 1; }
+    { printf 'main\n'; LC_ALL=C sort -u "$_inst_boot/branches" | sed '/^main$/d'; } > "$_inst_boot/choices"
+    _inst_color=; _inst_reset=
+    if [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != dumb ]; then
+        _inst_color=$(printf '\033[1;36m'); _inst_reset=$(printf '\033[0m')
+    fi
+    printf '\n%sGitHub 分支%s\n' "$_inst_color" "$_inst_reset" > /dev/tty
+    awk '{ printf "  %d) %s\n", NR, $0 }' "$_inst_boot/choices" > /dev/tty
+    _inst_default=$(awk -v branch="${_inst_branch:-main}" '$0 == branch { print NR; exit }' "$_inst_boot/choices")
+    while :; do
+        printf '选择分支编号 [%s]> ' "${_inst_default:-1}" > /dev/tty
+        IFS= read -r _inst_choice < /dev/tty || exit 1
+        _inst_choice=${_inst_choice:-${_inst_default:-1}}
+        case "$_inst_choice" in *[!0-9]*) continue ;; esac
+        _inst_branch=$(awk -v n="$_inst_choice" 'NR == n { print; exit }' "$_inst_boot/choices")
+        [ -z "$_inst_branch" ] || break
+        printf '分支编号超出范围\n' > /dev/tty
+    done
+    _INST_BOOT_SELECTED=$_inst_branch; export _INST_BOOT_SELECTED
+fi
+_inst_branch=$(printf '%s' "${_inst_branch:-main}" | jq -sRr '@uri') || exit 1
+_inst_url="https://codeload.github.com/AfxMsgBox/MyRule/tar.gz/refs/heads/$_inst_branch"
+_inst_download "$_inst_url" "$_inst_boot/repo.tgz" \
+    || { echo '安装器下载失败，请检查分支、网络或下载代理' >&2; exit 1; }
 tar -xzf "$_inst_boot/repo.tgz" -C "$_inst_boot" || exit 1
 set +f
 for _inst_main in "$_inst_boot"/*/sh/install-lib.sh; do
-    [ -f "$_inst_main" ] || { echo '所选分支尚不支持此安装器' >&2; exit 1; }
+    [ -f "$_inst_main" ] || { printf '分支 %s 缺少 sh/install-lib.sh，请选择包含新版安装器的分支\n' "$_inst_branch" >&2; exit 1; }
     _INST_BOOT_PROXY=$_inst_download_proxy; export _INST_BOOT_PROXY
     _INST_BOOT_REPO=${_inst_main%/sh/install-lib.sh}
     _INST_BOOT_BRANCH=$_inst_branch
