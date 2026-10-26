@@ -49,3 +49,77 @@ mp_cache_write() {
     cp "$2" "$_MP_CACHE_WRITE/$_mcw_key" &&
         mp_sha256 < "$2" > "$_MP_CACHE_WRITE/$_mcw_key.sha256"
 }
+
+# BEGIN shared HTTP transport (also embedded in standalone inst.sh)
+# URL/output/Core/fallback/label/timeout/min-size. Never print URLs or raw curl errors.
+mp_http_download() (
+    _hd_url=$1; _hd_dst=$2; _hd_core=$3; _hd_proxy=$4
+    _hd_label=${5:-文件}; _hd_timeout=${6:-300}; _hd_min=${7:-0}
+    _hd_meta=$(mktemp -d) || exit 1
+    trap 'rm -rf -- "$_hd_meta"' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    printf '下载：%s\n' "$_hd_label" >&2
+    _hd_round=0
+    while :; do
+        _hd_transient=0
+        for _hd_kind in core fallback direct; do
+            case "$_hd_kind" in
+                core) [ -n "$_hd_core" ] || continue; _hd_channel=$_hd_core; _hd_name='Core 本机代理' ;;
+                fallback) [ -n "$_hd_proxy" ] && [ "$_hd_proxy" != "$_hd_core" ] || continue
+                    _hd_channel=$_hd_proxy; _hd_name='外部后备代理' ;;
+                direct) _hd_channel=; _hd_name=直连 ;;
+            esac
+            printf '  尝试：%s\n' "$_hd_name" >&2
+            _hd_noproxy=; [ -n "$_hd_channel" ] || _hd_noproxy='*'
+            set -- --disable --fail -L --connect-timeout 10 --max-time "$_hd_timeout" \
+                --speed-limit 1 --speed-time 30 --proxy "$_hd_channel" --noproxy "$_hd_noproxy" \
+                --write-out '%{http_code}' "$_hd_url" -o "$_hd_dst"
+            : > "$_hd_dst" || exit 1
+            if [ -t 2 ]; then
+                # Only render curl's numeric progress records; errors can contain credentials.
+                (curl "$@" --progress-bar > "$_hd_meta/http"; printf '%s' "$?" > "$_hd_meta/rc") 2>&1 |
+                    awk 'BEGIN { RS="\r" } /^[[:space:]#.=+%<>0-9-]+$/ {
+                        printf "\r%s", $0; fflush(); shown=1
+                    } END { if (shown) printf "\n" }' >&2
+                _hd_rc=$(cat "$_hd_meta/rc")
+            else
+                curl "$@" --silent > "$_hd_meta/http" 2>/dev/null
+                _hd_rc=$?
+            fi
+            _hd_http=$(cat "$_hd_meta/http")
+            case "$_hd_http" in [0-9][0-9][0-9]) ;; *) _hd_http=000 ;; esac
+            if [ "$_hd_rc" = 0 ] && [ "$(wc -c < "$_hd_dst")" -gt "$_hd_min" ]; then exit 0; fi
+            _hd_retry=0
+            case "$_hd_rc" in
+                0) _hd_reason='响应为空或过小' ;;
+                5|6) _hd_reason='DNS 解析失败'; _hd_retry=1 ;;
+                7) _hd_reason='连接失败'; _hd_retry=1 ;;
+                18|52|55|56) _hd_reason='传输中断'; _hd_retry=1 ;;
+                28) _hd_reason='请求超时或连续 30 秒无数据'; _hd_retry=1 ;;
+                35) _hd_reason='TLS 握手失败'; _hd_retry=1 ;;
+                60) _hd_reason='TLS 证书校验失败' ;;
+                22) _hd_reason='HTTP 请求失败'
+                    case "$_hd_http" in 408|429|500|502|503|504) _hd_retry=1 ;; esac ;;
+                23|26) _hd_reason='本地文件读写失败' ;;
+                *) _hd_reason='下载失败' ;;
+            esac
+            printf '  %s：%s（curl %s，HTTP %s）\n' "$_hd_name" "$_hd_reason" "$_hd_rc" "$_hd_http" >&2
+            # Retry only if the final direct attempt was transient; a final 404/403 is conclusive.
+            _hd_transient=$_hd_retry
+            case "$_hd_rc" in 23|26) exit 1 ;; esac
+        done
+        [ "$_hd_transient" = 1 ] && [ "$_hd_round" -lt 2 ] || exit 1
+        _hd_round=$((_hd_round + 1))
+        printf '  临时错误，自动重试 %s/2\n' "$_hd_round" >&2
+        sleep 1
+    done
+)
+# END shared HTTP transport
+
+# Only the target requires Linux TUN; launchers (including macOS) do not.
+mp_require_tun() {
+    [ -c /dev/net/tun ] && ( : <>/dev/net/tun ) 2>/dev/null && return 0
+    printf '%s\n' '目标机无法访问 /dev/net/tun；请加载 tun 模块，容器须由宿主机开放并挂载 TUN 设备' >&2
+    return 1
+}

@@ -8,6 +8,7 @@
 - 可以从 Linux、macOS、OpenWrt 发起安装；macOS 仅用于下载资源和通过 SSH 部署到目标机。SSH 登录使用 root，或拥有 sudo 权限的用户；本机安装使用 root。安装器会提示并补装缺失依赖。
 - 准备节点订阅 URL。安装时选择是否设置 AdGuardHome 登录密码；用户名默认 `admin`，设置密码时填写 **bcrypt 哈希**。
 - 首次安装无法访问下载源时，准备一个 HTTP 或 SOCKS 代理地址。
+- LXC 等容器需先在宿主机开放并挂载 `/dev/net/tun`。安装器会检查设备，并在启动时检查 Core API、TUN 接口和 fake-ip 路由；缺失时提示原因并停止。
 
 依赖安装使用系统配置的软件源：Debian/Ubuntu 使用 `apt-get`，OpenWrt 使用 `opkg` 或 `apk`，只补齐缺失依赖。macOS 发起端缺少工具时使用已安装的 Homebrew；没有 Homebrew 时提示手动补齐。SSH 发起端需要 OpenSSH 客户端（OpenWrt 可安装 `openssh-client`）。**软件包下载遵循包管理器自身的代理配置，不使用安装器的 `--proxy`**；失败时会显示错误和手动安装命令，并停止安装。启用定时更新时会按需补装 `crontab` 和防止任务重叠的 `flock`。
 
@@ -125,6 +126,8 @@ sh /path/to/MyRule/sh/inst.sh --local --target admin@192.168.1.2 \
 ### 下载代理与重装
 
 下载顺序为：**下载所在机器的 Core 代理 → 外部后备代理 → 直连**。
+
+终端下载显示进度条；日志显示下载内容、当前通道及失败原因。临时网络错误最多自动重试两轮，持续 30 秒无数据会中止当前请求并尝试回退；必需资源最终失败时停止安装。软件包管理器使用自己的进度显示。
 
 | 场景 | 外部代理参数 |
 |---|---|

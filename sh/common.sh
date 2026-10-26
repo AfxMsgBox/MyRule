@@ -244,10 +244,10 @@ mp_copy_repo_file() {
     fi
 }
 
-# download_file <url> <dst> [verbose=true] [min_size=8]
+# download_file <url> <dst> [verbose=true] [min_size=8] [label] [timeout=300]
 # verbose=true 时输出目标文件名、通道、字节数与耗时；不输出远端 URL 凭据。
 # 每轮依次尝试 Core 配置派生的本机代理、外部后备代理、直连。
-# 一轮全失败时有 tty 则询问是否重试，否则直接返回失败。
+# 临时网络错误最多自动重试两轮；仍失败时，日常交互调用可手动重试。
 # --fail 让 4xx/5xx 不被当成功；mktemp + mv 原子替换
 download_file() {
     # 所有内部变量加 _df_ 前缀，避免污染调用方同名变量（POSIX sh 无 local）
@@ -273,40 +273,9 @@ download_file() {
     # 临时文件放在目标目录，保证最后 mv 不跨文件系统，真正原子替换。
     _df_tmp=$(mktemp "$_df_dir/.download.XXXXXX") || return 1
 
-    # _df_attempt <proxy-url-or-empty> <label>
-    # 空 proxy 表示直连；成功且文件大小合格时返回 0。
-    _df_attempt() {
-        _df_attempt_proxy="$1"; _df_attempt_label="$2"
-        [ "$_df_verbose" = "true" ] && echo_log "尝试：$_df_attempt_label"
-        if [ -n "$_df_attempt_proxy" ]; then
-            curl --disable --silent --fail -L --connect-timeout 10 --max-time 300 \
-                 --noproxy '' --proxy "$_df_attempt_proxy" "$_df_url" -o "$_df_tmp"
-        else
-            curl --disable --silent --fail -L --connect-timeout 10 --max-time 300 \
-                 --proxy '' --noproxy '*' "$_df_url" -o "$_df_tmp"
-        fi
-        _df_rc=$?
-        if [ "$_df_rc" -ne 0 ] && [ "$_df_verbose" = true ]; then
-            echo_log "$_df_attempt_label 下载失败（curl 退出码 $_df_rc）"
-        fi
-        [ "$_df_rc" -eq 0 ] && [ "$(get_file_size "$_df_tmp")" -gt "$_df_min_size" ]
-    }
-
-    while :; do
-        _df_primary_proxy=$(mp_core_proxy_url "${_MP_DOWNLOAD_CORE_CONFIG:-$MP_CORE_DIR/config.yaml}" 2>/dev/null || :)
-        _df_ok=0
-        if [ -n "$_df_primary_proxy" ] && _df_attempt "$_df_primary_proxy" "Core 本机代理"; then
-            _df_ok=1
-        elif [ -n "$MP_PROXY" ] && [ "$MP_PROXY" != "$_df_primary_proxy" ] \
-             && _df_attempt "$MP_PROXY" "外部后备代理"; then
-            _df_ok=1
-        fi
-        if [ "$_df_ok" -eq 0 ] && _df_attempt "" "直连"; then
-            _df_ok=1
-        fi
-        [ "$_df_ok" -eq 1 ] && break
-
-        [ "$_df_verbose" = "true" ] && echo_log "下载失败"
+    while ! mp_http_download "$_df_url" "$_df_tmp" \
+        "$(mp_core_proxy_url "${_MP_DOWNLOAD_CORE_CONFIG:-$MP_CORE_DIR/config.yaml}" 2>/dev/null || :)" \
+        "$MP_PROXY" "${5:-$(basename "$_df_dst")}" "${6:-300}" "$_df_min_size"; do
         if ! download_retry_prompt; then
             rm -f "$_df_tmp"
             return 1
@@ -406,24 +375,45 @@ mp_activate_configs() {
     echo_log "Core / AGH 已按依赖顺序启动"
 }
 
-# 等待 Core 按当前 config.yaml 启动控制 API。端口与 secret 均从 Core 配置读取。
+# 不只检查 API：TUN 必须上线，且 fake-ip 精确网段必须直接路由至该接口。
+mp_core_network_ready() {
+    _mcn_tun=$(mp_core_value tun device) || return 1
+    _mcn_cidr=$(mp_core_fake_ip_cidr) || return 1
+    _mcn_reason="TUN 接口 $_mcn_tun 未上线"
+    ip link show "$_mcn_tun" 2>/dev/null | grep -q '[<,]UP[,>]' || return 1
+    _mcn_reason="缺少 fake-ip 路由 $_mcn_cidr -> $_mcn_tun"
+    ip -4 route show "$_mcn_cidr" 2>/dev/null | awk -v net="$_mcn_cidr" -v dev="$_mcn_tun" '
+        $1 == net {
+            target=0; via=0
+            for (i=1; i<=NF; i++) {
+                if ($i == "dev" && $(i+1) == dev) target=1
+                if ($i == "via") via=1
+            }
+            if (target && !via) found=1
+        }
+        END { exit !found }
+    '
+}
+
+# 最多等待指定秒数；失败保持 AGH 停止，不能把 API 在线当作透明代理就绪。
 mp_wait_core_ready() {
     _mwcr_timeout="${1:-30}"
     _mwcr_api=$(mp_core_api_url) || return 1
     _mwcr_secret=$(mp_core_value "" secret 2>/dev/null || :)
     _mwcr_start=$(date +%s)
+    _mcn_reason='Core API 未响应'
     while [ "$(($(date +%s) - _mwcr_start))" -lt "$_mwcr_timeout" ]; do
-        if [ -n "$_mwcr_secret" ]; then
-            curl --silent --show-error --fail --max-time 2 --noproxy '*' \
-                -H "Authorization: Bearer $_mwcr_secret" "$_mwcr_api/version" >/dev/null 2>&1 \
-                && return 0
+        set -- --silent --fail --max-time 2 --proxy '' --noproxy '*'
+        [ -z "$_mwcr_secret" ] || set -- "$@" -H "Authorization: Bearer $_mwcr_secret"
+        if curl --disable "$@" "$_mwcr_api/version" >/dev/null 2>&1; then
+            _mcn_reason='Core 配置缺少有效的 TUN 或 fake-ip 参数'
+            mp_core_network_ready && return 0
         else
-            curl --silent --show-error --fail --max-time 2 --noproxy '*' \
-                "$_mwcr_api/version" >/dev/null 2>&1 && return 0
+            _mcn_reason='Core API 未响应'
         fi
         sleep 1
     done
-    echo_log "Core API 在 ${_mwcr_timeout}s 内未就绪：$_mwcr_api"
+    echo_log "Core 在 ${_mwcr_timeout}s 内未就绪：$_mcn_reason"
     return 1
 }
 
@@ -600,19 +590,19 @@ mp_fetch_core_providers() {
         _mfp_found=$((_mfp_found + 1))
         case "$_mfp_url" in
             http://*|https://*) ;;
-            *) echo_log "$_mfp_kind/$_mfp_name 缺少有效 url"; _mfp_failed=1; continue ;;
+            *) echo_log "$_mfp_kind/$_mfp_name 缺少有效 url"; _mfp_failed=1; break ;;
         esac
         while [ "${_mfp_path#./}" != "$_mfp_path" ]; do _mfp_path=${_mfp_path#./}; done
         case "$_mfp_path" in
             ''|.|..|/*|../*|*/../*|*/..)
                 echo_log "$_mfp_kind/$_mfp_name 缺少安全有效的 path"
-                _mfp_failed=1; continue
+                _mfp_failed=1; break
                 ;;
         esac
         _mfp_dst="$MP_CORE_DIR/$_mfp_path"
         mkdir -p "$(dirname "$_mfp_dst")"
         echo_log ">>> 预下载 $_mfp_kind/$_mfp_name"
-        download_file "$_mfp_url" "$_mfp_dst" || _mfp_failed=1
+        download_file "$_mfp_url" "$_mfp_dst" || { _mfp_failed=1; break; }
     done < "$_mfp_list"
     rm -f "$_mfp_list"
 
@@ -688,7 +678,7 @@ mp_fetch_agh_filters() {
         echo_log ">>> 预下载 AGH filter $_maf_id"
         if ! download_file "$_maf_url" "$_maf_dir/$_maf_id.txt"; then
             echo_log "AGH filter $_maf_id 下载失败"
-            _maf_failed=1
+            _maf_failed=1; break
         fi
     done < "$_maf_list"
     rm -f "$_maf_list"

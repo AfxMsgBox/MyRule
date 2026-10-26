@@ -464,6 +464,7 @@ mp_service_op enable_restart proxy_core
                 tar.addfile(info, io.BytesIO(content))
         self.add_common(r'''
 download_file() {
+    printf '%s\n' "$1" >> "$TEST_ROOT/binary-downloads"
     case "$1" in
         */releases/latest) fixture=release.json ;;
         *mihomo-linux-*) fixture=mihomo.gz ;;

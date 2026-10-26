@@ -171,7 +171,11 @@ MP_PROXY 外部代理
 
 `download_file` 使用目标目录内的临时文件，检查 curl 状态与最小文件大小，成功后以 `mv` 原子替换。不做进程、API 或网站预探测，由真实下载决定回退；Core 只读当前正式配置，端口按 mixed-port → port → socks-port 选择首个有效值。相同的 Core/外部代理不重复尝试。
 
-curl 的首个参数为 `--disable`，避免读取用户配置。代理通道使用显式 `--proxy URL --noproxy ''`，直连使用 `--proxy '' --noproxy '*'`，消除系统代理变量与 NO_PROXY 干扰。日志只输出目标文件名、通道、curl 退出码、大小和耗时，不打印远端 URL、代理凭据或 curl 原始错误。
+curl 的首个参数为 `--disable`，避免读取用户配置。代理通道使用显式 `--proxy URL --noproxy ''`，直连使用 `--proxy '' --noproxy '*'`，消除系统代理变量与 NO_PROXY 干扰。日志只输出资源名称、通道、curl 退出码、HTTP 状态、分类原因、大小和耗时，不打印远端 URL、代理凭据或 curl 原始错误。
+
+HTTP 传输统一由 `portable.sh` 的 `mp_http_download` 实现；独立 `inst.sh` 嵌入相同函数，单元测试强制两份一致。stderr 是 TTY 时启用 curl 进度条，awk 只转发由数字、空白和进度符号构成的记录并实时刷新，过滤可能带凭据的 curl 错误；非 TTY 仅显示阶段及诊断。HTTP 状态和退出码使用私有临时文件传递，结束后清理。
+
+每次请求连接超时 10 秒，连续 30 秒传输速度低于 1 B/s 提前终止；分支 API 和 Mihomo 版本 API 总超时 60 秒，其余资源默认 300 秒。每轮依次尝试全部可用通道；最后直连仍为暂态错误时，间隔 1 秒最多重试两轮，共三轮。暂态包含 DNS/连接/传输/握手错误、超时及 HTTP 408/429/500/502/503/504；最终 403/404、证书校验失败、空响应不自动重试，本地读写错误立即终止。
 
 安装模块的 `bootstrap_download` 用于分支 API 和仓库归档。独立 inst.sh 在模块尚不存在时含最小下载自举，优先读取本机 mixed-port，然后发起端代理及直连。模块加载后 bootstrap 和公共下载函数均按 mixed-port → port → socks-port 查找端口。
 
@@ -200,10 +204,10 @@ prepare 将 sh/、domain/、core/config.yaml、agh/agh.yaml、agh/myupstream.txt
 
 - `mp_detect_os`：即时识别 `openwrt` 或 `systemd`，不持久化 OS 类型。
 - `mp_service_op`：统一启停和重启服务。
-- `mp_activate_configs`：安装/重装与日常更新共用的服务切换流程；停止 AGH、提交待切换配置、重启 Core、等待 API、重启 AGH。重装使用 `enable_restart`，确保已运行的服务也重新加载；首次安装使用 `enable_start`，无需停止尚未运行的 AGH。
+- `mp_activate_configs`：安装/重装与日常更新共用的服务切换流程；停止 AGH、提交待切换配置、重启 Core、等待 API/TUN/路由就绪、重启 AGH。重装使用 `enable_restart`，确保已运行的服务也重新加载；首次安装使用 `enable_start`，无需停止尚未运行的 AGH。
 - `mp_commit_pending_configs`：仅提交配置，供上述流程或首次安装选择不启动服务时使用；运行中的 AGH 必须先停止。
 - `mp_sync_etc_files`：处理服务文件中的安装路径并按策略同步到 `/etc`。
-- `mp_wait_core_ready`：按当前 Core 配置等待 API 可用。
+- `mp_wait_core_ready`：按当前 Core 配置等待 API 可用，同时要求 TUN 接口具有 UP 标志、规范化后的完整 fake-ip CIDR 直接路由到该接口（无 via 网关）。默认总等待 30 秒，失败输出具体原因并保持 AGH 停止；API 请求强制直连。
 
 systemd 的启用逻辑直接创建 `multi-user.target.wants` 链接，不调用 `systemctl enable`，避免同名旧 SysV 脚本触发兼容层错误。
 
@@ -212,7 +216,7 @@ systemd 的启用逻辑直接创建 `multi-user.target.wants` 链接，不调用
 来源、文件及安装位置见 [README 下载列表](README.md#下载列表)。此处记录资源处理方式。
 
 
-GFW 和非中国顶级域名列表参与生成 `agh/dns.conf.pending`，配置提交后成为 `agh/dns.conf`。程序及面板压缩包解压安装后删除。当前安装流程每次都会请求上述资源，不因本地已有文件而跳过；必需下载失败会阻止后续配置切换和服务启动。
+GFW 和非中国顶级域名列表参与生成 `agh/dns.conf.pending`，配置提交后成为 `agh/dns.conf`。程序及面板压缩包解压安装后删除。当前安装流程每次都会请求上述资源，不因本地已有文件而跳过；必需下载失败立即终止后续资源下载、配置切换和服务启动。Mihomo latest JSON 须包含安全且非空的 tag_name；二进制或 UI 下载、解压、安装失败不继续处理后续组件。providers、filters 和 DNS 域名列表在首个失败处停止；DNS 清理临时文件并保留旧配置。已成功更新的其它组件不整批回滚。
 
 订阅和过滤器清单由 `core/config.yaml` 与 `agh/agh.yaml` 决定；修改模板后，下载项也会变化。当前 `whitelist_filters` 为空，没有额外白名单下载；GPT 规则来自本仓库，不列入 README 下载列表。GitHub Release 下载会跟随 HTTP 重定向，表中列的是脚本使用的入口地址。
 
@@ -240,6 +244,7 @@ GFW 域名列表使用 Loyalsoldier/clash-rules 已整理的 Clash payload，直
 入口定位/获取模块 → 检查发起端依赖 → 收集并校验参数
     ↓
 本机识别或 SSH 只读探测目标 OS、CPU、UID、sudo 可用性
+    → 检查目标 TUN 设备
     ↓
 prepare：固定仓库快照 → 按目标 CPU 下载全部外部资源
     → 保存参数 JSON → 生成并核对逐文件 SHA-256 清单
@@ -256,6 +261,8 @@ prepare：固定仓库快照 → 按目标 CPU 下载全部外部资源
 ```
 
 prepare 在私有临时目录运行既有配置/二进制更新器，以 `_MP_TARGET_ARCH` 指定目标 CPU，不执行下载的目标程序。`_MP_CACHE_WRITE` 按 URL 的 SHA-256 保存响应正文及内容校验值。目标 apply 设置 `_MP_RESOURCE_DIR` 后，外部资源缺失或校验失败立即退出，绝不联网回退；配置在目标重新渲染，因此路径和空 DNS 的 `/etc/resolv.conf` 使用目标值。日常更新不继承这些临时选项。
+
+本机目标在 prepare 前检查 `/dev/net/tun` 为可打开的字符设备；SSH 初探只检查设备类型，避免误拒绝需要 sudo 的用户，目标以 root 预检及 apply 时复查打开权限。设备缺失或不可访问时停止并提示宿主机开放 TUN；不自动创建设备。`--no-start` 同样检查，macOS 等纯发起端不检查 TUN。
 
 完整安装包包含 repo/、resources/、config.json、manifest；仅快照代码、模板及规则进入 repo。清单核对文件集合、内容哈希及类型，拒绝符号链接、额外文件、路径跳转。包含订阅与管理员参数的临时目录使用 0700，参数文件受 umask 077 保护。哈希用于完整性检查，传输身份和保密性由 SSH 负责，不将其描述为发行签名。
 
@@ -346,7 +353,7 @@ OpenWrt 优先选择可用的 apk，否则 opkg；Debian/Ubuntu（含通过 `ID_
     ↓
 将 agh.yaml.pending 切换为正式 agh.yaml
     ↓
-重启 Core并等待 API 就绪
+重启 Core并等待 API、TUN 和 fake-ip 路由就绪
     ↓
 启动 AGH
 ```
@@ -475,10 +482,13 @@ README 的接入示例限定为上述 IPv4 拓扑；跨网段、容器 NAT 或�
 
 透明转发还依赖：
 
+- Linux 的 `/dev/net/tun` 可访问；LXC 需要宿主机配置设备访问与挂载。安装器不会修改宿主机容器配置。
 - `net.ipv4.ip_forward=1`。
 - 防火墙允许客户端接口进入 AGH/Core 监听端口。
 - 防火墙允许客户端接口与 TUN 之间转发。
 - 若 nftables 的 `input` 默认策略为 drop，必须允许 Core TUN 内部回送给本机的流量，例如 `iifname "utun" accept`；这类流量可能使用动态端口，不能只按公开服务端口放行。
+
+实测边界：Mihomo 在 TUN 创建失败时仍可能启动控制 API、DNS 和显式代理监听。安装前设备检查及 `mp_wait_core_ready` 的接口/路由验收防止仅凭 API 在线报告成功，但不验证真实代理节点上网、客户端路由和防火墙配置；这些仍需端到端验证。平台开机路由触发器保持原机制。
 
 ## 9. 平台服务模型
 
@@ -520,10 +530,10 @@ README 的接入示例限定为上述 IPv4 拓扑；跨网段、容器 NAT 或�
 ## 10. 修改时必须保持的约束
 
 1. 修改前先确定变更属于脚本、配置还是二进制更新，不得隐式跨越边界。
-2. 常规远程文件下载统一走 `download_file`；只有安装 bootstrap（含分支 API）可保留同策略的最小实现。
+2. 常规远程文件下载统一走 `download_file`，它与安装 bootstrap 均调用 `mp_http_download`；独立入口嵌入同一传输函数并通过测试保证一致。
 3. 所有安装和日常下载优先使用当前正式 Core 配置派生的本机代理，然后 `MP_PROXY`，最后直连。
 4. 完整更新的全部下载完成前不得重启或停止 Core。
-5. 安装及完整更新的服务切换流程须等待 Core API 就绪后启动 AGH。重装提交正式配置前先停 AGH；日常更新的 Core 落盘边界见第 6.2 节。平台开机启动仍使用现有依赖/顺序机制，本轮未增加 API 检查。
+5. 安装及完整更新的服务切换流程须等待 Core API、TUN 与 fake-ip 路由就绪后启动 AGH。重装提交正式配置前先停 AGH；日常更新的 Core 落盘边界见第 6.2 节。平台开机启动仍使用现有依赖/顺序机制，不额外增加 API 检查。
 6. Core 端口、API、DNS、fake-ip、TUN、UI 等参数只能从目标 Core 配置读取。
 7. 新配置必须先写临时或 pending 文件，验证并完成依赖下载后再原子替换。
 8. AGH 模板完整更新会覆盖运行期修改，不能假定 Web UI 状态是权威来源。
@@ -538,7 +548,7 @@ README 的接入示例限定为上述 IPv4 拓扑；跨网段、容器 NAT 或�
 |---|---|
 | 修改卸载与清理范围 | `sh/uninstall.sh`、`tests/test_uninstall.py`、README、本文 |
 | 修改安装交互或安装顺序 | `sh/inst.sh`、`sh/install-lib.sh`、`sh/install-remote.sh`、`README.md` |
-| 修改下载代理或失败处理 | `sh/common.sh` 的 `download_file`、bootstrap 逻辑 |
+| 修改下载代理或失败处理 | `sh/portable.sh` 的 `mp_http_download`、`inst.sh` 嵌入函数、`download_file` 与 bootstrap 调用方 |
 | 增删本机变量 | `sh/env.conf`、`sh/inst.sh`、模板、`README.md`、本文 |
 | 修改 Core 字段或层级 | `core/config.yaml`、所有 `mp_core_*`、配置验证、本文映射表 |
 | 修改 AGH 主配置 | `agh/agh.yaml`、`mp_prepare_agh_config`、filter 预下载逻辑 |
@@ -559,5 +569,7 @@ for f in sh/*.sh sh/env.conf sh/etc/init.d/* sh/etc/hotplug.d/net/*; do
 done
 git diff --check
 ```
+
+`tests/test_download_health.py` 专门覆盖进度与错误脱敏、自动重试上限、永久错误保留旧文件、必需资源失败即停止、目标 TUN 预检及 API 在线但接口/路由缺失等场景。
 
 新增行为应补充相应的失败场景测试。模拟测试不等于真实 OpenWrt/systemd 部署验证；待验证事项记录在 TODO.md。

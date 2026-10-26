@@ -8,6 +8,10 @@ dl_dir="$MP_AGH_DIR/download"
 core_config="${1:-$MP_CORE_DIR/config.yaml}"
 mkdir -p "$MP_AGH_DIR" "$dl_dir" || exit 1
 agh_dns_staged=$(mktemp "$MP_AGH_DIR/dns.conf.tmp.XXXXXX") || exit 1
+trap 'rm -f "$agh_dns_staged"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+dns_fail() { echo_log 'AGH dns.conf 更新失败，保留原文件'; exit 1; }
 core_dns=$(mp_core_dns_endpoint "$core_config") \
     || { echo_log "无法从 Core 配置读取有效的 dns.listen"; rm -f "$agh_dns_staged"; exit 1; }
 
@@ -22,7 +26,7 @@ fetch_payload() {
     _bn=$1; _url=$2; _hdr=$3
     echo_log ">>> 拉取 $_bn"
     if ! download_file "$_url" "$dl_dir/$_bn"; then
-        echo_log "$_bn 失败，跳过"; return 1
+        echo_log "$_bn 失败，停止"; return 1
     fi
     printf '\n# %s\n' "$_hdr" >> "$agh_dns_staged" || return 1
     payload_to_agh "$dl_dir/$_bn" >> "$agh_dns_staged"
@@ -31,29 +35,28 @@ fetch_payload() {
 echo_log "生成 $agh_dns"
 echo "# Generated at $(date '+%F %T')" > "$agh_dns_staged" \
     || { rm -f "$agh_dns_staged"; exit 1; }
-rc=0
 
 # 默认上游：MP_LOCAL_DNS 空时退化为 /etc/resolv.conf 的 nameserver
 if [ -n "$MP_LOCAL_DNS" ]; then
-    for ns in $MP_LOCAL_DNS; do echo "$ns" >> "$agh_dns_staged" || rc=1; done
+    for ns in $MP_LOCAL_DNS; do echo "$ns" >> "$agh_dns_staged" || dns_fail; done
 else
-    awk '/^nameserver/ {print $2}' /etc/resolv.conf >> "$agh_dns_staged" || rc=1
+    awk '/^nameserver/ {print $2}' /etc/resolv.conf >> "$agh_dns_staged" || dns_fail
 fi
 
 # myupstream.txt 已是 [/domain/]server 格式，整段直接 cat
 echo_log ">>> 拉取 myupstream"
 if download_file "$MP_REPO_RAW_URL/agh/myupstream.txt" "$dl_dir/myupstream.txt"; then
     { printf '\n# My Up Stream\n' >> "$agh_dns_staged" \
-        && cat "$dl_dir/myupstream.txt" >> "$agh_dns_staged"; } || rc=$((rc+1))
+        && cat "$dl_dir/myupstream.txt" >> "$agh_dns_staged"; } || dns_fail
 else
     echo_log "myupstream 失败"
-    rc=$((rc+1))
+    dns_fail
 fi
 
 fetch_payload myproxylist.txt "$MP_REPO_RAW_URL/domain/myproxylist.txt" "My Proxy List" \
-    || rc=$((rc+1))
+    || dns_fail
 fetch_payload gpt.txt "$MP_REPO_RAW_URL/domain/gpt.txt" "GPT List" \
-    || rc=$((rc+1))
+    || dns_fail
 
 # not-cn 列表把 .bj 误算非中国 TLD，转换该段时直接剔除。
 echo_log ">>> 拉取 notcn.txt"
@@ -62,21 +65,16 @@ if download_file \
         "$dl_dir/notcn.txt"; then
     { printf '\n# Not China Domain\n' >> "$agh_dns_staged" \
         && payload_to_agh "$dl_dir/notcn.txt" | sed -E '/^\[\/bj\/\]/d' >> "$agh_dns_staged"; } \
-        || rc=$((rc+1))
+        || dns_fail
 else
     echo_log "notcn.txt 失败"
-    rc=$((rc+1))
+    dns_fail
 fi
 
 fetch_payload gfwlist.txt \
     "https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/gfw.txt" \
-    "GFW List" || rc=$((rc+1))
+    "GFW List" || dns_fail
 
-if [ "$rc" -ne 0 ]; then
-    rm -f "$agh_dns_staged"
-    echo_log "AGH dns.conf 更新失败，保留原文件（$rc 项下载或写入失败）"
-    exit 1
-fi
 mv "$agh_dns_staged" "$agh_dns" \
     || { echo_log "写入 $agh_dns 失败"; rm -f "$agh_dns_staged"; exit 1; }
 echo_log "生成完成：$(wc -l < "$agh_dns") 行"

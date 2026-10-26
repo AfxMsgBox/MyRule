@@ -27,79 +27,43 @@ case "$binary_arch" in
 esac
 [ -z "$mihomo_arch$agh_arch" ] && { echo_log "未识别架构 $binary_arch，跳过"; exit 1; }
 
-rc=0
+# 所有组件均为必需资源；失败立即结束，临时文件统一清理。
+bin_work=$(mktemp -d) || exit 1
+trap 'rm -rf -- "$bin_work"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
-# mihomo：版本号在文件名里，先通过公共下载函数获取 latest release 元数据
-if [ -n "$mihomo_arch" ]; then
-    while :; do
-        release_meta=$(mktemp) || exit 1
-        if download_file "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest" \
-                "$release_meta" false; then
-            ver=$(sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
-                    "$release_meta" | head -1)
-        else
-            ver=
-        fi
-        rm -f "$release_meta"
-        [ -n "$ver" ] && break
-        echo_log "获取 mihomo 最新版本失败"
-        download_retry_prompt || break
-    done
-    if [ -n "$ver" ]; then
-        gz=$(mktemp) || exit 1
-        mihomo_stage=$(mktemp) || { rm -f "$gz"; exit 1; }
-        url="https://github.com/MetaCubeX/mihomo/releases/download/$ver/mihomo-linux-$mihomo_arch-$ver.gz"
-        if download_file "$url" "$gz" true \
-           && gunzip -c "$gz" > "$mihomo_stage" \
-           && [ -s "$mihomo_stage" ] \
-           && mp_install_binary "$mihomo_stage" "$MP_CORE_DIR/mihomo"; then
-            echo_log "mihomo $ver / linux-$mihomo_arch 已就位：$MP_CORE_DIR/mihomo"
-        else
-            echo_log "mihomo 下载、解压或安装失败"
-            rc=$((rc+1))
-        fi
-        rm -f "$gz" "$mihomo_stage"
-    else rc=$((rc+1)); fi
+release_meta="$bin_work/mihomo-release.json"
+download_file 'https://api.github.com/repos/MetaCubeX/mihomo/releases/latest' \
+    "$release_meta" true 8 'Mihomo 最新版本信息' 60 || exit 1
+ver=$(jq -er '.tag_name | select(type == "string" and test("^[A-Za-z0-9._-]+$"))' "$release_meta" 2>/dev/null) \
+    || { echo_log 'Mihomo 版本响应格式错误或缺少有效 tag_name'; exit 1; }
+url="https://github.com/MetaCubeX/mihomo/releases/download/$ver/mihomo-linux-$mihomo_arch-$ver.gz"
+if ! download_file "$url" "$bin_work/mihomo.gz" true 8 "Mihomo $ver / linux-$mihomo_arch" \
+    || ! gunzip -c "$bin_work/mihomo.gz" > "$bin_work/mihomo" \
+    || [ ! -s "$bin_work/mihomo" ] \
+    || ! mp_install_binary "$bin_work/mihomo" "$MP_CORE_DIR/mihomo"; then
+    echo_log 'mihomo 下载、解压或安装失败'; exit 1
 fi
+echo_log "mihomo $ver / linux-$mihomo_arch 已就位：$MP_CORE_DIR/mihomo"
 
-# metacubexd UI：mihomo 的 Web 控制面板。架构无关的静态站点；
-# 安装目录从 core/config.yaml 的 external-ui 动态读取并限制在 Core home 内。
-# tarball 内容直接在顶层（./index.html ./_nuxt/...），没有 dist/ 包一层；
-# 故解压到子目录避免和 ui.tgz 同位
 core_ui_dir=$(mp_core_external_ui_path "$core_config" 2>/dev/null || :)
-if [ -n "$core_ui_dir" ]; then
-    ui_tmp=$(mktemp -d) || exit 1
-    ui_url="https://github.com/MetaCubeX/metacubexd/releases/latest/download/compressed-dist.tgz"
-    if mkdir -p "$ui_tmp/extract" \
-       && download_file "$ui_url" "$ui_tmp/ui.tgz" true \
-       && tar -xzf "$ui_tmp/ui.tgz" -C "$ui_tmp/extract" 2>/dev/null \
-       && [ -f "$ui_tmp/extract/index.html" ] \
-       && mp_install_ui "$ui_tmp/extract" "$core_ui_dir"; then
-        echo_log "metacubexd UI 已就位：$core_ui_dir"
-    else
-        echo_log "metacubexd UI 下载、解压或安装失败"
-        rc=$((rc+1))
-    fi
-    rm -rf "$ui_tmp"
-else
-    echo_log "Core 配置缺少安全有效的 external-ui，跳过 UI"
-    rc=$((rc+1))
+[ -n "$core_ui_dir" ] || { echo_log 'Core 配置缺少安全有效的 external-ui'; exit 1; }
+ui_url='https://github.com/MetaCubeX/metacubexd/releases/latest/download/compressed-dist.tgz'
+if ! mkdir "$bin_work/ui" \
+    || ! download_file "$ui_url" "$bin_work/ui.tgz" true 8 'metacubexd 面板' \
+    || ! tar -xzf "$bin_work/ui.tgz" -C "$bin_work/ui" 2>/dev/null \
+    || [ ! -f "$bin_work/ui/index.html" ] \
+    || ! mp_install_ui "$bin_work/ui" "$core_ui_dir"; then
+    echo_log 'metacubexd UI 下载、解压或安装失败'; exit 1
 fi
+echo_log "metacubexd UI 已就位：$core_ui_dir"
 
-# AdGuardHome：/releases/latest/download/ 直接给到最新 tar.gz
-if [ -n "$agh_arch" ]; then
-    tmp=$(mktemp -d) || exit 1
-    url="https://github.com/AdguardTeam/AdGuardHome/releases/latest/download/AdGuardHome_linux_${agh_arch}.tar.gz"
-    if download_file "$url" "$tmp/agh.tar.gz" true \
-       && tar -xzf "$tmp/agh.tar.gz" -C "$tmp" \
-       && [ -x "$tmp/AdGuardHome/AdGuardHome" ] \
-       && mp_install_binary "$tmp/AdGuardHome/AdGuardHome" "$MP_AGH_DIR/AdGuardHome"; then
-        echo_log "AdGuardHome / linux-$agh_arch 已就位：$MP_AGH_DIR/AdGuardHome"
-    else
-        echo_log "AdGuardHome 下载、解压或安装失败"
-        rc=$((rc+1))
-    fi
-    rm -rf "$tmp"
+url="https://github.com/AdguardTeam/AdGuardHome/releases/latest/download/AdGuardHome_linux_${agh_arch}.tar.gz"
+if ! download_file "$url" "$bin_work/agh.tar.gz" true 8 "AdGuardHome / linux-$agh_arch" \
+    || ! tar -xzf "$bin_work/agh.tar.gz" -C "$bin_work" 2>/dev/null \
+    || [ ! -x "$bin_work/AdGuardHome/AdGuardHome" ] \
+    || ! mp_install_binary "$bin_work/AdGuardHome/AdGuardHome" "$MP_AGH_DIR/AdGuardHome"; then
+    echo_log 'AdGuardHome 下载、解压或安装失败'; exit 1
 fi
-
-exit "$rc"
+echo_log "AdGuardHome / linux-$agh_arch 已就位：$MP_AGH_DIR/AdGuardHome"

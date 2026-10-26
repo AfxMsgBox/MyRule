@@ -73,20 +73,82 @@ trap 'exit 143' TERM
 _inst_port=$(awk '$1=="mixed-port:" {gsub(/[\047\042]/,"",$2); print $2; exit}' "$_inst_install_dir/core/config.yaml" 2>/dev/null)
 _inst_core=
 case "$_inst_port" in ''|*[!0-9]*) ;; *) _inst_core="socks5h://127.0.0.1:$_inst_port" ;; esac
-_inst_download() {
-    for _inst_channel in "$_inst_core" "$_inst_download_proxy" DIRECT; do
-        [ -n "$_inst_channel" ] || continue
-        _inst_noproxy=; [ "$_inst_channel" != DIRECT ] || { _inst_channel=; _inst_noproxy='*'; }
-        if curl --disable --silent --fail -L --connect-timeout 10 --max-time 300 --proxy "$_inst_channel" --noproxy "$_inst_noproxy" "$1" -o "$2" && [ -s "$2" ]; then return 0; fi
+# BEGIN shared HTTP transport (also embedded in standalone inst.sh)
+# URL/output/Core/fallback/label/timeout/min-size. Never print URLs or raw curl errors.
+mp_http_download() (
+    _hd_url=$1; _hd_dst=$2; _hd_core=$3; _hd_proxy=$4
+    _hd_label=${5:-文件}; _hd_timeout=${6:-300}; _hd_min=${7:-0}
+    _hd_meta=$(mktemp -d) || exit 1
+    trap 'rm -rf -- "$_hd_meta"' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    printf '下载：%s\n' "$_hd_label" >&2
+    _hd_round=0
+    while :; do
+        _hd_transient=0
+        for _hd_kind in core fallback direct; do
+            case "$_hd_kind" in
+                core) [ -n "$_hd_core" ] || continue; _hd_channel=$_hd_core; _hd_name='Core 本机代理' ;;
+                fallback) [ -n "$_hd_proxy" ] && [ "$_hd_proxy" != "$_hd_core" ] || continue
+                    _hd_channel=$_hd_proxy; _hd_name='外部后备代理' ;;
+                direct) _hd_channel=; _hd_name=直连 ;;
+            esac
+            printf '  尝试：%s\n' "$_hd_name" >&2
+            _hd_noproxy=; [ -n "$_hd_channel" ] || _hd_noproxy='*'
+            set -- --disable --fail -L --connect-timeout 10 --max-time "$_hd_timeout" \
+                --speed-limit 1 --speed-time 30 --proxy "$_hd_channel" --noproxy "$_hd_noproxy" \
+                --write-out '%{http_code}' "$_hd_url" -o "$_hd_dst"
+            : > "$_hd_dst" || exit 1
+            if [ -t 2 ]; then
+                # Only render curl's numeric progress records; errors can contain credentials.
+                (curl "$@" --progress-bar > "$_hd_meta/http"; printf '%s' "$?" > "$_hd_meta/rc") 2>&1 |
+                    awk 'BEGIN { RS="\r" } /^[[:space:]#.=+%<>0-9-]+$/ {
+                        printf "\r%s", $0; fflush(); shown=1
+                    } END { if (shown) printf "\n" }' >&2
+                _hd_rc=$(cat "$_hd_meta/rc")
+            else
+                curl "$@" --silent > "$_hd_meta/http" 2>/dev/null
+                _hd_rc=$?
+            fi
+            _hd_http=$(cat "$_hd_meta/http")
+            case "$_hd_http" in [0-9][0-9][0-9]) ;; *) _hd_http=000 ;; esac
+            if [ "$_hd_rc" = 0 ] && [ "$(wc -c < "$_hd_dst")" -gt "$_hd_min" ]; then exit 0; fi
+            _hd_retry=0
+            case "$_hd_rc" in
+                0) _hd_reason='响应为空或过小' ;;
+                5|6) _hd_reason='DNS 解析失败'; _hd_retry=1 ;;
+                7) _hd_reason='连接失败'; _hd_retry=1 ;;
+                18|52|55|56) _hd_reason='传输中断'; _hd_retry=1 ;;
+                28) _hd_reason='请求超时或连续 30 秒无数据'; _hd_retry=1 ;;
+                35) _hd_reason='TLS 握手失败'; _hd_retry=1 ;;
+                60) _hd_reason='TLS 证书校验失败' ;;
+                22) _hd_reason='HTTP 请求失败'
+                    case "$_hd_http" in 408|429|500|502|503|504) _hd_retry=1 ;; esac ;;
+                23|26) _hd_reason='本地文件读写失败' ;;
+                *) _hd_reason='下载失败' ;;
+            esac
+            printf '  %s：%s（curl %s，HTTP %s）\n' "$_hd_name" "$_hd_reason" "$_hd_rc" "$_hd_http" >&2
+            # Retry only if the final direct attempt was transient; a final 404/403 is conclusive.
+            _hd_transient=$_hd_retry
+            case "$_hd_rc" in 23|26) exit 1 ;; esac
+        done
+        [ "$_hd_transient" = 1 ] && [ "$_hd_round" -lt 2 ] || exit 1
+        _hd_round=$((_hd_round + 1))
+        printf '  临时错误，自动重试 %s/2\n' "$_hd_round" >&2
+        sleep 1
     done
-    return 1
+)
+# END shared HTTP transport
+
+_inst_download() {
+    mp_http_download "$1" "$2" "$_inst_core" "$_inst_download_proxy" "${3:-安装器资源}" "${4:-300}"
 }
 # 选择必须发生在下载模块之前；独立文件无法得知自己来自哪个分支。
 if [ "$_inst_interactive" = 1 ]; then
     _inst_page=1
     : > "$_inst_boot/branches"
     while :; do
-        _inst_download "https://api.github.com/repos/AfxMsgBox/MyRule/branches?per_page=100&page=$_inst_page" "$_inst_boot/page.json" \
+        _inst_download "https://api.github.com/repos/AfxMsgBox/MyRule/branches?per_page=100&page=$_inst_page" "$_inst_boot/page.json" "GitHub 分支列表（第 $_inst_page 页）" 60 \
             && jq -e 'type == "array" and length <= 100 and all(.[];
                 (.name | type == "string") and (.name | length > 0) and
                 (.name | test("[\u0000-\u001f\u007f]") | not))' "$_inst_boot/page.json" >/dev/null 2>&1 \
@@ -117,7 +179,7 @@ if [ "$_inst_interactive" = 1 ]; then
 fi
 _inst_branch=$(printf '%s' "${_inst_branch:-main}" | jq -sRr '@uri') || exit 1
 _inst_url="https://codeload.github.com/AfxMsgBox/MyRule/tar.gz/refs/heads/$_inst_branch"
-_inst_download "$_inst_url" "$_inst_boot/repo.tgz" \
+_inst_download "$_inst_url" "$_inst_boot/repo.tgz" "安装器仓库归档" \
     || { echo '安装器下载失败，请检查分支、网络或下载代理' >&2; exit 1; }
 tar -xzf "$_inst_boot/repo.tgz" -C "$_inst_boot" || exit 1
 set +f

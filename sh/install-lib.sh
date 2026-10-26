@@ -328,7 +328,7 @@ inst_require_tools() {
     if [ "${1:-}" = cron ]; then
         _irt_tools='crontab flock'
     elif [ "${1:-}" = launcher ]; then
-        _irt_tools='curl jq ca-certificates tar gzip gunzip awk sed grep find cat chmod cp mv rm mkdir mktemp dirname basename readlink date head sort tr wc uname id'
+        _irt_tools='curl jq ca-certificates tar gzip gunzip awk sed grep find cat chmod cp mv rm mkdir mktemp dirname basename readlink date sleep head sort tr wc uname id'
         [ -z "${INST_TARGET:-}" ] || _irt_tools="$_irt_tools ssh"
     else
         _irt_tools='curl jq ca-certificates tar gzip gunzip ip sysctl logger awk sed grep find
@@ -425,45 +425,20 @@ bootstrap_core_proxy() {
     return 1
 }
 
-bootstrap_attempt() {
-    say_step "下载通道：$2"
-    if [ -n "$1" ]; then
-        curl --disable --silent --fail -L --connect-timeout 10 --max-time 300 \
-            --proxy "$1" --noproxy '' "$_bd_url" -o "$_bd_tmp"
-    else
-        curl --disable --silent --fail -L --connect-timeout 10 --max-time 300 \
-            --proxy '' --noproxy '*' "$_bd_url" -o "$_bd_tmp"
-    fi
-    _ba_rc=$?
-    [ "$_ba_rc" -eq 0 ] && [ -s "$_bd_tmp" ] && return 0
-    say_warn "$2 下载失败（curl 退出码 $_ba_rc）"
-    return 1
-}
-
 bootstrap_download() {
     _bd_url=$1; _bd_dst=$2; _bd_retry_allowed=${3:-1}
     _bd_tmp=$(mktemp "$_bd_dst.tmp.XXXXXX") || return 1
-    while :; do
-        _bd_core=$(bootstrap_core_proxy 2>/dev/null || :)
-        _bd_ok=0
-        if [ -n "$_bd_core" ] && bootstrap_attempt "$_bd_core" 'Core 本机代理'; then
-            _bd_ok=1
-        elif [ -n "${INST_DOWNLOAD_PROXY-$MP_PROXY}" ] && [ "${INST_DOWNLOAD_PROXY-$MP_PROXY}" != "$_bd_core" ] \
-            && bootstrap_attempt "${INST_DOWNLOAD_PROXY-$MP_PROXY}" '外部后备代理'; then
-            _bd_ok=1
-        elif bootstrap_attempt '' '直连'; then
-            _bd_ok=1
-        fi
-        if [ "$_bd_ok" -eq 1 ]; then
-            mv "$_bd_tmp" "$_bd_dst" && return 0
-            rm -f "$_bd_tmp"; return 1
-        fi
+    _bd_label='仓库归档'; _bd_timeout=300
+    case "$_bd_url" in https://api.github.com/*) _bd_label='GitHub 分支列表'; _bd_timeout=60 ;; esac
+    while ! mp_http_download "$_bd_url" "$_bd_tmp" "$(bootstrap_core_proxy 2>/dev/null || :)" \
+        "${INST_DOWNLOAD_PROXY-$MP_PROXY}" "$_bd_label" "$_bd_timeout"; do
         if [ "$INSTALL_MODE" != interactive ] || [ "$_bd_retry_allowed" != 1 ]; then
             rm -f "$_bd_tmp"; return 1
         fi
         prompt_to _bd_retry Y '下载失败，重试？(Y/n)'
         case "$_bd_retry" in n|N|no|NO|No) rm -f "$_bd_tmp"; return 1 ;; esac
     done
+    mv "$_bd_tmp" "$_bd_dst" || { rm -f "$_bd_tmp"; return 1; }
 }
 
 inst_fetch_branches() {
@@ -886,7 +861,7 @@ inst_apply() (
     inst_detect_os || exit 1
     [ "$os_type" = "$INST_TARGET_OS" ] && [ "$(uname -m)" = "$INST_TARGET_ARCH" ] \
         || { say_err '安装包与目标系统或架构不一致'; exit 1; }
-    inst_require_tools || exit 1
+    inst_require_tools && mp_require_tun || exit 1
     if [ "$cron_script_days" != n ] || [ "$cron_config_days" != n ]; then inst_require_tools cron || exit 1; fi
     DIR_SH="$DIR_INST/sh"; DIR_CORE="$DIR_INST/core"; DIR_AGH="$DIR_INST/agh"
     for _ia_dir in "$DIR_INST" "$DIR_SH" "$DIR_CORE" "$DIR_AGH"; do
@@ -1075,7 +1050,7 @@ inst_main() {
         inst_require_tools launcher && inst_probe_target || return 1
     else
         inst_is_root || { say_err '本机安装需要 root；请使用 sudo sh inst.sh'; return 1; }
-        inst_detect_os || return 1
+        inst_detect_os && mp_require_tun || return 1
         INST_TARGET_OS=$os_type; INST_TARGET_ARCH=$(uname -m)
     fi
     say_section '安装概览'

@@ -30,6 +30,8 @@ inst_probe_target() {
         inst_ssh -T "$INST_TARGET" 'command -v sudo >/dev/null' \
             || { say_err '非 root SSH 用户需要 sudo'; return 1; }
     fi
+    inst_ssh -T "$INST_TARGET" '[ -c /dev/net/tun ]' \
+        || { say_err '目标机缺少可访问的 /dev/net/tun；请在宿主机开放 TUN 后重试'; return 1; }
     say_ok "目标：$INST_TARGET_OS / $INST_TARGET_ARCH"
 }
 
@@ -45,7 +47,7 @@ inst_deploy_remote() {
     cat "$INST_LIB/install-lib.sh" "$INST_LIB/portable.sh" > "$_inst_tmp/preflight.sh" || return 1
     cat >> "$_inst_tmp/preflight.sh" <<'PREFLIGHT'
 inst_colors
-inst_is_root && inst_detect_os && inst_require_tools || exit 1
+inst_is_root && inst_detect_os && inst_require_tools && mp_require_tun || exit 1
 cd "$1" || exit 1
 trap 'cd /; rm -rf -- "$1"' EXIT
 [ "$(mp_sha256 < bundle.tgz)" = "$2" ] || { say_err '上传校验失败'; exit 1; }

@@ -193,6 +193,8 @@ printf 'auth=%s user=%s hash=%s' "$INST_NO_AUTH" "$MP_AGH_USER_NAME" "$MP_AGH_PA
         # Browser/ZIP copies may have no execute bits, including the route helper.
         for path in (source / "sh").glob("*.sh"):
             path.chmod(0o644)
+        portable = source / "sh/portable.sh"
+        portable.write_text(portable.read_text().replace('/dev/net/tun', '/dev/null'))
         # Only replace host mutations; run actual bootstrap, template rendering and resource deployment.
         # Only replace system mutations; the actual prepare/cache/apply pipeline runs.
         state = source / "sh/install-lib.sh"
@@ -258,6 +260,8 @@ command = args[-1]
 with open(os.environ["TEST_ROOT"] + "/ssh-commands", "a") as out: out.write(command + "\n")
 if command.startswith("uname -s;"):
     print("Linux\naarch64\n0\nsystemd"); sys.exit(0)
+if command.startswith("[ -c /dev/net/tun ]"):
+    sys.exit(0)
 sys.exit(subprocess.run(["sh", "-c", command], env=os.environ | {"REMOTE_CPU": "aarch64"}).returncode)
 ''')
             ssh.chmod(0o755)
@@ -301,7 +305,7 @@ sys.exit(subprocess.run(["sh", "-c", command], env=os.environ | {"REMOTE_CPU": "
         result = self.run_shell('download_file "$MP_REPO_RAW_URL/domain/gpt.txt" "$TEST_ROOT/later"',
                                 extra={"MP_INST_DIR": str(target), "_MP_NONINTERACTIVE": "1"})
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("unexpected-repository-download", result.stderr)
+        self.assertIn("curl 99", result.stderr)
         self.assertIn("/refs/heads/feature/local/domain/gpt.txt", (self.root / "downloads").read_text().splitlines()[-1])
 
     def tty(self, script, extra=None):
@@ -617,7 +621,7 @@ with open(args[args.index("-o") + 1], "w") as out:
                           'bootstrap_download https://example.invalid "$TEST_ROOT/result"',
                           {"SUCCEED_PROXY": "none"})
         self.assertNotEqual(result.returncode, 0)
-        self.assertNotIn("重试", result.stdout)
+        self.assertNotIn("下载失败，重试？", result.stdout)
         self.assertEqual((self.root / "result").read_text(), "original")
         self.assertFalse(list(self.root.glob("result.tmp.*")))
 
