@@ -83,6 +83,35 @@ inst_snapshot "$TEST_ROOT/snapshot"
         result = self.installer(self.args(['--local']) + 'inst_validate', {'INST_ENTRY_ROOT': ''})
         self.assertNotEqual(result.returncode, 0)
 
+    def test_bootstrap_snapshot_accepts_symlinked_temporary_parent(self):
+        source = self.local_source()
+        # macOS /tmp -> /private/tmp: bootstrap retains the logical path,
+        # while mp_realpath resolves each file to the physical path.
+        alias = self.root / 'logical-tmp'
+        alias.symlink_to(self.root, target_is_directory=True)
+        result = self.installer(self.args(['--branch', 'main', '--target', 'user@host']) + r'''
+_inst_tmp="$TEST_ROOT"
+_INST_BOOT_BRANCH=main; _INST_BOOT_REPO="$TEST_ALIAS/local repo"
+inst_snapshot "$TEST_ROOT/snapshot"
+''', {'TEST_ALIAS': str(alias)})
+        self.assert_ok(result)
+        self.assertEqual((self.root / 'snapshot/core/config.yaml').read_bytes(),
+                         (source / 'core/config.yaml').read_bytes())
+
+    def test_snapshot_still_rejects_file_escaping_physical_source(self):
+        source = self.local_source()
+        outside = self.file('outside.yaml', 'outside configuration')
+        config = source / 'core/config.yaml'
+        config.unlink()
+        config.symlink_to(outside)
+        result = self.installer(self.args(['--source-dir', str(source), '--target', 'user@host']) + r'''
+_inst_tmp="$TEST_ROOT"
+inst_snapshot "$TEST_ROOT/snapshot"
+''')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('仓库文件超出源目录：core/config.yaml', result.stdout)
+        self.assertFalse((self.root / 'snapshot/core/config.yaml').exists())
+
     def test_bundle_parameters_round_trip_without_evaluating_text(self):
         value = "https://example.invalid/$(touch PWNED)?a='b'\\test"
         result = self.installer(self.args() + r'''

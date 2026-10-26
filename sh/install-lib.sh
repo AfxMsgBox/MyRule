@@ -691,15 +691,20 @@ inst_snapshot() (
         _is_src=$1
         fi
     fi
+    # macOS /tmp 常为 /private/tmp 的链接；目录和文件必须使用同一种真实路径。
+    _is_src=$(CDPATH= cd -- "$_is_src" 2>/dev/null && pwd -P) \
+        || { say_err '无法解析仓库源目录'; exit 1; }
     mkdir -p "$_is_dst" || exit 1
     (cd "$_is_src" && find sh domain -type f -print) > "$_inst_tmp/source-files" || exit 1
     printf '%s\n' core/config.yaml agh/agh.yaml agh/myupstream.txt >> "$_inst_tmp/source-files"
     while IFS= read -r _is_rel; do
         case "$_is_rel" in sh/env.local.conf|sh/.install-state/*|sh/.schedule/*) continue ;; esac
         case "$_is_rel" in *[!a-zA-Z0-9_./-]*|*/../*|*/./*|*//*|/*) echo '仓库路径不受支持' >&2; exit 1 ;; esac
-        _is_real=$(mp_realpath "$_is_src/$_is_rel") || exit 1
-        case "$_is_real" in "$_is_src"/*) ;; *) exit 1 ;; esac
-        [ -f "$_is_real" ] && mkdir -p "$_is_dst/$(dirname "$_is_rel")" && cp -p "$_is_real" "$_is_dst/$_is_rel" || exit 1
+        _is_real=$(mp_realpath "$_is_src/$_is_rel") \
+            || { say_err "无法解析仓库文件：$_is_rel"; exit 1; }
+        case "$_is_real" in "$_is_src"/*) ;; *) say_err "仓库文件超出源目录：$_is_rel"; exit 1 ;; esac
+        [ -f "$_is_real" ] && mkdir -p "$_is_dst/$(dirname "$_is_rel")" && cp -p "$_is_real" "$_is_dst/$_is_rel" \
+            || { say_err "无法复制仓库文件：$_is_rel"; exit 1; }
     done < "$_inst_tmp/source-files"
     _MP_SOURCE_DIR=$_is_dst; INST_TARGET=bundle
     inst_validate_source

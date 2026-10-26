@@ -187,6 +187,8 @@ HTTP 传输统一由 `portable.sh` 的 `mp_http_download` 实现；独立 `inst.
 
 prepare 将 sh/、domain/、core/config.yaml、agh/agh.yaml、agh/myupstream.txt 复制为快照；检查必需文件与路径边界。本机目标不能在源目录内；SSH 模式的源和目标属于不同机器，不作本地路径重叠判断。源根目录支持空格，仓库内文件名及目标安装路径限制为安全字符。
 
+快照复制前统一用 `pwd -P` 解析源根目录，再与 `mp_realpath` 解析的文件路径做边界比较；这也适用于自举归档复用路径。不得将逻辑根目录与物理文件路径直接比较，否则 macOS `/tmp` → `/private/tmp` 等符号链接会被误判为越界。解析、越界和复制失败须指出相对文件名。
+
 `_MP_SOURCE_DIR` 仅传递给本次准备和应用子进程。`mp_fetch_repo_sh` 同步快照脚本并保留私有配置及安装状态。`download_file` 遇到当前仓库 Raw URL 时映射为快照文件，失败不回退远端；其它 URL 在 prepare 下载并缓存，在 apply 只读缓存。本地安装仍需在发起端联网获取外部文件。分支参数始终保存为后续 GitHub 更新来源，不从本地 git 状态推测。
 
 ### 4.4 模板与资源预下载
