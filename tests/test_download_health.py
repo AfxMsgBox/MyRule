@@ -1,7 +1,10 @@
 """Download observability, fail-fast and target readiness contracts."""
 import json
+import select
 import shlex
+import subprocess
 import sys
+import time
 import unittest
 
 import test_installer
@@ -19,7 +22,7 @@ class DownloadTests(unittest.TestCase):
     def fake_curl(self, replies):
         self.file('replies', json.dumps(replies))
         path = self.file('commands/curl', '#!' + sys.executable + '\n' + r'''
-import json, os, pathlib, sys
+import json, os, pathlib, sys, time
 root = pathlib.Path(os.environ['TEST_ROOT'])
 args = sys.argv[1:]
 log = root / 'calls'
@@ -27,11 +30,18 @@ n = len(log.read_text().splitlines()) if log.exists() else 0
 with log.open('a') as f: f.write(json.dumps(args)+'\n')
 replies = json.loads((root / 'replies').read_text())
 code, http, body = replies[min(n, len(replies)-1)]
-pathlib.Path(args[args.index('-o')+1]).write_text(body)
-if '--progress-bar' in args:
-    sys.stderr.write('\r######## 50.0%\rcurl: private-secret must never leak\n\r################ 100.0%\r')
-else:
-    sys.stderr.write('curl: private-secret must never leak\n')
+destination = pathlib.Path(args[args.index('-o')+1])
+if '--dump-header' in args:
+    headers = 'HTTP/1.1 302 Found\r\nContent-Length: 99999\r\nLocation: private-secret\r\n\r\nHTTP/2 '+http+'\r\n'
+    if not os.environ.get('UNKNOWN_LENGTH'): headers += 'Content-Length: '+str(len(body))+'\r\n'
+    headers += 'Set-Cookie: private-secret\r\n\r\n'
+    pathlib.Path(args[args.index('--dump-header')+1]).write_text(headers)
+if os.environ.get('STREAM_DOWNLOAD'):
+    destination.write_text(body[:len(body)//2])
+    deadline=time.monotonic()+8
+    while not (root/'continue-download').exists() and time.monotonic()<deadline: time.sleep(.02)
+destination.write_text(body)
+sys.stderr.write('curl: private-secret must never leak\n')
 if '--write-out' in args: print(http, end='')
 sys.exit(code)
 ''')
@@ -87,10 +97,44 @@ sys.exit(code)
         result = self.tty('. "$MP_INST_DIR/sh/common.sh"\n_MP_NONINTERACTIVE=1\n'
                           'download_file https://example.invalid "$TEST_ROOT/result"')
         self.assert_ok(result)
-        self.assertIn('50.0%', result.stdout)
-        self.assertIn('100.0%', result.stdout)
+        self.assertIn('100%', result.stdout)
+        self.assertIn('下载完成', result.stdout)
         self.assertNotIn('private-secret', result.stdout)
-        self.assertIn('--progress-bar', self.calls()[0])
+        self.assertIn('--dump-header', self.calls()[0])
+
+    def test_piped_progress_arrives_before_download_finishes(self):
+        self.fake_curl([(0, '200', '0123456789abcdef0123456789abcdef')])
+        script = '. "$MP_INST_DIR/sh/common.sh"\n_MP_NONINTERACTIVE=1\ndownload_file https://example.invalid "$TEST_ROOT/result"'
+        proc = subprocess.Popen(['sh', '-c', script], env=self.env | {'STREAM_DOWNLOAD': '1'},
+                                cwd=self.root, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        output = b''
+        try:
+            deadline = time.monotonic()+5
+            while time.monotonic() < deadline and b'50%' not in output:
+                if select.select([proc.stderr], [], [], .1)[0]:
+                    import os
+                    chunk = os.read(proc.stderr.fileno(), 8192)
+                    if not chunk: break
+                    output += chunk
+            self.assertIn(b'50%', output)
+            self.assertIsNone(proc.poll(), 'progress must appear before completion')
+        finally:
+            self.file('continue-download', '')
+            _, tail = proc.communicate(timeout=5)
+            output += tail
+        self.assertEqual(proc.returncode, 0, output.decode())
+        self.assertIn(b'100%', output)
+        self.assertNotIn(b'private-secret', output)
+
+    def test_unknown_length_shows_downloaded_bytes_without_false_percentage(self):
+        self.fake_curl([(0, '200', 'valid response')])
+        result = self.run_shell('_MP_NONINTERACTIVE=1\ndownload_file https://example.invalid "$TEST_ROOT/result"',
+                                extra={'UNKNOWN_LENGTH': '1'})
+        self.assert_ok(result)
+        self.assertIn('已下载 14 字节', result.stderr)
+        self.assertIn('下载完成', result.stderr)
+        self.assertNotIn('%', result.stderr)
+        self.assertNotIn('private-secret', result.stderr)
 
     def test_standalone_transport_matches_shared_transport(self):
         def block(path):

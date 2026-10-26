@@ -74,12 +74,32 @@ _inst_port=$(awk '$1=="mixed-port:" {gsub(/[\047\042]/,"",$2); print $2; exit}' 
 _inst_core=
 case "$_inst_port" in ''|*[!0-9]*) ;; *) _inst_core="socks5h://127.0.0.1:$_inst_port" ;; esac
 # BEGIN shared HTTP transport (also embedded in standalone inst.sh)
+# Render only byte counts and response size, never raw curl output or headers.
+mp_download_progress() {
+    awk -v bytes="$1" -v seconds="$2" -v done="$3" '
+        /^HTTP\// { total=0; gsub(/\r/, "", $2); ok=($2 ~ /^2[0-9][0-9]$/) }
+        tolower($1)=="content-length:" && ok {
+            gsub(/\r/, "", $2); if ($2 ~ /^[0-9]+$/) total=$2+0
+        }
+        END {
+            rate=bytes/(seconds>0 ? seconds : 1)/1048576
+            if (total>0) {
+                pct=int(bytes*100/total); if(pct>100) pct=100
+                bar=""; for(i=0;i<20;i++) bar=bar (i<int(pct/5) ? "#" : "-")
+                printf "  [%s] %3d%%  %.2f/%.2f MiB", bar,pct,bytes/1048576,total/1048576
+            } else printf "  已下载 %d 字节 (%.2f MiB)",bytes,bytes/1048576
+            printf " | 均速 %.2f MiB/s | %ds%s",rate,seconds,(done ? " | 下载完成" : "")
+        }
+    ' "$4" >&2
+}
+
 # URL/output/Core/fallback/label/timeout/min-size. Never print URLs or raw curl errors.
 mp_http_download() (
     _hd_url=$1; _hd_dst=$2; _hd_core=$3; _hd_proxy=$4
     _hd_label=${5:-文件}; _hd_timeout=${6:-300}; _hd_min=${7:-0}
     _hd_meta=$(mktemp -d) || exit 1
-    trap 'rm -rf -- "$_hd_meta"' EXIT
+    _hd_pid=
+    trap '[ -z "$_hd_pid" ] || { kill "$_hd_pid" 2>/dev/null; wait "$_hd_pid" 2>/dev/null; }; rm -rf -- "$_hd_meta"' EXIT
     trap 'exit 130' INT
     trap 'exit 143' TERM
     printf '下载：%s\n' "$_hd_label" >&2
@@ -97,22 +117,34 @@ mp_http_download() (
             _hd_noproxy=; [ -n "$_hd_channel" ] || _hd_noproxy='*'
             set -- --disable --fail -L --connect-timeout 10 --max-time "$_hd_timeout" \
                 --speed-limit 1 --speed-time 30 --proxy "$_hd_channel" --noproxy "$_hd_noproxy" \
-                --write-out '%{http_code}' "$_hd_url" -o "$_hd_dst"
+                --write-out '%{http_code}' --dump-header "$_hd_meta/headers" "$_hd_url" -o "$_hd_dst"
             : > "$_hd_dst" || exit 1
-            if [ -t 2 ]; then
-                # Only render curl's numeric progress records; errors can contain credentials.
-                (curl "$@" --progress-bar > "$_hd_meta/http"; printf '%s' "$?" > "$_hd_meta/rc") 2>&1 |
-                    awk 'BEGIN { RS="\r" } /^[[:space:]#.=+%<>0-9-]+$/ {
-                        printf "\r%s", $0; fflush(); shown=1
-                    } END { if (shown) printf "\n" }' >&2
-                _hd_rc=$(cat "$_hd_meta/rc")
-            else
-                curl "$@" --silent > "$_hd_meta/http" 2>/dev/null
-                _hd_rc=$?
-            fi
+            : > "$_hd_meta/headers"
+            _hd_start=$(date +%s); _hd_last=-5; _hd_previous=0
+            curl "$@" --silent > "$_hd_meta/http" 2>/dev/null &
+            _hd_pid=$!
+            while kill -0 "$_hd_pid" 2>/dev/null; do
+                _hd_bytes=$(wc -c < "$_hd_dst"); _hd_elapsed=$(($(date +%s) - _hd_start))
+                if { [ -t 2 ] && [ "$_hd_elapsed" -gt "$_hd_last" ]; } || [ "$((_hd_elapsed - _hd_last))" -ge 5 ] \
+                    || { [ "$_hd_previous" -eq 0 ] && [ "$_hd_bytes" -gt 0 ]; }; then
+                    [ ! -t 2 ] || printf '\r\033[K' >&2
+                    mp_download_progress "$_hd_bytes" "$_hd_elapsed" 0 "$_hd_meta/headers"
+                    [ -t 2 ] || printf '\n' >&2
+                    _hd_last=$_hd_elapsed; _hd_previous=$_hd_bytes
+                fi
+                sleep 0.2
+            done
+            _hd_rc=0; wait "$_hd_pid" || _hd_rc=$?; _hd_pid=
+            _hd_bytes=$(wc -c < "$_hd_dst"); _hd_elapsed=$(($(date +%s) - _hd_start))
             _hd_http=$(cat "$_hd_meta/http")
             case "$_hd_http" in [0-9][0-9][0-9]) ;; *) _hd_http=000 ;; esac
-            if [ "$_hd_rc" = 0 ] && [ "$(wc -c < "$_hd_dst")" -gt "$_hd_min" ]; then exit 0; fi
+            if [ "$_hd_rc" = 0 ] && [ "$_hd_bytes" -gt "$_hd_min" ]; then
+                [ ! -t 2 ] || printf '\r\033[K' >&2
+                mp_download_progress "$_hd_bytes" "$_hd_elapsed" 1 "$_hd_meta/headers"
+                printf '\n' >&2
+                exit 0
+            fi
+            [ ! -t 2 ] || printf '\n' >&2
             _hd_retry=0
             case "$_hd_rc" in
                 0) _hd_reason='响应为空或过小' ;;
