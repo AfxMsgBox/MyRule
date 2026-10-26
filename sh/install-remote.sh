@@ -3,7 +3,7 @@
 inst_ssh() {
     _iss_tty=$1; shift
     set -- "$_iss_tty" -S "$_inst_tmp/ssh" -o ControlMaster=auto -o ControlPersist=600 \
-        -o ConnectTimeout=15 -p "$INST_SSH_PORT" "$@"
+        -o ConnectTimeout=15 -o LogLevel=ERROR -p "$INST_SSH_PORT" "$@"
     [ -z "$INST_SSH_KEY" ] || set -- -i "$INST_SSH_KEY" -o IdentitiesOnly=yes "$@"
     case "$INST_SSH_AUTH" in
         password) set -- -o PubkeyAuthentication=no -o PreferredAuthentications=keyboard-interactive,password "$@" ;;
@@ -58,7 +58,18 @@ PREFLIGHT
         inst_ssh -T "$INST_TARGET" "umask 077; cat > '$_inst_remote_tmp/bundle.tgz'" < "$_inst_tmp/bundle.tgz" || return 1
     say_section '在目标机安装'
     _idr_sudo=; [ "$INST_TARGET_UID" = 0 ] || _idr_sudo=sudo
-    inst_ssh -tt "$INST_TARGET" "$_idr_sudo sh '$_inst_remote_tmp/preflight.sh' '$_inst_remote_tmp' '$_idr_hash'"
+    if inst_ssh -tt "$INST_TARGET" "$_idr_sudo sh '$_inst_remote_tmp/preflight.sh' '$_inst_remote_tmp' '$_idr_hash'"; then
+        say_ok "SSH 安装成功：$INST_TARGET（远程退出码 0）"
+        say_dim 'SSH 会话已正常结束。上面的维护命令请在目标机执行。'
+    else
+        _idr_rc=$?
+        if [ "$_idr_rc" -eq 255 ]; then
+            say_err 'SSH 连接异常，无法确认目标机安装结果；请检查目标机后重试'
+        else
+            say_err "目标机安装失败（退出码 $_idr_rc），请查看上方错误后重试"
+        fi
+        return "$_idr_rc"
+    fi
 }
 
 inst_cleanup() {

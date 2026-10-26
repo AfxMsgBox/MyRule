@@ -1,6 +1,8 @@
 """Transfer bundle boundaries and remote transport failures, without real SSH/network."""
 import json
 import shlex
+import shutil
+import sys
 import unittest
 
 import test_installer
@@ -120,6 +122,66 @@ inst_deploy_remote "$TEST_ROOT/bundle"
         self.assertNotIn('sudo sh', calls)
         self.assertNotIn('unexpected-execution', result.stderr)
 
+    def test_config_validation_with_legacy_jq_nul_behavior(self):
+        # Model the older jq bug: contains("\u0000") is true for every string.
+        jq = shutil.which('jq')
+        wrapper = self.file('commands/jq', '#!' + sys.executable + '\n'
+                            'import os, sys\n'
+                            'args=[x.replace(\'contains("\\\\u0000")\', "true") for x in sys.argv[1:]]\n'
+                            f'os.execv({jq!r}, [{jq!r}]+args)\n')
+        wrapper.chmod(0o755)
+        result = self.installer(self.args() + '''
+INST_TARGET_OS=openwrt; INST_TARGET_ARCH=x86_64
+inst_save_config "$TEST_ROOT/config.json" && inst_load_config "$TEST_ROOT/config.json"
+''')
+        self.assert_ok(result)
+        config = self.root / 'config.json'
+        valid = json.loads(config.read_text())
+        for value in ('before\0after', '\0', None, 1):
+            with self.subTest(value=value):
+                config.write_text(json.dumps(valid | {'MP_PROXY': value}))
+                result = self.installer('inst_load_config "$TEST_ROOT/config.json"')
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('安装包参数校验失败', result.stdout)
+                self.assertNotIn('before', result.stdout + result.stderr)
+
+    def test_remote_result_distinguishes_success_failure_and_lost_connection(self):
+        self.file('bundle/file', 'content')
+        for status in (0, 1, 255):
+            result = self.installer(self.args(['--target', 'user@host']) + r'''
+_inst_tmp="$TEST_ROOT"; INST_LIB=$TEST_LIB; INST_TARGET_UID=0
+inst_ssh() {
+    case "$1" in
+        -tt) echo target-output; return "$TEST_EXIT" ;;
+    esac
+    case "$3" in *mktemp*) echo /tmp/myrule.TEST1234 ;; *) cat >/dev/null ;; esac
+}
+inst_deploy_remote "$TEST_ROOT/bundle"
+''', {'TEST_LIB': str(test_installer.LIB), 'TEST_EXIT': str(status)})
+            self.assertEqual(result.returncode, status, result.stdout + result.stderr)
+            self.assertIn('target-output', result.stdout)
+            if status == 0:
+                self.assertIn('SSH 安装成功', result.stdout)
+                self.assertIn('SSH 会话已正常结束', result.stdout)
+            else:
+                self.assertNotIn('SSH 安装成功', result.stdout)
+                self.assertIn('目标机安装失败' if status == 1 else '无法确认目标机安装结果', result.stdout)
+
+    def test_install_summary_does_not_claim_running_services_when_skipped(self):
+        for start in ('Y', 'n'):
+            result = self.installer(self.args() + r'''
+DIR_SH="$DIR_INST/sh"; os_type=openwrt; autostart=$TEST_START
+inst_print_result
+''', {'TEST_START': start})
+            self.assert_ok(result)
+            self.assertIn('安装结果', result.stdout)
+            self.assertIn('在安装设备上执行', result.stdout)
+            if start == 'Y':
+                self.assertIn('安装成功：Core 和 AGH 已启动', result.stdout)
+            else:
+                self.assertIn('未启动或重启服务', result.stdout)
+                self.assertNotIn('Core 和 AGH 已启动', result.stdout)
+
     def test_ssh_auth_keeps_arguments_and_enables_native_password_or_key(self):
         self.command('ssh', 'printf "%s\\n" "$@"\n')
         key = self.file('key with spaces', 'fake key')
@@ -130,5 +192,7 @@ inst_deploy_remote "$TEST_ROOT/bundle"
             self.assertIn(str(key), args)
             self.assertIn('2222', args)
             self.assertNotIn('StrictHostKeyChecking=no', args)
+            self.assertIn('LogLevel=ERROR', args)
+            self.assertNotIn('-q', args)
             if auth == 'password': self.assertIn('PubkeyAuthentication=no', args)
             if auth == 'key': self.assertIn('PasswordAuthentication=no', args)

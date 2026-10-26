@@ -266,7 +266,11 @@ prepare 在私有临时目录运行既有配置/二进制更新器，以 `_MP_TA
 
 完整安装包包含 repo/、resources/、config.json、manifest；仅快照代码、模板及规则进入 repo。清单核对文件集合、内容哈希及类型，拒绝符号链接、额外文件、路径跳转。包含订阅与管理员参数的临时目录使用 0700，参数文件受 umask 077 保护。哈希用于完整性检查，传输身份和保密性由 SSH 负责，不将其描述为发行签名。
 
+`inst_load_config` 严格核对参数字段集合与字符串类型，使用 `explode | index(0) == null` 排除 NUL；部分 OpenWrt jq 的 `contains("\u0000")` 会对普通字符串返回 true，不能用于此校验。校验失败须输出脱敏原因，不能静默退出。
+
 SSH 使用 OpenSSH ControlMaster 复用连接，原生支持默认密钥、agent、指定私钥及交互密码。保留主机密钥检查，不提供明文密码命令行选项。上传通过 SSH 标准输入完成，不依赖远端 SFTP/scp。非 root 目标要求 sudo；远端安装分配 TTY，允许原生 sudo 密码提示。只将经过限制的临时路径和哈希拼入远端命令，敏感安装参数走文件；结束时清理私有临时目录及连接。异常断线/断电可能遗留临时目录，真实恢复行为待验证。
+
+SSH 设置 `LogLevel=ERROR`，抑制正常 TTY 结束的 `Shared connection ... closed` 信息，保留错误和认证交互。远程安装返回 0 后，发起端输出明确成功及会话正常结束；非零返回失败，255 单独提示连接异常、结果无法确认，并保留原退出码。`inst_print_result` 仅在部署和定时任务设置成功后调用，区分服务已启动与 `--no-start` 的文件部署成功，维护命令注明须在安装设备上执行。
 
 `--download-proxy` 只属于发起端，SSH 模式默认空；`--proxy` 保存为目标机后备代理。本机安装未显式给 download-proxy 时沿用 proxy。资源准备读取发起端现有 Core（本机目标目录，SSH 发起端 /etc/proxy）；在 staging 中用 `_MP_DOWNLOAD_CORE_CONFIG` 指向它，不能误用目标地址或 staging 配置。后续目标更新仍为自己的 Core → MP_PROXY → 直连。
 

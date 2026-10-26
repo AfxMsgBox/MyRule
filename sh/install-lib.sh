@@ -739,7 +739,9 @@ inst_save_config() {
 }
 
 inst_load_config() {
-    jq -e --arg keys "$INST_CONFIG_KEYS" 'type == "object" and (keys|sort)==($keys|split(" ")|sort) and all(.[]; type=="string" and (contains("\u0000")|not))' "$1" >/dev/null || return 1
+    # 部分 OpenWrt jq 对 contains("\u0000") 的判断错误，按字符码检查 NUL。
+    jq -e --arg keys "$INST_CONFIG_KEYS" 'type == "object" and (keys|sort)==($keys|split(" ")|sort) and all(.[]; type=="string" and (explode | index(0) == null))' "$1" >/dev/null 2>&1 \
+        || { say_err '安装包参数校验失败：需要完整的字符串字段，且不能含空字符'; return 1; }
     for _ilc_key in $INST_CONFIG_KEYS; do
         _ilc_value=$(jq -r --arg key "$_ilc_key" '.[$key]' "$1") || return 1
         eval "$_ilc_key=\$_ilc_value"
@@ -993,7 +995,22 @@ inst_apply() (
     esac
 
     inst_apply_schedule || exit 1
-    say_section "安装完成"
+    inst_print_result
+)
+
+# 只有部署、配置切换及定时任务均成功后才输出结果。
+inst_print_result() {
+    say_section "安装结果"
+    case "$autostart" in
+        n|N|no|NO|No)
+            say_ok '文件部署成功；按选择未启动或重启服务'
+            say_dim '本次未检查服务运行状态，请按上方命令启用。'
+            ;;
+        *)
+            say_ok '安装成功：Core 和 AGH 已启动'
+            say_dim 'Core API、TUN 接口和 fake-ip 路由检查通过。'
+            ;;
+    esac
     printf '%s  %s\n' "${C_B}安装目录${C_R}" "$DIR_INST"
     printf '%s  %s\n' "${C_B}仓库分支${C_R}" "$MP_REPO_BRANCH"
     printf '%s  %s%s%s\n' "${C_B}AGH Web ${C_R}" "${C_CYN}" "http://<本机IP>:180" "${C_R}"
@@ -1003,11 +1020,11 @@ inst_apply() (
         openwrt) printf '%s  %slogread -e MyProxy -f%s\n' "${C_B}日志    ${C_R}" "${C_D}" "${C_R}" ;;
         systemd) printf '%s  %sjournalctl -t MyProxy -f%s\n' "${C_B}日志    ${C_R}" "${C_D}" "${C_R}" ;;
     esac
-    printf '\n%s\n' "${C_B}以后刷新${C_R}"
+    printf '\n%s\n' "${C_B}日常维护命令（在安装设备上执行）${C_R}"
     say_dim "  脚本:   sh $DIR_SH/update-scripts.sh"
     say_dim "  配置:   sh $DIR_SH/update-all-configs-restart-services.sh"
     say_dim "  二进制: sh $DIR_SH/update-bin.sh"
-)
+}
 
 # === 主流程 ===
 inst_set_download_context() {
