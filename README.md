@@ -68,8 +68,7 @@ sh inst.sh --fill-from ./debug.cfg  # 使用指定文件
 | 更新 Mihomo、AGH、面板 | `sh /etc/proxy/sh/update-bin.sh` |
 | 查看自动更新任务 | `crontab -l` |
 | OpenWrt 日志 | `logread -e MyProxy -f` |
-| systemd 脚本日志 | `journalctl -t MyProxy -f` |
-| systemd 服务日志 | `journalctl -u proxy_core -u agh -f` |
+| systemd 日志（脚本、Core、AGH） | `journalctl -t MyProxy -f` |
 
 二进制更新成功后重启服务：
 

@@ -526,6 +526,7 @@ README 的接入示例限定为上述 IPv4 拓扑；跨网段、容器 NAT 或�
 - `agh.service` 通过 `Requires`/`After` 依赖 `proxy_core.service`。
 - 两个 unit 都关闭 systemd 启动频率限制，由 `Restart=on-failure` 负责崩溃恢复。
 - 服务文件用 `/etc/proxy` 作为仓库占位路径，安装/更新时替换为实际 `MP_INST_DIR`。
+- 脚本用 `logger -t MyProxy`，两个服务以 `SyslogIdentifier=MyProxy` 将 stdout/stderr 写入 journal；日常统一用 `journalctl -t MyProxy -f` 查看。排查服务启动、退出或重启问题时，用 `journalctl -u proxy_core -u agh -f` 补充查看 systemd 自身的管理消息。安装文件日志仍保留完整下载命令和进度。
 
 ### 9.2 OpenWrt
 
