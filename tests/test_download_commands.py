@@ -1,6 +1,7 @@
 """Exact, replayable download commands in private logs; concise terminal output."""
 import json
 import shlex
+import shutil
 import subprocess
 import sys
 import unittest
@@ -18,12 +19,50 @@ class CommandLogTests(unittest.TestCase):
     fake_curl = test_download_health.DownloadTests.fake_curl
     calls = test_download_health.DownloadTests.calls
 
-    def logged(self, result):
+    def logged(self, result, replay=False):
         log = (self.root / 'myrule.inst.log').read_text()
         self.assertNotIn('[命令，敏感值已脱敏]', result.stdout + result.stderr)
-        return [shlex.split(line.split('] ', 1)[1] if line.startswith('  [命令，敏感值已脱敏] ') else line)
-                for line in log.splitlines()
-                if line.startswith(('  [命令，敏感值已脱敏] ', " '"))]
+        commands = []; is_replay = False
+        for line in log.splitlines():
+            if line.startswith('['):
+                is_replay = '调试重放命令' in line
+            elif is_replay == replay and line.startswith(('  [命令，敏感值已脱敏] ', " '")):
+                commands.append(shlex.split(line.split('] ', 1)[1] if line.startswith('  [命令，敏感值已脱敏] ') else line))
+        return commands
+
+    def test_curl_replay_runs_after_installer_temporary_directories_are_removed(self):
+        real_curl = shutil.which('curl')
+        self.assertIsNotNone(real_curl)
+        self.command('curl', 'exec ' + shlex.quote(real_curl) + ' "$@"\n')
+        payload = self.file('source with spaces.txt', 'downloaded content\n')
+        temporary = self.root/'removed-install-dir'
+        temporary.mkdir()
+        args = ['curl', '--disable', '--fail', '-L', '--connect-timeout', '10',
+                '--max-time', '60', '--proxy', '', '--noproxy', '*',
+                '--write-out', '%{http_code}', '--dump-header', str(temporary/'headers'),
+                payload.as_uri(), '-o', str(temporary/'download'), '--silent',
+                '-H', "Authorization: Bearer a'b$(touch PWNED)"]
+        result = self.run_shell('mp_log_download_command ' + shlex.join(args))
+        self.assert_ok(result)
+        self.assertEqual(self.logged(result), [args])
+        replay = self.logged(result, replay=True)[0]
+        self.assertNotIn('--silent', replay)
+        self.assertIn('--show-error', replay)
+        self.assertIn(args[-1], replay)
+        self.assertIn(payload.as_uri(), replay)
+        shutil.rmtree(temporary)
+        original = self.run_shell(shlex.join(args), source=False)
+        self.assertNotEqual(original.returncode, 0)
+        log = (self.root/'myrule.inst.log').read_text().splitlines()
+        command = next(log[i+1] for i, line in enumerate(log) if '调试重放命令' in line)
+        for shell in ('sh', 'bash'):
+            replayed = subprocess.run([shell, '-c', command], cwd=self.root, env=self.env,
+                                      capture_output=True, text=True, timeout=5)
+            self.assert_ok(replayed)
+            self.assertEqual((self.root/'myrule-download.body').read_bytes(), payload.read_bytes())
+            self.assertTrue((self.root/'myrule-download.headers').exists())
+        self.assertFalse((self.root/'PWNED').exists())
+        self.assertFalse(temporary.exists())
 
     def test_full_download_command_round_trips_secrets_and_shell_characters(self):
         recorder = self.file('record.py', 'import json,sys\nfrom pathlib import Path\n'

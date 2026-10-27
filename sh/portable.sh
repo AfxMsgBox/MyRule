@@ -141,7 +141,11 @@ mp_log_command() (
     mp_init_log "${MP_LOG_FILE:-${INST_ENTRY_DIR:-${MP_INST_DIR:-.}/sh}/myrule.inst.log}" || exit 1
     exec >> "$MP_LOG_FILE" || exit 1
     if [ "${_MP_LOG_FULL_COMMAND:-0}" = 1 ]; then
-        mp_log_event '执行下载命令（完整参数）'
+        if [ "${_MP_LOG_REPLAY:-0}" = 1 ]; then
+            mp_log_event '调试重放命令（复制下一行；覆盖当前目录 myrule-download.body / myrule-download.headers）'
+        else
+            mp_log_event '执行下载命令（完整参数）'
+        fi
     else
         mp_log_event '执行命令（敏感值已脱敏）'
         printf '  [命令，敏感值已脱敏]'
@@ -170,6 +174,21 @@ mp_log_command() (
 
 mp_log_download_command() (
     _MP_LOG_FULL_COMMAND=1
+    mp_log_command "$@" || exit 1
+    [ "$1" = curl ] || exit 0
+    # 保留实际请求参数；重放只替换会被清理的输出路径并恢复诊断显示。
+    _lr_first=1; _lr_skip=0
+    for _lr_arg do
+        if [ "$_lr_first" = 1 ]; then set --; _lr_first=0; fi
+        if [ "$_lr_skip" = 1 ]; then _lr_skip=0; continue; fi
+        case "$_lr_arg" in
+            -o|--output|-D|--dump-header) _lr_skip=1; continue ;;
+            --silent|-s) continue ;;
+        esac
+        set -- "$@" "$_lr_arg"
+    done
+    set -- "$@" --show-error -o ./myrule-download.body --dump-header ./myrule-download.headers
+    _MP_LOG_REPLAY=1
     mp_log_command "$@"
 )
 
