@@ -44,6 +44,7 @@ class ShellTests(unittest.TestCase):
             (self.root / directory).mkdir()
         self.env = {"PATH": str(self.root / "commands") + os.pathsep + os.environ["PATH"],
                     "MP_INST_DIR": str(self.root), "TEST_ROOT": str(self.root),
+                    "MP_LOG_FILE": str(self.root / 'myrule.inst.log'),
                     "MP_SUBSCRIBE_URL": "https://example.invalid/sub?target=clash",
                     "MP_AGH_USER_NAME": "test", "MP_AGH_PASSWORD": "$2a$10$test"}
         self.command("logger", "exit 0\n")

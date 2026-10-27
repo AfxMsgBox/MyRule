@@ -47,22 +47,31 @@ inst_deploy_remote() {
     cat "$INST_LIB/install-lib.sh" "$INST_LIB/portable.sh" > "$_inst_tmp/preflight.sh" || return 1
     cat >> "$_inst_tmp/preflight.sh" <<'PREFLIGHT'
 inst_colors
+MP_LOG_FILE="$1/commands.log"; export MP_LOG_FILE
+mp_init_log "$MP_LOG_FILE" || exit 1
+mp_log_event "目标机系统：$(uname -srm)"
+trap '_remote_rc=$?; mp_log_event "目标部署退出码：$_remote_rc"; cd /; rm -rf -- "$1/bundle"; rm -f -- "$1/bundle.tgz"' EXIT
 inst_is_root && inst_detect_os && inst_require_tools && mp_require_tun || exit 1
 cd "$1" || exit 1
-trap 'cd /; rm -rf -- "$1"' EXIT
 [ "$(mp_sha256 < bundle.tgz)" = "$2" ] || { say_err '上传校验失败'; exit 1; }
 mkdir bundle && tar -xzf bundle.tgz -C bundle || exit 1
 sh bundle/repo/sh/install-lib.sh --installer-run --apply "$1/bundle"
 PREFLIGHT
-    inst_ssh -T "$INST_TARGET" "umask 077; cat > '$_inst_remote_tmp/preflight.sh'" < "$_inst_tmp/preflight.sh" &&
+    inst_ssh -T "$INST_TARGET" "umask 077; : > '$_inst_remote_tmp/commands.log'; cat > '$_inst_remote_tmp/preflight.sh'" < "$_inst_tmp/preflight.sh" &&
         inst_ssh -T "$INST_TARGET" "umask 077; cat > '$_inst_remote_tmp/bundle.tgz'" < "$_inst_tmp/bundle.tgz" || return 1
     say_section '在目标机安装'
     _idr_sudo=; [ "$INST_TARGET_UID" = 0 ] || _idr_sudo=sudo
-    if inst_ssh -tt "$INST_TARGET" "$_idr_sudo sh '$_inst_remote_tmp/preflight.sh' '$_inst_remote_tmp' '$_idr_hash'"; then
+    _idr_rc=0
+    inst_ssh -tt "$INST_TARGET" "$_idr_sudo sh '$_inst_remote_tmp/preflight.sh' '$_inst_remote_tmp' '$_idr_hash'" || _idr_rc=$?
+    if [ -n "${MP_LOG_FILE:-}" ]; then
+        mp_log_event '以下为目标机部署日志'
+        inst_ssh -T "$INST_TARGET" "cat '$_inst_remote_tmp/commands.log'" </dev/null >> "$MP_LOG_FILE" \
+            || say_warn '无法取回目标日志；如连接已中断，请检查目标机临时安装目录'
+    fi
+    if [ "$_idr_rc" -eq 0 ]; then
         say_ok "SSH 安装成功：$INST_TARGET（远程退出码 0）"
         say_dim 'SSH 会话已正常结束。上面的维护命令请在目标机执行。'
     else
-        _idr_rc=$?
         if [ "$_idr_rc" -eq 255 ]; then
             say_err 'SSH 连接异常，无法确认目标机安装结果；请检查目标机后重试'
         else

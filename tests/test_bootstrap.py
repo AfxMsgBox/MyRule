@@ -106,3 +106,29 @@ esac
         self.assertNotEqual(rc, 0)
         self.assertIn("无法获取完整分支列表", output)
         self.assertNotIn("codeload.github.com", (self.root / "requests").read_text())
+
+    def test_fill_defaults_survive_bootstrap_and_log_stays_at_entry(self):
+        self.env.pop('MP_LOG_FILE', None)
+        self.file('myrule.inst.cfg', json.dumps({'MP_REPO_BRANCH':'feature/install',
+                                              'INST_DOWNLOAD_PROXY':'http://user:private@proxy.invalid:8080'}))
+        rc, output = self.bootstrap([[{'name':'main'},{'name':'feature/install'}]], b'\n', ('--fill-from',))
+        self.assertEqual(rc, 0, output)
+        self.assertEqual((self.root/'selected').read_text(), 'feature/install\n')
+        config=json.loads((self.root/'myrule.inst.cfg').read_text())
+        self.assertEqual(config['MP_REPO_BRANCH'], 'feature/install')
+        self.assertEqual(config['INST_DOWNLOAD_PROXY'], 'http://user:private@proxy.invalid:8080')
+        log=(self.root/'myrule.inst.log').read_text()
+        self.assertIn('执行命令',log)
+        self.assertIn('独立入口退出码：0',log)
+        self.assertNotIn('private',log)
+        self.assertNotIn('[命令，敏感值已脱敏]',output)
+
+    def test_fill_custom_path_and_explicit_log_path(self):
+        self.env.pop('MP_LOG_FILE', None)
+        cfg=self.file('answers.json',json.dumps({'MP_REPO_BRANCH':'feature/install'}))
+        rc, output=self.bootstrap([[{'name':'main'},{'name':'feature/install'}]], b'\n',
+                                  ('--fill-from',str(cfg),'--log-file',str(self.root/'custom.log')))
+        self.assertEqual(rc,0,output)
+        self.assertTrue((self.root/'custom.log').is_file())
+        self.assertFalse((self.root/'myrule.inst.cfg').exists())
+        self.assertFalse((self.root/'myrule.inst.log').exists())

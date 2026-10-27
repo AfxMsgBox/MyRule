@@ -15,7 +15,7 @@ put_provider() {
     set -- --disable --silent --max-time 30 -o /dev/null -w '%{http_code}' --proxy '' --noproxy '*'
     [ -z "$core_secret" ] || set -- "$@" -H "Authorization: Bearer $core_secret"
     set -- "$@" -X PUT "$core_api/providers/$_pp_provider"
-    mp_log_command curl "$@"
+    mp_log_command curl "$@" || return 1
     _pp_rc=0; code=$(curl "$@" 2>/dev/null) || _pp_rc=$?
     case "$code" in [0-9][0-9][0-9]) ;; *) code=000 ;; esac
     case "$_pp_rc:$code" in

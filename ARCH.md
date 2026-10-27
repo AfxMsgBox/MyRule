@@ -171,9 +171,11 @@ MP_PROXY 外部代理
 
 `download_file` 使用目标目录内的临时文件，检查 curl 状态与最小文件大小，成功后以 `mv` 原子替换。不做进程、API 或网站预探测，由真实下载决定回退；Core 只读当前正式配置，端口按 mixed-port → port → socks-port 选择首个有效值。相同的 Core/外部代理不重复尝试。
 
-curl 的首个参数为 `--disable`，避免读取用户配置。代理通道使用显式 `--proxy URL --noproxy ''`，直连使用 `--proxy '' --noproxy '*'`，消除系统代理变量与 NO_PROXY 干扰。每次通道尝试与重试都在执行前通过 `mp_log_command` 打印脱敏命令，再输出资源名称、状态、进度及诊断；不打印原始凭据或 curl 错误。
+curl 的首个参数为 `--disable`，避免读取用户配置。代理通道使用显式 `--proxy URL --noproxy ''`，直连使用 `--proxy '' --noproxy '*'`，消除系统代理变量与 NO_PROXY 干扰。每次通道尝试与重试都在执行前通过 `mp_log_command` 将脱敏命令写入文件，终端输出资源名称、状态、进度及诊断；不打印原始凭据或 curl 错误。
 
-`mp_log_command` 使用纯 shell 对各参数逐个加引号，不用 eval，不改变实际执行参数。`mp_log_url` 保留项目已知公开来源的路径；其它资源路径、所有查询串/片段、URL userinfo 与 Authorization 头隐藏为 `<redacted>`，代理保留协议及地址端口。日志输出 stderr，避免污染函数返回值或 HTTP 状态捕获。`mp_run_download_command` 为依赖包管理器共用“打印后执行”封装，保留退出码及其原生进度；这些函数随共享传输块嵌入独立入口，并提前定义以支持依赖安装前的日志。
+`mp_log_command` 使用纯 shell 对各参数逐个加引号，不用 eval，不改变实际执行参数。`mp_log_url` 保留项目已知公开来源的路径；其它资源路径、所有查询串/片段、URL userinfo 与 Authorization 头隐藏为 `<redacted>`，代理保留协议及地址端口。命令仅追加到 `MP_LOG_FILE`，不污染终端、函数返回值或 HTTP 状态捕获。`mp_run_download_command` 为依赖包管理器共用“记录后执行”封装，保留退出码及其原生进度；这些函数随共享传输块嵌入独立入口，并提前定义以支持依赖安装前的日志。
+
+独立入口导出真实 `INST_ENTRY_DIR`，模块和子脚本继承同一 `MP_LOG_FILE`。默认路径为入口脚本同目录 `myrule.inst.log`，`--log-file PATH` 覆盖；日常更新未继承该变量时默认写入安装目录 `sh/myrule.inst.log`。`mp_init_log` 要求父目录存在、目标为普通文件且不是符号链接，以 umask 077 创建、chmod 600，并追加而不截断。`mp_log_event` 记录时间戳；阶段函数、`echo_log` 和传输函数记录系统/工具、物理路径、进度、HTTP/curl 状态、重试及退出码。日志初始化失败停止下载；不使用全局 `set -x` 或原始 stdout/stderr 全量转储，避免输入值和认证信息泄漏。
 
 HTTP 传输统一由 `portable.sh` 的 `mp_http_download` 实现；独立 `inst.sh` 嵌入同一传输及进度函数，单元测试强制两份一致。curl 在后台以 silent 模式下载，前台定期读取目标临时文件大小，以 `mp_download_progress` 显示大小、平均速度和耗时；TTY 每秒原地刷新，非 TTY 在开始、首次收到数据、之后每 5 秒及完成时输出行。每 0.2 秒检查下载进程，避免小文件额外等待整秒；终止时回收 curl 并清理私有元数据目录。
 
@@ -193,7 +195,9 @@ HTTP 状态及响应头只保存在私有临时目录。进度只提取最后一
 
 prepare 将 sh/、domain/、core/config.yaml、agh/agh.yaml、agh/myupstream.txt 复制为快照；检查必需文件与路径边界。本机目标不能在源目录内；SSH 模式的源和目标属于不同机器，不作本地路径重叠判断。源根目录支持空格，仓库内文件名及目标安装路径限制为安全字符。
 
-快照复制前统一用 `pwd -P` 解析源根目录，再与 `mp_realpath` 解析的文件路径做边界比较；这也适用于自举归档复用路径。不得将逻辑根目录与物理文件路径直接比较，否则 macOS `/tmp` → `/private/tmp` 等符号链接会被误判为越界。解析、越界和复制失败须指出相对文件名。
+快照复制 `inst_snapshot` 和资源读取 `mp_copy_repo_file` 都先用 `pwd -P` 解析源根目录，再与 `mp_realpath` 解析的文件路径做边界比较；这也适用于自举归档复用路径。不得将逻辑根目录与物理文件路径直接比较，否则 macOS `/tmp` → `/private/tmp` 等符号链接会被误判为越界。解析、越界和复制失败须指出相对文件名，资源读取日志记录逻辑根目录、物理根目录及解析后的文件路径。
+
+快照排除默认 `myrule.inst.cfg`、`myrule.inst.log`，并按真实路径排除当前使用的自定义配置及日志，避免将调试数据和订阅凭据打包上传。
 
 `_MP_SOURCE_DIR` 仅传递给本次准备和应用子进程。`mp_fetch_repo_sh` 同步快照脚本并保留私有配置及安装状态。`download_file` 遇到当前仓库 Raw URL 时映射为快照文件，失败不回退远端；其它 URL 在 prepare 下载并缓存，在 apply 只读缓存。本地安装仍需在发起端联网获取外部文件。分支参数始终保存为后续 GitHub 更新来源，不从本地 git 状态推测。
 
@@ -282,9 +286,13 @@ SSH 使用 OpenSSH ControlMaster 复用连接，原生支持默认密钥、agent
 
 SSH 设置 `LogLevel=ERROR`，抑制正常 TTY 结束的 `Shared connection ... closed` 信息，保留错误和认证交互。远程安装返回 0 后，发起端输出明确成功及会话正常结束；非零返回失败，255 单独提示连接异常、结果无法确认，并保留原退出码。`inst_print_result` 仅在部署和定时任务设置成功后调用，区分服务已启动与 `--no-start` 的文件部署成功，维护命令注明须在安装设备上执行。
 
+目标机日志 `commands.log` 由 SSH 登录用户在私有临时目录内创建，确保 sudo 部署后仍可读取；预检及 apply 继承该路径。远端退出时清理 bundle，保留日志，由发起端取回追加到同一安装日志后统一清理临时目录。取日志失败仅提示警告，不能覆盖原部署退出码。
+
 `--download-proxy` 只属于发起端，SSH 模式默认空；`--proxy` 保存为目标机后备代理。本机安装未显式给 download-proxy 时沿用 proxy。资源准备读取发起端现有 Core（本机目标目录，SSH 发起端 /etc/proxy）；在 staging 中用 `_MP_DOWNLOAD_CORE_CONFIG` 指向它，不能误用目标地址或 staging 配置。后续目标更新仍为自己的 Core → MP_PROXY → 直连。
 
 向导走 /dev/tty 的 fd 3，可见输入、空行保留默认值，DNS 输入 `-` 清空。所有来源均分页获取 GitHub 分支列表，main 置顶；本地来源所选分支用于后续在线更新。密码选择默认不设置，选择设置后输入用户名及 bcrypt 哈希。颜色仅对 TTY 启用，NO_COLOR/TERM=dumb 禁用，日志不显示订阅或代理凭据；SSH 自身管理密码输入。
+
+`--fill-from [PATH]` 强制交互模式，省略 PATH 时使用入口同目录 `myrule.inst.cfg`；不带参数不读取或写入任何默认值文件。配置为 JSON 对象，所有值必须为不含 NUL 的字符串；不 source/eval 配置内容。`prompt_to` 按变量名读取默认值（含空字符串），缺键回退原默认值，每次输入后以同目录临时文件和原子 mv 写回，权限 0600；日志只记字段名。分支保存 `MP_REPO_BRANCH` 名称，动态映射列表序号，不保存序号。独立入口与安装模块共用上述函数；配置路径与日志相同、文件非法或保存失败均停止，SSH/sudo 密码不进入配置。
 
 外部下载清单保留在 [README 下载列表](README.md#下载列表)。每次安装重新准备最新资源，不因目标已有文件跳过。只有下载与包校验成功才开始覆盖目标项目文件；软件依赖补装不在此保证范围内。覆盖应用不承诺整批事务回滚。
 

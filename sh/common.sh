@@ -19,6 +19,7 @@ fi
 
 # 日志：终端 + 系统 log
 echo_log() {
+    mp_log_event "$1"
     if [ "${_MP_INSTALL_OUTPUT:-0}" = 1 ] && [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != dumb ]; then
         printf '\033[36m  [信息]\033[0m %s\n' "$1"
     else
@@ -229,9 +230,12 @@ mp_copy_repo_file() {
     case "/$_mcr_rel/" in *'/../'*|*'/./'*|*'//'*)
         echo_log '无效的本地仓库相对路径'; return 1 ;;
     esac
-    _mcr_src=$(mp_realpath "$_MP_SOURCE_DIR/$_mcr_rel") || return 1
-    case "$_mcr_src" in "$_MP_SOURCE_DIR/"*) ;; *)
-        echo_log '本地仓库文件超出源目录'; return 1 ;;
+    _mcr_root=$(CDPATH= cd -- "$_MP_SOURCE_DIR" 2>/dev/null && pwd -P) \
+        || { echo_log '无法解析本地仓库目录'; return 1; }
+    _mcr_src=$(mp_realpath "$_mcr_root/$_mcr_rel") || return 1
+    mp_log_event "仓库读取：输入目录=$_MP_SOURCE_DIR；物理目录=$_mcr_root；文件=$_mcr_src"
+    case "$_mcr_src" in "$_mcr_root/"*) ;; *)
+        echo_log "本地仓库文件超出源目录：$_mcr_rel"; return 1 ;;
     esac
     [ -f "$_mcr_src" ] && [ -r "$_mcr_src" ] \
         && [ "$(get_file_size "$_mcr_src")" -gt "$_mcr_min" ] \

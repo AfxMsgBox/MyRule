@@ -16,7 +16,9 @@ class CommandLogTests(unittest.TestCase):
     calls = test_download_health.DownloadTests.calls
 
     def logged(self, result):
-        return [shlex.split(line.split('] ', 1)[1]) for line in result.stderr.splitlines()
+        log = (self.root / 'myrule.inst.log').read_text()
+        self.assertNotIn('[命令，敏感值已脱敏]', result.stdout + result.stderr)
+        return [shlex.split(line.split('] ', 1)[1]) for line in log.splitlines()
                 if line.startswith('  [命令，敏感值已脱敏] ')]
 
     def test_command_arguments_are_quoted_without_evaluation(self):
@@ -66,6 +68,7 @@ class CommandLogTests(unittest.TestCase):
         self.command('sleep', 'exit 0\n')
         self.command('curl', 'printf "%s\\n" "$@" > "$TEST_ROOT/api-args"\necho raw-secret >&2\nprintf 204\nexit "$TEST_STATUS"\n')
         for status in ('0', '7'):
+            (self.root / 'myrule.inst.log').unlink(missing_ok=True)
             result = self.run_shell('sh "$MP_INST_DIR/sh/update-proxy-rule.sh"', extra={'TEST_STATUS': status})
             self.assertEqual(result.returncode == 0, status == '0', result.stdout + result.stderr)
             self.assertIn('由 Core 下载，等待 API 结果', result.stdout)

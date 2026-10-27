@@ -22,24 +22,27 @@ inst_colors() {
 
 say_section() {
     _inst_step=$((_inst_step + 1))
+    mp_log_event "阶段 $_inst_step：$*"
     printf '\n%s[%02d] %s%s\n' "${C_B}${C_BLU}" "$_inst_step" "$*" "$C_R"
 }
 
-say_step() { printf '  %s[执行]%s %s\n' "$C_CYN" "$C_R" "$*"; }
-say_ok() { printf '  %s[成功]%s %s\n' "$C_GRN" "$C_R" "$*"; }
-say_warn() { printf '  %s[警告]%s %s\n' "$C_YEL" "$C_R" "$*"; }
-say_err() { printf '  %s[失败]%s %s\n' "$C_RED" "$C_R" "$*"; }
+say_step() { mp_log_event "[执行] $*"; printf '  %s[执行]%s %s\n' "$C_CYN" "$C_R" "$*"; }
+say_ok() { mp_log_event "[成功] $*"; printf '  %s[成功]%s %s\n' "$C_GRN" "$C_R" "$*"; }
+say_warn() { mp_log_event "[警告] $*"; printf '  %s[警告]%s %s\n' "$C_YEL" "$C_R" "$*"; }
+say_err() { mp_log_event "[失败] $*"; printf '  %s[失败]%s %s\n' "$C_RED" "$C_R" "$*"; }
 say_dim() { printf '  %s%s%s\n' "$C_D" "$*" "$C_R"; }
 
 prompt_to() {
     _p_var=$1; _p_def=$2; _p_label=$3; shift 3
     [ "$INSTALL_MODE" = interactive ] || { eval "$_p_var=\$_p_def"; return 0; }
+    [ "$_p_var" = _ib_choice ] || _p_def=$(mp_fill_default "$_p_var" "$_p_def") || exit 1
     printf '\n%s%s%s\n' "${T_B}${T_CYN}" "$_p_label" "$T_R" >&3
     for _p_hint in "$@"; do printf '  %s\n' "$_p_hint" >&3; done
     printf '  [%s] > ' "${_p_def:-空}" >&3
     IFS= read -r _p_val <&3 || { say_err '输入已结束，取消安装'; exit 1; }
     [ -n "$_p_val" ] || _p_val=$_p_def
     eval "$_p_var=\$_p_val"
+    [ "$_p_var" = _ib_choice ] || mp_fill_save "$_p_var" "$_p_val" || exit 1
 }
 
 # === options ===
@@ -69,6 +72,8 @@ MyRule 安装器
       --configs-days N               配置更新间隔 1–365 天；省略保留旧任务
       --no-start                     暂不启用新配置和服务
       --interactive                  带参数继续交互收集其余选项
+      --fill-from [PATH]             交互读取并保存默认值；默认脚本同目录 myrule.inst.cfg
+      --log-file PATH                下载命令日志；默认脚本同目录 myrule.inst.log
       --help                         显示帮助
 支持 --选项=值。SSH 的用户名、密码和密钥认证独立于安装参数。
 USAGE
@@ -77,6 +82,8 @@ USAGE
 inst_parse_args() {
     INSTALL_MODE=silent; [ "$#" -ne 0 ] || INSTALL_MODE=interactive
     _inst_help=0; _inst_seen=' '; _MP_SOURCE_DIR=; INST_LOCAL=0
+    INST_FILL_FILE=
+    INST_LOG_FILE=${MP_LOG_FILE:-${INST_ENTRY_DIR:-${INST_LIB:-.}}/myrule.inst.log}
     DIR_INST=/etc/proxy; MP_REPO_BRANCH=main; MP_LOCAL_DNS='223.5.5.5 119.29.29.29'
     MP_PROXY=; MP_SUBSCRIBE_URL=; MP_AGH_USER_NAME=admin; MP_AGH_PASSWORD=; INST_NO_AUTH=0
     INST_TARGET=; INST_SSH_PORT=22; INST_SSH_KEY=; INST_SSH_AUTH=auto
@@ -90,6 +97,17 @@ inst_parse_args() {
         case "$1" in
             --help) _inst_help=1; shift; continue ;;
             --interactive) INSTALL_MODE=interactive; shift; continue ;;
+            --fill-from|--fill-from=*)
+                INSTALL_MODE=interactive
+                INST_FILL_FILE=${INST_ENTRY_DIR:-${INST_LIB:-.}}/myrule.inst.cfg
+                case "$1" in
+                    *=*) INST_FILL_FILE=${1#*=}; shift ;;
+                    *) shift; if [ "$#" -gt 0 ]; then
+                        case "$1" in --*) ;; *) INST_FILL_FILE=$1; shift ;; esac
+                    fi ;;
+                esac
+                [ -n "$INST_FILL_FILE" ] || { say_err '配置文件路径不能为空'; return 1; }
+                continue ;;
             --local) INST_LOCAL=1; shift; continue ;;
             --no-start) autostart=n; shift; continue ;;
             --no-auth) INST_NO_AUTH=1; shift; continue ;;
@@ -103,6 +121,7 @@ inst_parse_args() {
             --ssh-port) _ipa_var=INST_SSH_PORT ;; --ssh-key) _ipa_var=INST_SSH_KEY ;;
             --ssh-auth) _ipa_var=INST_SSH_AUTH ;; --scripts-days) _ipa_var=cron_script_days ;;
             --configs-days) _ipa_var=cron_config_days ;;
+            --log-file) _ipa_var=INST_LOG_FILE ;;
             *) say_err '未知参数；请使用 --help 查看命名参数'; return 1 ;;
         esac
         case "$1" in
@@ -111,7 +130,7 @@ inst_parse_args() {
                case "$2" in --*) say_err "参数缺少值：$_ipa_key"; return 1 ;; esac
                _ipa_value=$2; shift 2 ;;
         esac
-        case "$_ipa_key" in --source-dir|--target|--ssh-key)
+        case "$_ipa_key" in --source-dir|--target|--ssh-key|--log-file)
             [ -n "$_ipa_value" ] || { say_err "$_ipa_key 不能为空"; return 1; } ;;
         esac
         eval "$_ipa_var=\$_ipa_value"
@@ -291,7 +310,7 @@ inst_apt() {
     if [ -n "$_iip_sudo" ]; then
         mp_run_download_command sudo env DEBIAN_FRONTEND=noninteractive apt-get "$@"
     else
-        mp_log_command env DEBIAN_FRONTEND=noninteractive apt-get "$@"
+        mp_log_command env DEBIAN_FRONTEND=noninteractive apt-get "$@" || return 1
         DEBIAN_FRONTEND=noninteractive apt-get "$@"
     fi
 }
@@ -471,11 +490,13 @@ inst_choose_branch() {
     done
     printf '\n%s远端分支%s\n' "${T_B}${T_CYN}" "$T_R" >&3
     awk '{ printf "  %d) %s\n", NR, $0 }' "$_inst_tmp/branches.sorted" >&3
+    _ib_branch=$(mp_fill_default MP_REPO_BRANCH main) || return 1
+    _ib_default=$(awk -v branch="$_ib_branch" '$0==branch {print NR; exit}' "$_inst_tmp/branches.sorted")
     while :; do
-        prompt_to _ib_choice 1 '选择分支编号（回车使用 main）'
+        prompt_to _ib_choice "${_ib_default:-1}" '选择分支编号'
         case "$_ib_choice" in ''|*[!0-9]*) say_warn '请输入有效编号'; continue ;; esac
         MP_REPO_BRANCH=$(awk -v n="$_ib_choice" 'NR == n { print; exit }' "$_inst_tmp/branches.sorted")
-        [ -n "$MP_REPO_BRANCH" ] && return 0
+        if [ -n "$MP_REPO_BRANCH" ]; then mp_fill_save MP_REPO_BRANCH "$MP_REPO_BRANCH"; return $?; fi
         say_warn '分支编号超出范围'
     done
 }
@@ -699,10 +720,11 @@ inst_snapshot() (
     (cd "$_is_src" && find sh domain -type f -print) > "$_inst_tmp/source-files" || exit 1
     printf '%s\n' core/config.yaml agh/agh.yaml agh/myupstream.txt >> "$_inst_tmp/source-files"
     while IFS= read -r _is_rel; do
-        case "$_is_rel" in sh/env.local.conf|sh/.install-state/*|sh/.schedule/*) continue ;; esac
+        case "$_is_rel" in sh/env.local.conf|sh/.install-state/*|sh/.schedule/*|*/myrule.inst.cfg|*/myrule.inst.log) continue ;; esac
         case "$_is_rel" in *[!a-zA-Z0-9_./-]*|*/../*|*/./*|*//*|/*) echo '仓库路径不受支持' >&2; exit 1 ;; esac
         _is_real=$(mp_realpath "$_is_src/$_is_rel") \
             || { say_err "无法解析仓库文件：$_is_rel"; exit 1; }
+        [ "$_is_real" != "${INST_FILL_FILE:-}" ] && [ "$_is_real" != "${MP_LOG_FILE:-}" ] || continue
         case "$_is_real" in "$_is_src"/*) ;; *) say_err "仓库文件超出源目录：$_is_rel"; exit 1 ;; esac
         [ -f "$_is_real" ] && mkdir -p "$_is_dst/$(dirname "$_is_rel")" && cp -p "$_is_real" "$_is_dst/$_is_rel" \
             || { say_err "无法复制仓库文件：$_is_rel"; exit 1; }
@@ -1048,6 +1070,9 @@ inst_main() {
     if [ "${1:-}" = --apply ] && [ "$#" = 2 ]; then inst_apply "$2"; return $?; fi
     inst_parse_args "$@" || return 1
     [ "$_inst_help" != 1 ] || { inst_usage; return 0; }
+    mp_init_log "$INST_LOG_FILE" || return 1
+    say_dim "下载命令日志：$MP_LOG_FILE"
+    mp_log_event "安装入口：${INST_ENTRY_DIR:-$INST_LIB}；系统：$(uname -srm)"
     if [ "$INSTALL_MODE" = interactive ]; then
         ( : <>/dev/tty ) 2>/dev/null || { say_err '无参数安装需要交互终端；自动化请提供命名参数'; return 1; }
         exec 3<>/dev/tty; inst_colors
@@ -1057,9 +1082,10 @@ inst_main() {
     inst_detect_launcher || return 1
     say_section '检查发起端依赖'
     inst_require_tools launcher || return 1
+    mp_fill_init || return 1
     umask 077
     _inst_tmp=$(mktemp -d /tmp/myrule.XXXXXXXX) || return 1
-    trap inst_cleanup EXIT
+    trap '_inst_rc=$?; mp_log_event "安装流程退出码：$_inst_rc"; inst_cleanup' EXIT
     trap 'exit 130' INT
     trap 'exit 143' TERM
     unset _MP_RESOURCE_DIR _MP_CACHE_WRITE _MP_TARGET_ARCH _MP_DOWNLOAD_CORE_CONFIG
@@ -1076,6 +1102,7 @@ inst_main() {
         inst_detect_os && mp_require_tun || return 1
         INST_TARGET_OS=$os_type; INST_TARGET_ARCH=$(uname -m)
     fi
+    mp_log_event "工具：$(curl --version | head -n 1)；$(jq --version)"
     say_section '安装概览'
     printf '  目标：%s\n  平台：%s / %s\n  目录：%s\n  分支：%s\n' "${INST_TARGET:-本机}" "$INST_TARGET_OS" "$INST_TARGET_ARCH" "$DIR_INST" "$MP_REPO_BRANCH"
     say_dim "仓库来源：${_MP_SOURCE_DIR:-GitHub}"
@@ -1092,5 +1119,7 @@ if [ "${1:-}" = --installer-run ]; then
     INST_LIB=$(CDPATH= cd "$(dirname "$0")" && pwd -P) || exit 1
     . "$INST_LIB/portable.sh" || exit 1
     . "$INST_LIB/install-remote.sh" || exit 1
-    inst_main "$@"
+    _inst_exit=0; inst_main "$@" || _inst_exit=$?
+    mp_log_event "安装器结束，退出码：$_inst_exit"
+    exit "$_inst_exit"
 fi

@@ -159,6 +159,9 @@ test "$_MP_SOURCE_DIR" = "$TEST_SOURCE" && test "$MP_REPO_BRANCH" = feature/loca
         test_scripts.ShellTests.jq_without_regex(self)
         self.exercise_install(remote=True, online=True, no_auth=True)
 
+    def test_install_from_symlinked_temporary_directory(self):
+        self.exercise_install(remote=True, online=True, no_auth=True, linked_tmp=True)
+
     def test_auth_requires_explicit_choice_and_defaults_to_admin(self):
         cases = [([], False), (["--no-auth"], True),
                  (["--agh-password", "$2b$10$test"], True),
@@ -192,7 +195,18 @@ printf 'auth=%s user=%s hash=%s' "$INST_NO_AUTH" "$MP_AGH_USER_NAME" "$MP_AGH_PA
             self.assertIn(expected, result.stdout)
             self.assertNotIn("$2b$10$old", result.stdout)
 
-    def exercise_install(self, remote=False, online=False, no_auth=False):
+    def exercise_install(self, remote=False, online=False, no_auth=False, linked_tmp=False):
+        if linked_tmp:
+            physical = self.root / 'physical-tmp'
+            physical.mkdir()
+            (self.root / 'logical-tmp').symlink_to(physical, target_is_directory=True)
+            real_mktemp = shutil.which('mktemp')
+            self.command('mktemp', '''
+if [ "$*" = '-d /tmp/myrule.XXXXXXXX' ] && [ -z "${REMOTE_CPU:-}" ]; then
+    path=$(''' + shlex.quote(real_mktemp) + ''' -d "$TEST_ROOT/physical-tmp/myrule.XXXXXXXX") || exit 1
+    printf '%s\\n' "$TEST_ROOT/logical-tmp/${path##*/}"
+else exec ''' + shlex.quote(real_mktemp) + ''' "$@"; fi
+''')
         source = self.local_source()
         # Browser/ZIP copies may have no execute bits, including the route helper.
         for path in (source / "sh").glob("*.sh"):
@@ -222,6 +236,7 @@ mp_wait_core_ready() { printf 'ready\n' >> "$TEST_ROOT/events"; }
         self.command("uname", 'case "$1" in -s) echo Linux ;; *) echo "${REMOTE_CPU:-x86_64}" ;; esac\n')
         self.command("id", "echo 0\n")
         self.command("curl", r'''
+[ "${1:-}" != --version ] || { echo 'curl test'; exit 0; }
 while [ "$#" -gt 0 ]; do
     case "$1" in
         -o) out=$2; shift ;;
@@ -305,6 +320,9 @@ sys.exit(subprocess.run(["sh", "-c", command], env=os.environ | {"REMOTE_CPU": "
             ssh_commands = (self.root / "ssh-commands").read_text()
             self.assertNotIn("private", ssh_commands)
             self.assertNotIn("target-proxy", ssh_commands)
+            log = (self.root / 'myrule.inst.log').read_text()
+            self.assertIn('以下为目标机部署日志', log)
+            self.assertIn('目标部署退出码：0', log)
         # Subsequent independent updates must use the configured online branch, not the old source path.
         result = self.run_shell('download_file "$MP_REPO_RAW_URL/domain/gpt.txt" "$TEST_ROOT/later"',
                                 extra={"MP_INST_DIR": str(target), "_MP_NONINTERACTIVE": "1"})

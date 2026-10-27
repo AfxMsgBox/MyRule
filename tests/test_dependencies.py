@@ -60,8 +60,9 @@ inst_require_tools "${TEST_MODE:-}"
                          'bsdutils', 'mawk', 'findutils', 'coreutils', 'ca-certificates'})
         self.assertEqual(len(arguments[3:]), len(set(arguments[3:])))
         self.assertIn('检查通过', result.stdout)
-        self.assertIn("'apt-get' 'update'", result.stderr)
-        self.assertIn("'apt-get' 'install' '-y' '--no-install-recommends'", result.stderr)
+        log = (self.root / 'myrule.inst.log').read_text()
+        self.assertIn("'apt-get' 'update'", log)
+        self.assertIn("'apt-get' 'install' '-y' '--no-install-recommends'", log)
 
     def test_openwrt_opkg_and_apk(self):
         for manager, action in [('opkg', 'install'), ('apk', 'add')]:
@@ -75,8 +76,9 @@ inst_require_tools "${TEST_MODE:-}"
                 self.assertEqual(set(calls[1].split('|')[1].split()), {action, 'curl', 'jq',
                                  'ca-bundle', 'ip-tiny', 'procps-ng-sysctl', 'logger',
                                  'gawk', 'findutils-find', 'coreutils-head'})
-                self.assertIn(f"'{manager}' 'update'", result.stderr)
-                self.assertIn(f"'{manager}' '{action}'", result.stderr)
+                log = (self.root / 'myrule.inst.log').read_text()
+                self.assertIn(f"'{manager}' 'update'", log)
+                self.assertIn(f"'{manager}' '{action}'", log)
 
     def test_update_failure_stops_before_install(self):
         for manager in ('apt-get', 'opkg', 'apk'):
