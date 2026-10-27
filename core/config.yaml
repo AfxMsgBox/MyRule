@@ -79,11 +79,12 @@ dns:
   # 这台 DNS 只解析 paeadiy.com，因此用按域名匹配的 policy，不能用 proxy-server-nameserver
   # ——后者按"所有节点域名"一刀切，机场若在别的域名下加节点，查询会被送去一台
   # 拒绝解析它们的服务器。通配符覆盖将来可能出现的 cp2/cp3 等主机名。
+  # 2026-10-27:貌似官方配置删除了关于代理服务器节点的域名解析规则，加上这个在aliyun上不正常。
 #  nameserver-policy:
 #    '+.paeadiy.com': '47.116.209.9:39053'
-  proxy-server-nameserver:
+#  proxy-server-nameserver:
 #    - udp://47.116.209.9:39053
-    - udp://127.0.0.1:53
+#    - udp://127.0.0.1:53
     
 proxy-providers:
   HongKong:
