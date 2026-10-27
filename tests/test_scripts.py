@@ -255,7 +255,7 @@ printf '%s' "$TEST_VALUE"
         self.prepare_pending()
         self.assert_ok(self.activate())
         self.assertEqual((self.root / "events").read_text().splitlines(),
-                         ["stop agh", "enable_restart proxy_core", "ready", "enable_restart agh"])
+                         ["stop agh", "enable_restart proxy_core", "ready", "enable_start agh"])
         self.assertEqual((self.root / "core-at-stop").read_text(), "old-core")
         self.assertEqual((self.root / "agh-at-stop").read_text(), "old-agh")
         self.assertEqual((self.root / "core/config.yaml").read_text(), "new-core")
@@ -290,7 +290,7 @@ printf '%s' "$TEST_VALUE"
     def test_activation_readiness_failure_keeps_agh_stopped(self):
         self.prepare_pending()
         self.assertNotEqual(self.activate({"TEST_READY_FAIL": "1"}).returncode, 0)
-        self.assertNotIn("enable_restart agh", (self.root / "events").read_text())
+        self.assertNotIn("enable_start agh", (self.root / "events").read_text())
 
     def test_binary_install_success(self):
         self.file("new-binary", "new")
@@ -399,7 +399,7 @@ reinstall="$TEST_REINSTALL"
         self.assertEqual((self.root / "agh-at-stop").read_text(), "old-agh")
         self.assertIn("mixed-port: 7890", (self.root / "core/config.yaml").read_text())
         self.assertEqual((self.root / "events").read_text().splitlines(),
-                         ["sync always", "stop agh", "enable_restart proxy_core", "ready", "enable_restart agh"])
+                         ["sync always", "stop agh", "enable_restart proxy_core", "ready", "enable_start agh"])
 
     def test_fresh_install_decline_writes_configs_without_services(self):
         self.assert_ok(self.run_install_flow(reinstall=False, answer="n"))
@@ -443,6 +443,53 @@ reinstall="$TEST_REINSTALL"
         self.assertFalse((self.root / "events").exists())
         self.assertEqual((self.root / "core/config.yaml").read_text(), "old-core")
         self.assertFalse((self.root / "core/config.yaml.pending").exists())
+
+    def test_activation_first_install_and_daily_update_do_not_restart_stopped_agh(self):
+        self.prepare_pending()
+        for op, expected in (
+            ('restart', ['stop agh', 'restart proxy_core', 'ready', 'start agh']),
+            ('enable_start', ['enable_start proxy_core', 'ready', 'enable_start agh']),
+        ):
+            with self.subTest(op=op):
+                (self.root / 'events').unlink(missing_ok=True)
+                self.file('agh/agh.yaml.pending', 'new-agh')
+                self.assert_ok(self.run_shell('mp_activate_configs ' + op))
+                self.assertEqual((self.root / 'events').read_text().splitlines(), expected)
+
+    def test_service_diagnostics_are_logged_sanitized_and_keep_exit_status(self):
+        self.command('service', r'''
+printf 'native service failure\n' >&2
+printf '%s\n' "$MP_SUBSCRIBE_URL" "$MP_PROXY" "$MP_AGH_PASSWORD" >&2
+printf 'request https://other.invalid/private?secret=token\nAuthorization: Bearer api-secret\n' >&2
+exit 7
+''')
+        result = self.run_shell('mp_detect_os() { echo openwrt; }\nmp_service_op start agh',
+                                extra={'MP_PROXY': 'http://user:pass@proxy.invalid:1080'})
+        self.assertEqual(result.returncode, 7)
+        logged = (self.root / 'myrule.inst.log').read_text()
+        self.assertIn('native service failure', logged)
+        self.assertIn('退出码 7', logged)
+        self.assertIn('native service failure', result.stdout)
+        for secret in ('example.invalid', 'proxy.invalid', 'other.invalid', '$2a$10$test', 'api-secret'):
+            self.assertNotIn(secret, logged + result.stdout + result.stderr)
+
+    def test_service_stderr_is_logged_even_when_manager_returns_success(self):
+        self.command('systemctl', 'echo "Command failed: Not found" >&2\nexit 0\n')
+        result = self.run_shell('mp_detect_os() { echo systemd; }\nmp_service_op start agh')
+        self.assert_ok(result)
+        logged = (self.root / 'myrule.inst.log').read_text()
+        self.assertIn('Command failed: Not found', logged)
+        self.assertIn('退出码 0', logged)
+
+    def test_service_logging_failure_prevents_unrecorded_service_changes(self):
+        self.file('target-log', 'unchanged')
+        (self.root / 'linked-log').symlink_to(self.root / 'target-log')
+        self.command('service', 'touch "$TEST_ROOT/service-called"\n')
+        result = self.run_shell('mp_detect_os() { echo openwrt; }\nmp_service_op start agh',
+                                extra={'MP_LOG_FILE': str(self.root / 'linked-log')})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.root / 'service-called').exists())
+        self.assertEqual((self.root / 'target-log').read_text(), 'unchanged')
 
     def test_enable_restart_platform_dispatch(self):
         # Redirect the systemd unit directory in this test copy, never touching real /etc.

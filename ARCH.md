@@ -215,8 +215,8 @@ prepare 将 sh/、domain/、core/config.yaml、agh/agh.yaml、agh/myupstream.txt
 ### 4.5 平台与服务
 
 - `mp_detect_os`：即时识别 `openwrt` 或 `systemd`，不持久化 OS 类型。
-- `mp_service_op`：统一启停和重启服务。
-- `mp_activate_configs`：安装/重装与日常更新共用的服务切换流程；停止 AGH、提交待切换配置、重启 Core、等待 API/TUN/路由就绪、重启 AGH。重装使用 `enable_restart`，确保已运行的服务也重新加载；首次安装使用 `enable_start`，无需停止尚未运行的 AGH。
+- `mp_service_op`：统一启停和重启服务，返回首个失败命令的实际退出码。`mp_run_service_command` 在私有临时目录捕获服务管理器 stdout/stderr，脱敏后显示并写入安装日志，同时记录命令和退出码；即使退出码为 0，诊断输出仍写日志。已知订阅/代理/密码值、输出中的 URL 和认证头隐藏；临时原文在退出时删除。日志初始化失败时不执行服务操作。
+- `mp_activate_configs`：安装/重装与日常更新共用的服务切换流程；停止 AGH、提交待切换配置、重启 Core、等待 API/TUN/路由就绪、启动 AGH。重装对 Core 使用 `enable_restart`、对已停止的 AGH 使用 `enable_start`；日常更新对 AGH 使用 `start`，避免 OpenWrt restart 再次删除已不存在的 procd 实例。首次安装使用 `enable_start`，无需停止尚未运行的 AGH。
 - `mp_commit_pending_configs`：仅提交配置，供上述流程或首次安装选择不启动服务时使用；运行中的 AGH 必须先停止。
 - `mp_sync_etc_files`：处理服务文件中的安装路径并按策略同步到 `/etc`。
 - `mp_wait_core_ready`：按当前 Core 配置等待 API 可用，同时要求 TUN 接口具有 UP 标志、规范化后的完整 fake-ip CIDR 直接路由到该接口（无 via 网关）。默认总等待 30 秒，失败输出具体原因并保持 AGH 停止；API 请求强制直连。

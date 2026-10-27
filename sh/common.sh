@@ -300,7 +300,46 @@ mp_detect_os() {
     fi
 }
 
-# mp_service_op <op> <svc...>   op: enable_start | enable_restart | restart | stop
+# Capture service-manager diagnostics without leaking subscription/proxy credentials.
+# Keep the original status; the output file is private and removed even on interruption.
+mp_run_service_command() (
+    umask 077
+    mp_init_log "${MP_LOG_FILE:-$MP_INST_DIR/sh/myrule.inst.log}" || exit 1
+    _msc_tmp=$(mktemp -d) || exit 1
+    trap 'rm -rf -- "$_msc_tmp"' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    mp_log_command "$@" || exit 1
+    _msc_rc=0; "$@" > "$_msc_tmp/raw" 2>&1 || _msc_rc=$?
+    awk '
+        function hide(text, secret, pos, out) {
+            if (secret == "") return text
+            out=""
+            while ((pos=index(text,secret))>0) {
+                out=out substr(text,1,pos-1) "<redacted>"
+                text=substr(text,pos+length(secret))
+            }
+            return out text
+        }
+        {
+            line=$0
+            line=hide(line,ENVIRON["MP_SUBSCRIBE_URL"])
+            line=hide(line,ENVIRON["MP_PROXY"])
+            line=hide(line,ENVIRON["MP_AGH_PASSWORD"])
+            if (tolower(line) ~ /authorization[[:space:]]*:/) line="<redacted authentication diagnostic>"
+            gsub(/(https?|socks5h?):\/\/[^[:space:]<>]+/, "<redacted-url>", line)
+            print line
+        }
+    ' "$_msc_tmp/raw" > "$_msc_tmp/safe" || exit 1
+    while IFS= read -r _msc_line || [ -n "$_msc_line" ]; do
+        printf '%s\n' "$_msc_line"
+        mp_log_event "服务命令输出：$_msc_line"
+    done < "$_msc_tmp/safe"
+    mp_log_event "服务命令结束：$*；退出码 $_msc_rc"
+    exit "$_msc_rc"
+)
+
+# mp_service_op <op> <svc...>   op: enable_start | enable_restart | start | restart | stop
 # 按即时探测的系统类型派发到 service / systemctl。
 mp_service_op() {
     _mso_os=$(mp_detect_os) || { echo_log "未识别系统，跳过 $*"; return 1; }
@@ -308,10 +347,9 @@ mp_service_op() {
     _mso_rc=0
     for _svc in "$@"; do
         case "$_mso_os-$_op" in
-            openwrt-enable_start) service "$_svc" enable && service "$_svc" start ;;
-            openwrt-enable_restart) service "$_svc" enable && service "$_svc" restart ;;
-            openwrt-restart)      service "$_svc" restart ;;
-            openwrt-stop)         service "$_svc" stop ;;
+            openwrt-enable_start) mp_run_service_command service "$_svc" enable && mp_run_service_command service "$_svc" start ;;
+            openwrt-enable_restart) mp_run_service_command service "$_svc" enable && mp_run_service_command service "$_svc" restart ;;
+            openwrt-start|openwrt-restart|openwrt-stop) mp_run_service_command service "$_svc" "$_op" ;;
             systemd-enable_start|systemd-enable_restart)
                 # systemctl enable 会在 /etc/init.d 存在同名脚本时强制同步 SysV，
                 # 即使原生 unit 已安装也可能因旧脚本头不完整而失败。直接按 unit
@@ -323,12 +361,12 @@ mp_service_op() {
                 [ -f "$_mso_unit" ] \
                     && mkdir -p "$_mso_wants" \
                     && ln -sf "$_mso_unit" "$_mso_wants/$_svc.service" \
-                    && systemctl "$_mso_action" "$_svc.service"
+                    && mp_run_service_command systemctl "$_mso_action" "$_svc.service"
                 ;;
-            systemd-restart)      systemctl restart "$_svc.service" ;;
-            systemd-stop)         systemctl stop "$_svc.service" ;;
+            systemd-start|systemd-restart|systemd-stop) mp_run_service_command systemctl "$_op" "$_svc.service" ;;
             *) echo_log "未支持的操作 $_mso_os-$_op"; return 1 ;;
-        esac || { echo_log "$_op $_svc 失败"; _mso_rc=1; }
+        esac || { _mso_status=$?; echo_log "$_op $_svc 失败（退出码 $_mso_status）";
+            [ "$_mso_rc" -ne 0 ] || _mso_rc=$_mso_status; }
     done
     return "$_mso_rc"
 }
@@ -374,7 +412,9 @@ mp_activate_configs() {
         || { echo_log "Core 启动失败，AGH 保持停止"; return 1; }
     mp_wait_core_ready 30 \
         || { echo_log "Core 未就绪，AGH 保持停止"; return 1; }
-    mp_service_op "$_mac_op" agh \
+    # AGH was already stopped before committing configuration; do not stop it twice.
+    _mac_agh_op=enable_start; [ "$_mac_op" != restart ] || _mac_agh_op=start
+    mp_service_op "$_mac_agh_op" agh \
         || { echo_log "Core 已就绪，但 AGH 启动失败"; return 1; }
     echo_log "Core / AGH 已按依赖顺序启动"
 }
