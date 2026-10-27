@@ -1,5 +1,6 @@
 """Persistent wizard defaults, private logs and macOS path aliases."""
 import json
+import re
 import shlex
 import subprocess
 import unittest
@@ -42,13 +43,22 @@ class PreferencesTests(unittest.TestCase):
         standalone = self.file('standalone/inst.sh', test_installer.SOURCE)
         log = self.file('myrule.inst.log', 'previous log')
         self.command('curl', 'touch "$TEST_ROOT/network-used"; exit 99\n')
+        parser = test_scripts.function_source(test_installer.LIBRARY, 'inst_parse_args')
+        options = set(re.findall(r'--[a-z][a-z-]*', parser)) | {'-h', 'help'}
+        expected = None
         for entry in (standalone, self.root/'sh/inst.sh'):
             for flag in ('--help', '-h', 'help'):
                 result = subprocess.run(['sh', str(entry), flag], env=self.env,
                                         capture_output=True, text=True, timeout=5)
                 self.assert_ok(result)
-                for option in ('--fill-from', '--branch', '--log-file', '--target'):
-                    self.assertIn(option, result.stdout)
+                for option in options:
+                    lines = [line for line in result.stdout.splitlines()
+                             if line.startswith('  ' + option + ' ')]
+                    self.assertEqual(len(lines), 1, option)
+                    self.assertRegex(lines[0], r'\s{2,}\S.*\s{2,}\S', option)
+                if expected is None:
+                    expected = result.stdout
+                self.assertEqual(result.stdout, expected)
                 self.assertFalse((self.root/'network-used').exists())
                 self.assertEqual(log.read_text(), 'previous log')
 

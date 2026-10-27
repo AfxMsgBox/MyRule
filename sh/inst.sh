@@ -15,6 +15,50 @@ export INST_ENTRY_ROOT INST_ENTRY_DIR
 unset _INST_BOOT_LOG
 if [ -f "$_inst_dir/install-lib.sh" ]; then exec sh "$_inst_dir/install-lib.sh" --installer-run "$@"; fi
 
+# BEGIN shared installer help
+inst_usage() {
+    cat <<'USAGE'
+MyRule 安装器
+用法：sh inst.sh [选项]
+无参数进入向导；有参数默认静默安装，可用 --interactive 或 --fill-from 进入向导。
+目标：OpenWrt / systemd Linux；macOS 仅作为 SSH 发起端。
+静默模式必须提供订阅，并在 --agh-password 与 --no-auth 中二选一。
+
+  --subscribe-url URL        节点订阅 HTTP/HTTPS 地址；静默安装必填
+  --agh-user USER            AGH 用户名；默认 admin
+  --agh-password HASH        AGH 密码的 bcrypt 哈希（用单引号包裹）；与 --no-auth 互斥
+  --no-auth                  AGH 免登录；与 --agh-password 互斥
+  --branch NAME              安装及后续更新的 GitHub 分支；省略或空值为 main
+  --local                    使用 inst.sh 所在的本地仓库；与 --source-dir 互斥
+  --source-dir DIR           指定本地仓库根目录；外部程序和规则仍需联网下载
+  --target USER@HOST         通过 SSH 安装到目标机；省略则安装到本机
+  --ssh-port PORT            SSH 端口；默认 22
+  --ssh-key FILE             SSH 私钥文件；省略则使用默认密钥或 agent
+  --ssh-auth MODE            SSH 认证：auto / password / key；默认 auto，密码由 SSH 提示
+  --install-dir DIR          目标安装目录；默认 /etc/proxy，不支持空格和中文
+  --dns 'DNS1 DNS2'          直连上游 DNS；默认 '223.5.5.5 119.29.29.29'，空值使用目标机系统 DNS
+  --proxy URL                保存到目标机的外部后备代理；默认空，Core 代理优先
+  --download-proxy URL       发起端本次下载代理；不保存到目标机，本机未指定时沿用 --proxy
+  --scripts-days N           自动更新脚本的间隔（1–365 天）；省略或 n 保留已有任务
+  --configs-days N           自动更新配置的间隔（1–365 天）；省略或 n 保留已有任务
+  --no-start                 部署文件、暂存配置，不启用或重启服务
+  --interactive              带参数时仍进入交互向导
+  --fill-from [PATH]         交互读取并保存输入默认值；省略路径用脚本同目录 myrule.inst.cfg
+  --log-file PATH            安装日志路径；默认脚本同目录 myrule.inst.log，每次安装覆盖旧日志
+  --help                     显示完整帮助，无需联网
+  -h                         同 --help
+  help                       同 --help
+
+支持 --选项=值；空值写作 ''。静默安装不从旧配置补齐参数。
+SSH 支持 root 或可使用 sudo 的用户；本机安装需 root。
+示例：
+  sh inst.sh --fill-from
+  sh inst.sh --subscribe-url 'https://example.com/sub' --no-auth
+  sh inst.sh --target root@192.168.1.2 --interactive
+USAGE
+}
+# END shared installer help
+
 # 自举前校验全部选项及取值结构；业务值仍由模块校验。
 _inst_branch=main; _inst_proxy=; _inst_download_proxy=; _inst_download_set=0
 _inst_log_file=${MP_LOG_FILE:-$_inst_dir/myrule.inst.log}; INST_FILL_FILE=
@@ -51,12 +95,7 @@ for _inst_arg do
             continue ;;
         --help|-h|help)
             [ "$_inst_arg" = "$_inst_key" ] || { printf '参数不接受值：%s\n' "$_inst_key" >&2; exit 1; }
-            printf '%s\n' 'MyRule：无参数交互；命令行必填 --subscribe-url URL，认证选择 --agh-password BCRYPT 或 --no-auth' \
-            '可选 --agh-user USER（默认 admin）' \
-            '可选 --target USER@HOST --ssh-port PORT --ssh-key FILE --ssh-auth auto|password|key' \
-            '--branch NAME --local --source-dir DIR --install-dir DIR --dns DNS --proxy URL --download-proxy URL' \
-            '--scripts-days N --configs-days N --no-start --interactive --fill-from [PATH] --log-file PATH' \
-            '--help / -h / help：显示帮助（无需联网）'; exit 0 ;;
+            inst_usage; exit 0 ;;
         --local) echo '单文件安装器无法推断本地仓库，请从仓库内运行或指定 --source-dir' >&2; exit 1 ;;
         *) printf '未知参数：%s；请使用 --help 查看用法（交互配置参数为 --fill-from）\n' "$_inst_key" >&2; exit 1 ;;
     esac

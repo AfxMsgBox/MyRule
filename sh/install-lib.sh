@@ -47,37 +47,49 @@ prompt_to() {
 
 # === options ===
 # 业务参数解析；独立入口同步校验选项结构。值赋给固定变量，不 eval 用户文本。
+# BEGIN shared installer help
 inst_usage() {
     cat <<'USAGE'
 MyRule 安装器
-  sh inst.sh                         交互选择安装方式
-  sh inst.sh [选项]                   命令行安装
+用法：sh inst.sh [选项]
+无参数进入向导；有参数默认静默安装，可用 --interactive 或 --fill-from 进入向导。
+目标：OpenWrt / systemd Linux；macOS 仅作为 SSH 发起端。
+静默模式必须提供订阅，并在 --agh-password 与 --no-auth 中二选一。
 
-必填：--subscribe-url URL
-认证：--agh-password BCRYPT          设置密码哈希；与 --no-auth 二选一
-      --no-auth                      关闭 AGH 登录认证
-      --agh-user USER                管理员用户名，默认 admin
-来源：--branch NAME                  GitHub / 后续更新分支，默认 main
-      --local                        使用 inst.sh 所在的本地仓库
-      --source-dir DIR               显式指定本地仓库
-目标：--target USER@HOST             通过 SSH 安装；省略则安装到本机
-      --ssh-port PORT                SSH 端口，默认 22
-      --ssh-key FILE                 SSH 私钥；也支持默认密钥与 agent
-      --ssh-auth auto|password|key   认证方式，默认 auto；密码由 SSH 提示
-配置：--install-dir DIR              目标安装目录，默认 /etc/proxy
-      --dns 'DNS1 DNS2'              默认 '223.5.5.5 119.29.29.29'；空值用目标机 DNS
-      --proxy URL                    目标机后备代理，默认空
-      --download-proxy URL           发起端下载代理；不写入目标机配置
-      --scripts-days N               脚本更新间隔 1–365 天；省略保留旧任务
-      --configs-days N               配置更新间隔 1–365 天；省略保留旧任务
-      --no-start                     暂不启用新配置和服务
-      --interactive                  带参数继续交互收集其余选项
-      --fill-from [PATH]             交互读取并保存默认值；默认脚本同目录 myrule.inst.cfg
-      --log-file PATH                下载命令日志；默认脚本同目录 myrule.inst.log
-      --help / -h / help             显示帮助（无需联网）
-支持 --选项=值。SSH 的用户名、密码和密钥认证独立于安装参数。
+  --subscribe-url URL        节点订阅 HTTP/HTTPS 地址；静默安装必填
+  --agh-user USER            AGH 用户名；默认 admin
+  --agh-password HASH        AGH 密码的 bcrypt 哈希（用单引号包裹）；与 --no-auth 互斥
+  --no-auth                  AGH 免登录；与 --agh-password 互斥
+  --branch NAME              安装及后续更新的 GitHub 分支；省略或空值为 main
+  --local                    使用 inst.sh 所在的本地仓库；与 --source-dir 互斥
+  --source-dir DIR           指定本地仓库根目录；外部程序和规则仍需联网下载
+  --target USER@HOST         通过 SSH 安装到目标机；省略则安装到本机
+  --ssh-port PORT            SSH 端口；默认 22
+  --ssh-key FILE             SSH 私钥文件；省略则使用默认密钥或 agent
+  --ssh-auth MODE            SSH 认证：auto / password / key；默认 auto，密码由 SSH 提示
+  --install-dir DIR          目标安装目录；默认 /etc/proxy，不支持空格和中文
+  --dns 'DNS1 DNS2'          直连上游 DNS；默认 '223.5.5.5 119.29.29.29'，空值使用目标机系统 DNS
+  --proxy URL                保存到目标机的外部后备代理；默认空，Core 代理优先
+  --download-proxy URL       发起端本次下载代理；不保存到目标机，本机未指定时沿用 --proxy
+  --scripts-days N           自动更新脚本的间隔（1–365 天）；省略或 n 保留已有任务
+  --configs-days N           自动更新配置的间隔（1–365 天）；省略或 n 保留已有任务
+  --no-start                 部署文件、暂存配置，不启用或重启服务
+  --interactive              带参数时仍进入交互向导
+  --fill-from [PATH]         交互读取并保存输入默认值；省略路径用脚本同目录 myrule.inst.cfg
+  --log-file PATH            安装日志路径；默认脚本同目录 myrule.inst.log，每次安装覆盖旧日志
+  --help                     显示完整帮助，无需联网
+  -h                         同 --help
+  help                       同 --help
+
+支持 --选项=值；空值写作 ''。静默安装不从旧配置补齐参数。
+SSH 支持 root 或可使用 sudo 的用户；本机安装需 root。
+示例：
+  sh inst.sh --fill-from
+  sh inst.sh --subscribe-url 'https://example.com/sub' --no-auth
+  sh inst.sh --target root@192.168.1.2 --interactive
 USAGE
 }
+# END shared installer help
 
 inst_parse_args() {
     INSTALL_MODE=silent; [ "$#" -ne 0 ] || INSTALL_MODE=interactive
