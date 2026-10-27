@@ -13,7 +13,7 @@ mkdir -p "$MP_CORE_DIR" "$MP_AGH_DIR" || exit 1
 binary_arch=${_MP_TARGET_ARCH:-$(uname -m)}
 echo_log "更新内核二进制（CPU: linux-$binary_arch）"
 case "$binary_arch" in
-    x86_64)         mihomo_arch=amd64;            agh_arch=amd64 ;;
+    x86_64)         mihomo_arch=amd64-compatible; agh_arch=amd64 ;;
     aarch64)        mihomo_arch=arm64;            agh_arch=arm64 ;;
     armv7l)         mihomo_arch=armv7;            agh_arch=armv7 ;;
     armv6l)         mihomo_arch=armv6;            agh_arch=armv6 ;;
@@ -43,9 +43,22 @@ url="https://github.com/MetaCubeX/mihomo/releases/download/$ver/mihomo-linux-$mi
 if ! download_file "$url" "$bin_work/mihomo.gz" true 8 "Mihomo $ver / linux-$mihomo_arch" \
     || ! gunzip -c "$bin_work/mihomo.gz" > "$bin_work/mihomo" \
     || [ ! -s "$bin_work/mihomo" ] \
-    || ! mp_install_binary "$bin_work/mihomo" "$MP_CORE_DIR/mihomo"; then
+    || ! chmod 0755 "$bin_work/mihomo"; then
     echo_log 'mihomo 下载、解压或安装失败'; exit 1
 fi
+# prepare 只为目标收集资源，不能在 macOS/不同 CPU 的发起端执行 Linux 程序。
+# apply 与日常更新在替换旧二进制前检查，保留原生诊断及实际退出码。
+if [ -z "${_MP_CACHE_WRITE:-}" ]; then
+    echo_log '检查 Mihomo 是否能在目标机运行'
+    bin_check_rc=0
+    mp_run_logged_command "$bin_work/mihomo" -v || bin_check_rc=$?
+    if [ "$bin_check_rc" -ne 0 ]; then
+        echo_log "Mihomo 无法在目标机运行（退出码 $bin_check_rc），请检查 CPU 指令集及系统兼容性；未替换现有内核"
+        exit "$bin_check_rc"
+    fi
+fi
+mp_install_binary "$bin_work/mihomo" "$MP_CORE_DIR/mihomo" \
+    || { echo_log 'mihomo 安装失败'; exit 1; }
 echo_log "mihomo $ver / linux-$mihomo_arch 已就位：$MP_CORE_DIR/mihomo"
 
 core_ui_dir=$(mp_core_external_ui_path "$core_config" 2>/dev/null || :)

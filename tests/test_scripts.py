@@ -513,7 +513,7 @@ mp_service_op enable_restart proxy_core
 
     def make_binary_fixtures(self):
         self.file("fixtures/release.json", '{"tag_name":"test-version"}')
-        (self.root / "fixtures/mihomo.gz").write_bytes(gzip.compress(b"new-mihomo"))
+        (self.root / "fixtures/mihomo.gz").write_bytes(gzip.compress(b'#!/bin/sh\n[ "$1" = -v ] || exit 9\necho new-mihomo\n'))
         for archive, name, content in [("ui.tgz", "index.html", b"new-ui"),
                                        ("agh.tgz", "AdGuardHome/AdGuardHome", b"new-agh")]:
             with tarfile.open(self.root / "fixtures" / archive, "w:gz") as tar:
@@ -541,7 +541,7 @@ download_file() {
     def test_binary_updater_uses_pending_ui_path(self):
         self.make_binary_fixtures()
         self.assert_ok(self.run_shell('sh "$MP_INST_DIR/sh/update-bin.sh" "$MP_CORE_DIR/config.yaml.pending"'))
-        self.assertEqual((self.root / "core/mihomo").read_text(), "new-mihomo")
+        self.assertIn("echo new-mihomo", (self.root / "core/mihomo").read_text())
         self.assertEqual((self.root / "agh/AdGuardHome").read_text(), "new-agh")
         self.assertEqual((self.root / "core/next-ui/index.html").read_text(), "new-ui")
         self.assertFalse((self.root / "core/old-ui").exists())
@@ -553,7 +553,56 @@ download_file() {
         result = self.run_shell('sh "$MP_INST_DIR/sh/update-bin.sh"')
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual((self.root / "core/mihomo").read_text(), "old-mihomo")
-        self.assertNotIn("mihomo test-version / linux-amd64 已就位", result.stdout)
+        self.assertNotIn("已就位", result.stdout)
+
+    def test_binary_updater_selects_compatible_x86_and_keeps_other_architectures(self):
+        self.make_binary_fixtures()
+        for arch, mihomo, agh in [('x86_64', 'amd64-compatible', 'amd64'),
+                                   ('aarch64', 'arm64', 'arm64'),
+                                   ('armv7l', 'armv7', 'armv7')]:
+            with self.subTest(arch=arch):
+                (self.root / 'binary-downloads').unlink(missing_ok=True)
+                result = self.run_shell('sh "$MP_INST_DIR/sh/update-bin.sh"',
+                                        extra={'_MP_TARGET_ARCH': arch})
+                self.assert_ok(result)
+                urls = (self.root / 'binary-downloads').read_text().splitlines()
+                self.assertIn(f'https://github.com/MetaCubeX/mihomo/releases/download/test-version/mihomo-linux-{mihomo}-test-version.gz', urls)
+                self.assertIn(f'https://github.com/AdguardTeam/AdGuardHome/releases/latest/download/AdGuardHome_linux_{agh}.tar.gz', urls)
+
+    def test_incompatible_binary_logs_error_and_preserves_installed_components(self):
+        self.make_binary_fixtures()
+        diagnostic = 'This program can only be run on AMD64 processors with v3 microarchitecture support.'
+        (self.root / 'fixtures/mihomo.gz').write_bytes(gzip.compress(
+            f'#!/bin/sh\necho "{diagnostic}" >&2\nexit 42\n'.encode()))
+        self.file('core/mihomo', 'old-mihomo')
+        self.file('agh/AdGuardHome', 'old-agh')
+        self.file('core/old-ui/index.html', 'old-ui')
+        result = self.run_shell('sh "$MP_INST_DIR/sh/update-bin.sh"')
+        self.assertEqual(result.returncode, 42)
+        self.assertIn(diagnostic, result.stdout)
+        logged = (self.root / 'myrule.inst.log').read_text()
+        self.assertIn(diagnostic, logged)
+        self.assertIn('退出码 42', logged)
+        self.assertEqual((self.root / 'core/mihomo').read_text(), 'old-mihomo')
+        self.assertEqual((self.root / 'agh/AdGuardHome').read_text(), 'old-agh')
+        self.assertEqual((self.root / 'core/old-ui/index.html').read_text(), 'old-ui')
+        self.assertEqual(len((self.root / 'binary-downloads').read_text().splitlines()), 2)
+
+    def test_prepare_skips_execution_but_cached_apply_checks_binary(self):
+        self.make_binary_fixtures()
+        (self.root / 'fixtures/mihomo.gz').write_bytes(gzip.compress(
+            b'#!/bin/sh\ntouch "$TEST_ROOT/binary-ran"\nexit 43\n'))
+        result = self.run_shell('sh "$MP_INST_DIR/sh/update-bin.sh"',
+                                extra={'_MP_CACHE_WRITE': str(self.root / 'cache'),
+                                       '_MP_TARGET_ARCH': 'x86_64'})
+        self.assert_ok(result)
+        self.assertFalse((self.root / 'binary-ran').exists())
+        self.file('core/mihomo', 'old-mihomo')
+        result = self.run_shell('sh "$MP_INST_DIR/sh/update-bin.sh"',
+                                extra={'_MP_RESOURCE_DIR': str(self.root / 'cache')})
+        self.assertEqual(result.returncode, 43)
+        self.assertTrue((self.root / 'binary-ran').exists())
+        self.assertEqual((self.root / 'core/mihomo').read_text(), 'old-mihomo')
 
 
 if __name__ == "__main__":

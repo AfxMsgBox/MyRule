@@ -300,9 +300,9 @@ mp_detect_os() {
     fi
 }
 
-# Capture service-manager diagnostics without leaking subscription/proxy credentials.
+# Capture command diagnostics without leaking subscription/proxy credentials.
 # Keep the original status; the output file is private and removed even on interruption.
-mp_run_service_command() (
+mp_run_logged_command() (
     umask 077
     mp_init_log "${MP_LOG_FILE:-$MP_INST_DIR/sh/myrule.inst.log}" || exit 1
     _msc_tmp=$(mktemp -d) || exit 1
@@ -333,11 +333,13 @@ mp_run_service_command() (
     ' "$_msc_tmp/raw" > "$_msc_tmp/safe" || exit 1
     while IFS= read -r _msc_line || [ -n "$_msc_line" ]; do
         printf '%s\n' "$_msc_line"
-        mp_log_event "服务命令输出：$_msc_line"
+        mp_log_event "命令输出：$_msc_line"
     done < "$_msc_tmp/safe"
-    mp_log_event "服务命令结束：$*；退出码 $_msc_rc"
+    mp_log_event "命令结束：$*；退出码 $_msc_rc"
     exit "$_msc_rc"
 )
+
+mp_run_service_command() { mp_run_logged_command "$@"; }
 
 # mp_service_op <op> <svc...>   op: enable_start | enable_restart | start | restart | stop
 # 按即时探测的系统类型派发到 service / systemctl。

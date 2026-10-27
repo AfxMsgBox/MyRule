@@ -215,7 +215,7 @@ prepare 将 sh/、domain/、core/config.yaml、agh/agh.yaml、agh/myupstream.txt
 ### 4.5 平台与服务
 
 - `mp_detect_os`：即时识别 `openwrt` 或 `systemd`，不持久化 OS 类型。
-- `mp_service_op`：统一启停和重启服务，返回首个失败命令的实际退出码。`mp_run_service_command` 在私有临时目录捕获服务管理器 stdout/stderr，脱敏后显示并写入安装日志，同时记录命令和退出码；即使退出码为 0，诊断输出仍写日志。已知订阅/代理/密码值、输出中的 URL 和认证头隐藏；临时原文在退出时删除。日志初始化失败时不执行服务操作。
+- `mp_service_op`：统一启停和重启服务，返回首个失败命令的实际退出码。`mp_run_service_command` 委托 `mp_run_logged_command` 在私有临时目录捕获 stdout/stderr，脱敏后显示并写入安装日志，同时记录命令和退出码；即使退出码为 0，诊断输出仍写日志。已知订阅/代理/密码值、输出中的 URL 和认证头隐藏；临时原文在退出时删除。日志初始化失败时不执行命令。Mihomo 可执行性检查复用此封装。
 - `mp_activate_configs`：安装/重装与日常更新共用的服务切换流程；停止 AGH、提交待切换配置、重启 Core、等待 API/TUN/路由就绪、启动 AGH。重装对 Core 使用 `enable_restart`、对已停止的 AGH 使用 `enable_start`；日常更新对 AGH 使用 `start`，避免 OpenWrt restart 再次删除已不存在的 procd 实例。首次安装使用 `enable_start`，无需停止尚未运行的 AGH。
 - `mp_commit_pending_configs`：仅提交配置，供上述流程或首次安装选择不启动服务时使用；运行中的 AGH 必须先停止。
 - `mp_sync_etc_files`：处理服务文件中的安装路径并按策略同步到 `/etc`。
@@ -226,6 +226,10 @@ systemd 的启用逻辑直接创建 `multi-user.target.wants` 链接，不调用
 ### 4.6 外部下载资源处理
 
 来源、文件及安装位置见 [README 下载列表](README.md#下载列表)。此处记录资源处理方式。
+
+`update-bin.sh` 对 x86_64 固定选择 Mihomo `amd64-compatible` 构建，避免普通 amd64 包要求 v3 指令集而无法在旧 CPU 或受限虚拟机运行；AGH 仍选择 amd64，其它架构映射不变。本机安装、SSH prepare/apply、日常更新使用同一映射，不按发起端 CPU 指令集选包。
+
+解压后、替换现有内核前，在目标机执行临时 Mihomo 的 `-v` 检查；非零退出立即停止后续组件更新，保留已有内核并将原生错误及退出码写入日志。prepare 以 `_MP_CACHE_WRITE` 标识资源收集阶段，此阶段不执行下载的目标程序，避免 macOS 或跨架构发起端误执行 Linux 二进制；目标 apply 和日常更新必须检查。此检查仅验证程序可运行，服务启动后仍需 API/TUN/路由就绪检查。
 
 
 GFW 和非中国顶级域名列表参与生成 `agh/dns.conf.pending`，配置提交后成为 `agh/dns.conf`。程序及面板压缩包解压安装后删除。当前安装流程每次都会请求上述资源，不因本地已有文件而跳过；必需下载失败立即终止后续资源下载、配置切换和服务启动。Mihomo latest JSON 须包含安全且非空的 tag_name；二进制或 UI 下载、解压、安装失败不继续处理后续组件。providers、filters 和 DNS 域名列表在首个失败处停止；DNS 清理临时文件并保留旧配置。已成功更新的其它组件不整批回滚。

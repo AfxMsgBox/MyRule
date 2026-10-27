@@ -226,7 +226,7 @@ mp_wait_core_ready() { printf 'ready\n' >> "$TEST_ROOT/events"; }
 ''')
         self.file("fixtures/release.json", '{"tag_name":"test-version"}')
         self.file("fixtures/payload", "payload:\n  - '+.example.org'\n")
-        (self.root / "fixtures/mihomo.gz").write_bytes(gzip.compress(b"test-mihomo"))
+        (self.root / "fixtures/mihomo.gz").write_bytes(gzip.compress(b'#!/bin/sh\n[ "$1" = -v ] || exit 9\necho test-mihomo\n'))
         for archive, name in [("ui.tgz", "index.html"), ("agh.tgz", "AdGuardHome/AdGuardHome")]:
             with tarfile.open(self.root / "fixtures" / archive, "w:gz") as tar:
                 info = tarfile.TarInfo(name)
