@@ -173,17 +173,17 @@ MP_PROXY 外部代理
 
 `download_file` 使用目标目录内的临时文件，检查 curl 状态与最小文件大小，成功后以 `mv` 原子替换。不做进程、API 或网站预探测，由真实下载决定回退；Core 只读当前正式配置，端口按 mixed-port → port → socks-port 选择首个有效值。相同的 Core/外部代理不重复尝试。
 
-curl 的首个参数为 `--disable`，避免读取用户配置。代理通道使用显式 `--proxy URL --noproxy ''`，直连使用 `--proxy '' --noproxy '*'`，消除系统代理变量与 NO_PROXY 干扰。每次通道尝试与重试都在执行前通过 `mp_log_command` 将脱敏命令写入文件，终端输出资源名称、状态、进度及诊断；不打印原始凭据或 curl 错误。
+curl 的首个参数为 `--disable`，避免读取用户配置。代理通道使用显式 `--proxy URL --noproxy ''`，直连使用 `--proxy '' --noproxy '*'`，消除系统代理变量与 NO_PROXY 干扰。每次通道尝试与重试都在执行前通过 `mp_log_download_command` 将完整命令写入文件，终端输出资源名称、状态、进度及诊断；不打印原始凭据或 curl 错误。
 
-`mp_log_command` 使用纯 shell 对各参数逐个加引号，不用 eval，不改变实际执行参数。`mp_log_url` 保留项目已知公开来源的路径；其它资源路径、所有查询串/片段、URL userinfo 与 Authorization 头隐藏为 `<redacted>`，代理保留协议及地址端口。命令仅追加到 `MP_LOG_FILE`，不污染终端、函数返回值或 HTTP 状态捕获。`mp_run_download_command` 为依赖包管理器共用“记录后执行”封装，保留退出码及其原生进度；这些函数随共享传输块嵌入独立入口，并提前定义以支持依赖安装前的日志。
+`mp_log_command` 使用纯 shell 对各参数逐个加引号，不用 eval，不改变实际执行参数。`mp_log_download_command` 通过子 shell 内部标志启用完整参数模式，保留 URL、代理凭据及 Authorization 等全部原始参数；命令单独成行，不带提示前缀，可复制到 shell 执行。完整模式仅用于 HTTP 下载、包管理器及 Core provider 刷新，不影响服务诊断的脱敏。普通命令仍由 `mp_log_url` 保留项目已知公开来源的路径；其它资源路径、所有查询串/片段、URL userinfo 与 Authorization 头隐藏为 `<redacted>`，代理保留协议及地址端口。命令仅追加到 `MP_LOG_FILE`，不污染终端、函数返回值或 HTTP 状态捕获。`mp_run_download_command` 为依赖包管理器共用“记录后执行”封装，保留退出码及其原生进度；这些函数随共享传输块嵌入独立入口，并提前定义以支持依赖安装前的日志。
 
-独立入口导出真实 `INST_ENTRY_DIR`，模块和子脚本继承同一 `MP_LOG_FILE`。默认路径为入口脚本同目录 `myrule.inst.log`，`--log-file PATH` 覆盖；日常更新未继承该变量时默认写入安装目录 `sh/myrule.inst.log`。`mp_init_log` 要求父目录存在、目标为普通文件且不是符号链接，以 umask 077 创建、chmod 600，默认追加；安装入口显式传入 `reset` 时在安全路径检查及权限设置后清空旧日志。独立入口通过 `_INST_BOOT_LOG` 将本次日志的规范路径传给模块，路径一致时模块继续追加；本地模块入口开启新日志，prepare/apply、下载和服务封装不清空日志。帮助及参数结构错误不创建或修改日志。`mp_log_event` 记录时间戳；阶段函数、`echo_log` 和传输函数记录系统/工具、物理路径、进度、HTTP/curl 状态、重试及退出码。日志初始化失败停止下载；不使用全局 `set -x` 或原始 stdout/stderr 全量转储，避免输入值和认证信息泄漏。
+独立入口导出真实 `INST_ENTRY_DIR`，模块和子脚本继承同一 `MP_LOG_FILE`。默认路径为入口脚本同目录 `myrule.inst.log`，`--log-file PATH` 覆盖；日常更新未继承该变量时默认写入安装目录 `sh/myrule.inst.log`。`mp_init_log` 要求父目录存在、目标为普通文件且不是符号链接，以 umask 077 创建、chmod 600，默认追加；安装入口显式传入 `reset` 时在安全路径检查及权限设置后清空旧日志。独立入口通过 `_INST_BOOT_LOG` 将本次日志的规范路径传给模块，路径一致时模块继续追加；本地模块入口开启新日志，prepare/apply、下载和服务封装不清空日志。帮助及参数结构错误不创建或修改日志。`mp_log_event` 记录时间戳；阶段函数、`echo_log` 和传输函数记录系统/工具、物理路径、进度、HTTP/curl 状态、重试及退出码。日志初始化失败停止下载；不使用全局 `set -x` 或原始 stdout/stderr 全量转储，避免额外记录无关的输入值和认证信息；下载命令按调试需求显式保留凭据，日志权限仍为 0600。
 
 HTTP 传输统一由 `portable.sh` 的 `mp_http_download` 实现；独立 `inst.sh` 嵌入同一传输及进度函数，单元测试强制两份一致。curl 在后台以 silent 模式下载，前台定期读取目标临时文件大小，以 `mp_download_progress` 显示大小、平均速度和耗时；TTY 每秒原地刷新，非 TTY 在开始、首次收到数据、之后每 5 秒及完成时输出行。每 0.2 秒检查下载进程，避免小文件额外等待整秒；终止时回收 curl 并清理私有元数据目录。
 
-HTTP 状态及响应头只保存在私有临时目录。进度只提取最后一个成功响应的数值 Content-Length，重定向的新状态行清除前一个响应长度；兼容 HTTP/2 状态行及 CRLF。总大小未知时显示字节数，不猜测百分比。不会显示原始响应头、URL 凭据或 curl 错误；不再依赖管道转发 curl 进度，避免 awk 输入缓冲和 `tee` 导致进度消失。本地复制及 SSH 缓存读取仍显示对应来源，不伪装成网络下载。
+HTTP 状态及响应头只保存在私有临时目录。进度只提取最后一个成功响应的数值 Content-Length，重定向的新状态行清除前一个响应长度；兼容 HTTP/2 状态行及 CRLF。总大小未知时显示字节数，不猜测百分比。终端不会显示原始响应头、URL 凭据或 curl 错误；不再依赖管道转发 curl 进度，避免 awk 输入缓冲和 `tee` 导致进度消失。本地复制及 SSH 缓存读取仍显示对应来源，不伪装成网络下载。
 
-`update-proxy-rule.sh` 仅通过 PUT API 触发 Core 下载，使用同一命令日志函数屏蔽 Authorization，并输出逐项开始/成功/失败；没有字节总量时不伪造百分比。HTTP 200/204 且 curl 退出码 0 才算成功。Core 就绪探测和 keeplive HEAD 属于健康检查，不是资源下载。
+`update-proxy-rule.sh` 仅通过 PUT API 触发 Core 下载，使用完整下载命令日志函数保留 Authorization，并输出逐项开始/成功/失败；没有字节总量时不伪造百分比。HTTP 200/204 且 curl 退出码 0 才算成功。Core 就绪探测和 keeplive HEAD 属于健康检查，不是资源下载。
 
 每次请求连接超时 10 秒，连续 30 秒传输速度低于 1 B/s 提前终止；分支 API 和 Mihomo 版本 API 总超时 60 秒，其余资源默认 300 秒。每轮依次尝试全部可用通道；最后直连仍为暂态错误时，间隔 1 秒最多重试两轮，共三轮。暂态包含 DNS/连接/传输/握手错误、超时及 HTTP 408/429/500/502/503/504；最终 403/404、证书校验失败、空响应不自动重试，本地读写错误立即终止。
 

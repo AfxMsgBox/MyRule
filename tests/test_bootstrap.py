@@ -118,10 +118,10 @@ esac
         self.assertEqual(config['MP_REPO_BRANCH'], 'feature/install')
         self.assertEqual(config['INST_DOWNLOAD_PROXY'], 'http://user:private@proxy.invalid:8080')
         log=(self.root/'myrule.inst.log').read_text()
-        self.assertIn('执行命令',log)
+        self.assertIn('执行下载命令（完整参数）',log)
         self.assertIn('独立入口退出码：0',log)
-        self.assertNotIn('private',log)
-        self.assertNotIn('[命令，敏感值已脱敏]',output)
+        self.assertIn("'http://user:private@proxy.invalid:8080'",log)
+        self.assertNotIn("'curl' '--disable'",output)
 
     def test_fill_custom_path_and_explicit_log_path(self):
         self.env.pop('MP_LOG_FILE', None)

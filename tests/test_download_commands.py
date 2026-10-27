@@ -1,5 +1,8 @@
-"""Download command visibility without credential disclosure or command execution."""
+"""Exact, replayable download commands in private logs; concise terminal output."""
+import json
 import shlex
+import subprocess
+import sys
 import unittest
 
 import test_scripts
@@ -18,8 +21,38 @@ class CommandLogTests(unittest.TestCase):
     def logged(self, result):
         log = (self.root / 'myrule.inst.log').read_text()
         self.assertNotIn('[命令，敏感值已脱敏]', result.stdout + result.stderr)
-        return [shlex.split(line.split('] ', 1)[1]) for line in log.splitlines()
-                if line.startswith('  [命令，敏感值已脱敏] ')]
+        return [shlex.split(line.split('] ', 1)[1] if line.startswith('  [命令，敏感值已脱敏] ') else line)
+                for line in log.splitlines()
+                if line.startswith(('  [命令，敏感值已脱敏] ', " '"))]
+
+    def test_full_download_command_round_trips_secrets_and_shell_characters(self):
+        recorder = self.file('record.py', 'import json,sys\nfrom pathlib import Path\n'
+                             'Path("replayed.json").write_text(json.dumps(sys.argv[1:]))\n')
+        args = [sys.executable, str(recorder),
+                'https://user:password@example.invalid/private?token=secret#fragment',
+                '--proxy', 'socks5h://user:proxy-password@proxy.invalid:1080',
+                '-H', 'Authorization: Bearer api-secret', "a'b", '', 'path with spaces',
+                '$(touch PWNED); `touch PWNED`']
+        result = self.run_shell('mp_log_download_command ' + shlex.join(args))
+        self.assert_ok(result)
+        self.assertEqual(result.stdout+result.stderr, '')
+        self.assertEqual(self.logged(result), [args])
+        self.assertFalse((self.root/'replayed.json').exists())
+        log = (self.root/'myrule.inst.log').read_text()
+        command = next(line for line in log.splitlines() if line.startswith(" '"))
+        replay = subprocess.run(['sh', '-c', command], cwd=self.root, capture_output=True, text=True)
+        self.assert_ok(replay)
+        self.assertEqual(json.loads((self.root/'replayed.json').read_text()), args[2:])
+        self.assertFalse((self.root/'PWNED').exists())
+        self.assertEqual((self.root/'myrule.inst.log').stat().st_mode & 0o777, 0o600)
+
+    def test_package_download_logger_keeps_actual_arguments_and_exit_status(self):
+        self.command('package-test', 'exit 7\n')
+        args = ['package-test', '--repository', 'https://user:secret@example.invalid/path?token=value']
+        result = self.run_shell('mp_run_download_command ' + shlex.join(args))
+        self.assertEqual(result.returncode, 7)
+        self.assertEqual(self.logged(result), [args])
+        self.assertEqual(result.stdout+result.stderr, '')
 
     def test_command_arguments_are_quoted_without_evaluation(self):
         args = ['printf', '%s', "a'b", 'path with spaces', '', '$(touch PWNED); `id`']
@@ -55,7 +88,7 @@ class CommandLogTests(unittest.TestCase):
         self.assertEqual(len(logs), len(calls))
         self.assertEqual(len(logs), 2)
         for logged, actual in zip(logs, calls):
-            self.assertEqual(logged[0], 'curl')
+            self.assertEqual(logged, ['curl', *actual])
             self.assertEqual(logged[logged.index('--noproxy')+1], actual[actual.index('--noproxy')+1])
             self.assertIn(url, actual)
             self.assertIn('--silent', logged)
@@ -74,6 +107,7 @@ class CommandLogTests(unittest.TestCase):
             self.assertIn('由 Core 下载，等待 API 结果', result.stdout)
             self.assertIn('刷新 proxies/test-provider ' + ('OK' if status == '0' else '失败'), result.stdout)
             self.assertEqual(len(self.logged(result)), 1)
+            self.assertIn('Authorization: Bearer secret-header', self.logged(result)[0])
             self.assertNotIn('secret', result.stdout + result.stderr)
             self.assertIn('Authorization: Bearer secret-header', (self.root / 'api-args').read_text())
 

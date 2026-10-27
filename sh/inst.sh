@@ -157,16 +157,22 @@ mp_log_url() (
 mp_log_command() (
     mp_init_log "${MP_LOG_FILE:-${INST_ENTRY_DIR:-${MP_INST_DIR:-.}/sh}/myrule.inst.log}" || exit 1
     exec >> "$MP_LOG_FILE" || exit 1
-    mp_log_event '执行命令（敏感值已脱敏）'
-    printf '  [命令，敏感值已脱敏]'
+    if [ "${_MP_LOG_FULL_COMMAND:-0}" = 1 ]; then
+        mp_log_event '执行下载命令（完整参数）'
+    else
+        mp_log_event '执行命令（敏感值已脱敏）'
+        printf '  [命令，敏感值已脱敏]'
+    fi
     _lc_kind=
     for _lc_arg do
         _lc_next=
         case "$_lc_arg" in --proxy) _lc_next=proxy ;; esac
-        case "$_lc_arg" in
-            http://*|https://*|socks5://*|socks5h://*) _lc_arg=$(mp_log_url "$_lc_arg" "$_lc_kind") ;;
-            'Authorization:'*) _lc_arg='Authorization: <redacted>' ;;
-        esac
+        if [ "${_MP_LOG_FULL_COMMAND:-0}" != 1 ]; then
+            case "$_lc_arg" in
+                http://*|https://*|socks5://*|socks5h://*) _lc_arg=$(mp_log_url "$_lc_arg" "$_lc_kind") ;;
+                'Authorization:'*) _lc_arg='Authorization: <redacted>' ;;
+            esac
+        fi
         printf " '"
         while :; do
             case "$_lc_arg" in
@@ -179,8 +185,13 @@ mp_log_command() (
     printf '\n'
 )
 
+mp_log_download_command() (
+    _MP_LOG_FULL_COMMAND=1
+    mp_log_command "$@"
+)
+
 mp_run_download_command() {
-    mp_log_command "$@" || return 1
+    mp_log_download_command "$@" || return 1
     _rd_rc=0; "$@" || _rd_rc=$?
     mp_log_event "命令结束：$1，退出码 $_rd_rc"
     return "$_rd_rc"
@@ -236,7 +247,7 @@ mp_http_download() (
             : > "$_hd_dst" || exit 1
             : > "$_hd_meta/headers"
             _hd_start=$(date +%s); _hd_last=-5; _hd_previous=0
-            mp_log_command curl "$@" || exit 1
+            mp_log_download_command curl "$@" || exit 1
             curl "$@" > "$_hd_meta/http" 2>/dev/null &
             _hd_pid=$!
             while kill -0 "$_hd_pid" 2>/dev/null; do

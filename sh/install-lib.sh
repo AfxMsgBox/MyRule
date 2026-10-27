@@ -310,7 +310,7 @@ inst_apt() {
     if [ -n "$_iip_sudo" ]; then
         mp_run_download_command sudo env DEBIAN_FRONTEND=noninteractive apt-get "$@"
     else
-        mp_log_command env DEBIAN_FRONTEND=noninteractive apt-get "$@" || return 1
+        mp_log_download_command env DEBIAN_FRONTEND=noninteractive apt-get "$@" || return 1
         DEBIAN_FRONTEND=noninteractive apt-get "$@"
     fi
 }
