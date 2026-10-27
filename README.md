@@ -275,6 +275,8 @@ sh /etc/proxy/sh/update-all-configs-restart-services.sh
 
 ## 卸载
 
+停止服务后最多等待 10 秒让进程退出；超时会报错并保留服务文件和数据，避免删除仍在使用的程序。
+
 ```sh
 # 交互卸载：询问是否删除安装文件，回车默认保留
 sh /etc/proxy/sh/uninstall.sh

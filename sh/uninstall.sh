@@ -193,6 +193,19 @@ un_check_processes() {
     done
 }
 
+# procd stop returns before the process has finished exiting.
+un_wait_processes() {
+    un_check_processes >/dev/null 2>&1 && return 0
+    un_log '等待目标进程退出（最多 10 秒）'
+    un_wait_count=0
+    while [ "$un_wait_count" -lt 10 ]; do
+        sleep 1 || return 1
+        un_wait_count=$((un_wait_count + 1))
+        un_check_processes >/dev/null 2>&1 && return 0
+    done
+    un_check_processes
+}
+
 # 只读取固定格式的恢复记录，不执行本机配置或备份内容。
 un_prepare_forward() {
     un_forward_state="$un_dir/sh/.install-state/forward"
@@ -324,7 +337,7 @@ un_execute() {
             service "$un_svc" stop || { un_fail "停止 $un_svc 失败，保留文件和数据"; return 1; }
         fi
     done < "$un_tmp/services"
-    un_check_processes || return 1
+    un_wait_processes || return 1
     un_cleanup_route || return 1
     if [ "$un_os" = openwrt ]; then
         while IFS= read -r un_svc; do

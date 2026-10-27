@@ -434,6 +434,7 @@ exec {rm} "$@"
         self.assertNotIn("卸载完成", result.stdout)
 
     def test_running_or_deleted_binary_blocks_removal(self):
+        self.command('sleep', 'echo wait >> "$TEST_ROOT/waits"\n')
         link = self.proc / "123/exe"
         link.parent.mkdir(parents=True)
         for suffix in ("", " (deleted)"):
@@ -443,6 +444,23 @@ exec {rm} "$@"
             self.assertTrue((self.etc / "systemd/system/agh.service").exists())
             self.assertTrue((self.target / "sh/env.local.conf").exists())
             link.unlink()
+        self.assertEqual(len((self.root / 'waits').read_text().splitlines()), 20)
+
+    def test_openwrt_async_stop_waits_before_removing_files(self):
+        self.platform('openwrt')
+        link = self.proc / '123/exe'
+        link.parent.mkdir(parents=True)
+        link.symlink_to(self.target / 'core/mihomo')
+        self.command('sleep', '''
+test -f "$TEST_ROOT/etc/init.d/proxy_core" || exit 1
+test -f "$TEST_ROOT/installed/sh/env.local.conf" || exit 1
+rm "$TEST_ROOT/proc/123/exe"
+''')
+        result = self.run_uninstall('--purge')
+        self.assert_ok(result)
+        self.assertIn('等待目标进程退出', result.stdout)
+        self.assertFalse((self.etc / 'init.d/proxy_core').exists())
+        self.assertFalse((self.target / 'sh').exists())
 
     def test_purge_refuses_unsafe_targets_missing_marker_symlinks_and_mounts(self):
         for directory in ("/", "/etc", "/usr/local", "/tmp", str(self.target / "../installed")):
