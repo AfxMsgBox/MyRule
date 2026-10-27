@@ -46,7 +46,7 @@ prompt_to() {
 }
 
 # === options ===
-# 用户接口只在此处定义；值赋给固定变量，不 eval 用户文本。
+# 业务参数解析；独立入口同步校验选项结构。值赋给固定变量，不 eval 用户文本。
 inst_usage() {
     cat <<'USAGE'
 MyRule 安装器
@@ -74,7 +74,7 @@ MyRule 安装器
       --interactive                  带参数继续交互收集其余选项
       --fill-from [PATH]             交互读取并保存默认值；默认脚本同目录 myrule.inst.cfg
       --log-file PATH                下载命令日志；默认脚本同目录 myrule.inst.log
-      --help                         显示帮助
+      --help / -h / help             显示帮助（无需联网）
 支持 --选项=值。SSH 的用户名、密码和密钥认证独立于安装参数。
 USAGE
 }
@@ -95,7 +95,7 @@ inst_parse_args() {
         case "$_inst_seen" in *" $_ipa_key "*) say_err "重复参数：$_ipa_key"; return 1 ;; esac
         _inst_seen="$_inst_seen$_ipa_key "
         case "$1" in
-            --help) _inst_help=1; shift; continue ;;
+            --help|-h|help) _inst_help=1; shift; continue ;;
             --interactive) INSTALL_MODE=interactive; shift; continue ;;
             --fill-from|--fill-from=*)
                 INSTALL_MODE=interactive
@@ -103,7 +103,7 @@ inst_parse_args() {
                 case "$1" in
                     *=*) INST_FILL_FILE=${1#*=}; shift ;;
                     *) shift; if [ "$#" -gt 0 ]; then
-                        case "$1" in --*) ;; *) INST_FILL_FILE=$1; shift ;; esac
+                        case "$1" in -*) ;; *) INST_FILL_FILE=$1; shift ;; esac
                     fi ;;
                 esac
                 [ -n "$INST_FILL_FILE" ] || { say_err '配置文件路径不能为空'; return 1; }
@@ -122,12 +122,12 @@ inst_parse_args() {
             --ssh-auth) _ipa_var=INST_SSH_AUTH ;; --scripts-days) _ipa_var=cron_script_days ;;
             --configs-days) _ipa_var=cron_config_days ;;
             --log-file) _ipa_var=INST_LOG_FILE ;;
-            *) say_err '未知参数；请使用 --help 查看命名参数'; return 1 ;;
+            *) say_err "未知参数：$_ipa_key；请使用 --help 查看用法（交互配置参数为 --fill-from）"; return 1 ;;
         esac
         case "$1" in
             *=*) _ipa_value=${1#*=}; shift ;;
             *) [ "$#" -ge 2 ] || { say_err "参数缺少值：$_ipa_key"; return 1; }
-               case "$2" in --*) say_err "参数缺少值：$_ipa_key"; return 1 ;; esac
+               case "$2" in --*|-h) say_err "参数缺少值：$_ipa_key"; return 1 ;; esac
                _ipa_value=$2; shift 2 ;;
         esac
         case "$_ipa_key" in --source-dir|--target|--ssh-key|--log-file)
@@ -1066,11 +1066,17 @@ inst_set_download_context() {
 
 inst_main() {
     inst_colors
+    _inst_log_active=0
     # 内部 apply 仅由已校验传输包的前置入口或本机流程调用。
-    if [ "${1:-}" = --apply ] && [ "$#" = 2 ]; then inst_apply "$2"; return $?; fi
+    if [ "${1:-}" = --apply ] && [ "$#" = 2 ]; then _inst_log_active=1; inst_apply "$2"; return $?; fi
     inst_parse_args "$@" || return 1
     [ "$_inst_help" != 1 ] || { inst_usage; return 0; }
-    mp_init_log "$INST_LOG_FILE" || return 1
+    _inst_log_mode=reset
+    if [ -n "${_INST_BOOT_LOG:-}" ] && [ "$_INST_BOOT_LOG" = "$(mp_private_path "$INST_LOG_FILE")" ]; then
+        _inst_log_mode=append
+    fi
+    mp_init_log "$INST_LOG_FILE" "$_inst_log_mode" || return 1
+    _inst_log_active=1
     say_dim "下载命令日志：$MP_LOG_FILE"
     mp_log_event "安装入口：${INST_ENTRY_DIR:-$INST_LIB}；系统：$(uname -srm)"
     if [ "$INSTALL_MODE" = interactive ]; then
@@ -1120,6 +1126,6 @@ if [ "${1:-}" = --installer-run ]; then
     . "$INST_LIB/portable.sh" || exit 1
     . "$INST_LIB/install-remote.sh" || exit 1
     _inst_exit=0; inst_main "$@" || _inst_exit=$?
-    mp_log_event "安装器结束，退出码：$_inst_exit"
+    [ "$_inst_log_active" != 1 ] || mp_log_event "安装器结束，退出码：$_inst_exit"
     exit "$_inst_exit"
 fi

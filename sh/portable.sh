@@ -68,6 +68,8 @@ mp_init_log() {
     (umask 077; : >> "$MP_LOG_FILE") \
         || { printf '%s\n' '无法写入下载命令日志' >&2; return 1; }
     if command -v chmod >/dev/null 2>&1; then chmod 600 "$MP_LOG_FILE" || return 1; fi
+    # 仅安装入口请求 reset；下载、服务及 apply 初始化继续追加本次记录。
+    if [ "${2:-}" = reset ]; then : > "$MP_LOG_FILE" || return 1; fi
     export MP_LOG_FILE
 }
 

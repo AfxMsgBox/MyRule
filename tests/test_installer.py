@@ -286,8 +286,16 @@ sys.exit(subprocess.run(["sh", "-c", command], env=os.environ | {"REMOTE_CPU": "
             ssh.chmod(0o755)
             args += ["--target", "installer@example.invalid", "--download-proxy", "http://proxy.invalid:1080"]
             args[args.index("--proxy") + 1] = "http://target-proxy.invalid:1080"
+        self.file('myrule.inst.log', 'previous-install-marker\n')
         result = subprocess.run(args, cwd=self.root, env=self.env, text=True, capture_output=True, timeout=10)
         self.assert_ok(result)
+        log = (self.root/'myrule.inst.log').read_text()
+        self.assertNotIn('previous-install-marker', log)
+        self.assertIn('安装入口', log)
+        self.assertIn('Mihomo 是否能在目标机运行', log)
+        if online:
+            self.assertIn('独立安装入口', log)
+            self.assertIn('安装器仓库归档', log)
         self.assertTrue((target / "core/mihomo").exists())
         self.assertTrue((target / "core/ui/index.html").exists())
         self.assertTrue((target / "agh/AdGuardHome").exists())

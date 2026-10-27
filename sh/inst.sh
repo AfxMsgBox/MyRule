@@ -12,43 +12,57 @@ INST_ENTRY_ROOT=
 [ ! -f "$_inst_dir/../core/config.yaml" ] || INST_ENTRY_ROOT=$(CDPATH= cd "$_inst_dir/.." && pwd -P)
 INST_ENTRY_DIR=$_inst_dir
 export INST_ENTRY_ROOT INST_ENTRY_DIR
+unset _INST_BOOT_LOG
 if [ -f "$_inst_dir/install-lib.sh" ]; then exec sh "$_inst_dir/install-lib.sh" --installer-run "$@"; fi
 
-# 自举之前只读取下载所需选项，其余参数交由统一解析器严格校验。
+# 自举前校验全部选项及取值结构；业务值仍由模块校验。
 _inst_branch=main; _inst_proxy=; _inst_download_proxy=; _inst_download_set=0
 _inst_log_file=${MP_LOG_FILE:-$_inst_dir/myrule.inst.log}; INST_FILL_FILE=
 _inst_source=; _inst_target=; _inst_install_dir=/etc/proxy; _inst_interactive=0; _inst_next=
 [ "$#" -ne 0 ] || _inst_interactive=1
+_inst_seen=' '
 for _inst_arg do
     if [ -n "$_inst_next" ]; then
         if [ "$_inst_next" = fill_optional ]; then
             _inst_next=
-            case "$_inst_arg" in --*) ;; *) INST_FILL_FILE=$_inst_arg; continue ;; esac
+            case "$_inst_arg" in -*) ;; *) INST_FILL_FILE=$_inst_arg; continue ;; esac
         else
+            case "$_inst_arg" in --*|-h) printf '参数缺少值：%s\n' "$_inst_key" >&2; exit 1 ;; esac
             eval "$_inst_next=\$_inst_arg"; _inst_next=; continue
         fi
     fi
     _inst_key=${_inst_arg%%=*}
+    case "$_inst_seen" in *" $_inst_key "*) printf '重复参数：%s\n' "$_inst_key" >&2; exit 1 ;; esac
+    _inst_seen="$_inst_seen$_inst_key "
     case "$_inst_key" in
         --branch) _inst_var=_inst_branch ;; --proxy) _inst_var=_inst_proxy ;;
         --download-proxy) _inst_var=_inst_download_proxy; _inst_download_set=1 ;;
         --source-dir) _inst_var=_inst_source ;; --target) _inst_var=_inst_target ;;
         --install-dir) _inst_var=_inst_install_dir ;;
         --log-file) _inst_var=_inst_log_file ;;
+        --subscribe-url|--agh-user|--agh-password|--ssh-port|--ssh-key|--ssh-auth|--scripts-days|--configs-days|--dns)
+            _inst_var=_inst_unused ;;
         --fill-from)
             _inst_interactive=1; INST_FILL_FILE=$_inst_dir/myrule.inst.cfg
             case "$_inst_arg" in *=*) _inst_var=INST_FILL_FILE ;; *) _inst_next=fill_optional; continue ;; esac ;;
-        --interactive) _inst_interactive=1; continue ;;
-        --help) printf '%s\n' 'MyRule：无参数交互；命令行必填 --subscribe-url URL，认证选择 --agh-password BCRYPT 或 --no-auth' \
+        --interactive|--no-start|--no-auth)
+            [ "$_inst_arg" = "$_inst_key" ] || { printf '参数不接受值：%s\n' "$_inst_key" >&2; exit 1; }
+            [ "$_inst_key" != --interactive ] || _inst_interactive=1
+            continue ;;
+        --help|-h|help)
+            [ "$_inst_arg" = "$_inst_key" ] || { printf '参数不接受值：%s\n' "$_inst_key" >&2; exit 1; }
+            printf '%s\n' 'MyRule：无参数交互；命令行必填 --subscribe-url URL，认证选择 --agh-password BCRYPT 或 --no-auth' \
             '可选 --agh-user USER（默认 admin）' \
             '可选 --target USER@HOST --ssh-port PORT --ssh-key FILE --ssh-auth auto|password|key' \
             '--branch NAME --local --source-dir DIR --install-dir DIR --dns DNS --proxy URL --download-proxy URL' \
-            '--scripts-days N --configs-days N --no-start --interactive --fill-from [PATH] --log-file PATH'; exit 0 ;;
+            '--scripts-days N --configs-days N --no-start --interactive --fill-from [PATH] --log-file PATH' \
+            '--help / -h / help：显示帮助（无需联网）'; exit 0 ;;
         --local) echo '单文件安装器无法推断本地仓库，请从仓库内运行或指定 --source-dir' >&2; exit 1 ;;
-        *) continue ;;
+        *) printf '未知参数：%s；请使用 --help 查看用法（交互配置参数为 --fill-from）\n' "$_inst_key" >&2; exit 1 ;;
     esac
     case "$_inst_arg" in *=*) _inst_val=${_inst_arg#*=}; eval "$_inst_var=\$_inst_val" ;; *) _inst_next=$_inst_var ;; esac
 done
+case "$_inst_next" in ''|fill_optional) ;; *) printf '参数缺少值：%s\n' "$_inst_key" >&2; exit 1 ;; esac
 if [ -n "$_inst_source" ]; then
     [ -f "$_inst_source/sh/install-lib.sh" ] || { echo '本地仓库缺少 install-lib.sh' >&2; exit 1; }
     exec sh "$_inst_source/sh/install-lib.sh" --installer-run "$@"
@@ -71,6 +85,8 @@ mp_init_log() {
     (umask 077; : >> "$MP_LOG_FILE") \
         || { printf '%s\n' '无法写入下载命令日志' >&2; return 1; }
     if command -v chmod >/dev/null 2>&1; then chmod 600 "$MP_LOG_FILE" || return 1; fi
+    # 仅安装入口请求 reset；下载、服务及 apply 初始化继续追加本次记录。
+    if [ "${2:-}" = reset ]; then : > "$MP_LOG_FILE" || return 1; fi
     export MP_LOG_FILE
 }
 
@@ -273,7 +289,8 @@ mp_http_download() (
 )
 # END shared HTTP transport
 
-mp_init_log "$_inst_log_file" || exit 1
+mp_init_log "$_inst_log_file" reset || exit 1
+_INST_BOOT_LOG=$MP_LOG_FILE; export _INST_BOOT_LOG
 printf '安装日志：%s\n' "$MP_LOG_FILE"
 mp_log_event "独立安装入口：$INST_ENTRY_DIR；系统：$(uname -srm)"
 # 浏览器下载的单文件也能自举。完整依赖检查在模块中进行。

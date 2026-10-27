@@ -1,6 +1,7 @@
 """Persistent wizard defaults, private logs and macOS path aliases."""
 import json
 import shlex
+import subprocess
 import unittest
 
 import test_installer
@@ -15,6 +16,77 @@ class PreferencesTests(unittest.TestCase):
     assert_ok = test_scripts.ShellTests.assert_ok
     installer = test_installer.InstallerTests.installer
     local_source = test_installer.InstallerTests.local_source
+
+    def test_entry_rejects_bad_options_before_network_or_package_changes(self):
+        standalone = self.file('standalone/inst.sh', test_installer.SOURCE)
+        self.command('curl', 'touch "$TEST_ROOT/network-used"; exit 99\n')
+        cases = [(['--fill-file'], '未知参数'), (['--from-file'], '未知参数'),
+                 (['--unknown=private-token'], '未知参数'),
+                 (['--branch'], '参数缺少值'),
+                 (['--subscribe-url', '--no-auth'], '参数缺少值'),
+                 (['--ssh-key', '-h'], '参数缺少值'),
+                 (['--branch=a', '--branch=b'], '重复参数'),
+                 (['--no-auth=yes'], '参数')]
+        for entry in (standalone, self.root/'sh/inst.sh'):
+            for shell in ('sh', 'bash'):
+                for args, message in cases:
+                    with self.subTest(entry=entry, shell=shell, args=args):
+                        result = subprocess.run([shell, str(entry), *args], env=self.env,
+                                                capture_output=True, text=True, timeout=5)
+                        self.assertNotEqual(result.returncode, 0)
+                        self.assertIn(message, result.stdout+result.stderr)
+                        self.assertNotIn('private-token', result.stdout+result.stderr)
+                        self.assertFalse((self.root/'network-used').exists())
+
+    def test_help_aliases_work_offline_without_touching_log(self):
+        standalone = self.file('standalone/inst.sh', test_installer.SOURCE)
+        log = self.file('myrule.inst.log', 'previous log')
+        self.command('curl', 'touch "$TEST_ROOT/network-used"; exit 99\n')
+        for entry in (standalone, self.root/'sh/inst.sh'):
+            for flag in ('--help', '-h', 'help'):
+                result = subprocess.run(['sh', str(entry), flag], env=self.env,
+                                        capture_output=True, text=True, timeout=5)
+                self.assert_ok(result)
+                for option in ('--fill-from', '--branch', '--log-file', '--target'):
+                    self.assertIn(option, result.stdout)
+                self.assertFalse((self.root/'network-used').exists())
+                self.assertEqual(log.read_text(), 'previous log')
+
+    def test_entry_resets_default_and_custom_logs_each_run(self):
+        standalone = self.file('standalone/inst.sh', test_installer.SOURCE)
+        self.command('curl', 'exit 22\n')
+        for entry in (standalone, self.root/'sh/inst.sh'):
+            for custom in (False, True):
+                log = entry.parent/'myrule.inst.log' if not custom else self.root/'custom.log'
+                env = {key: value for key, value in self.env.items() if key != 'MP_LOG_FILE'}
+                for iteration in range(2):
+                    log.write_text('previous-run-marker\n')
+                    args = ['--branch=main'] + (['--log-file', str(log)] if custom else [])
+                    result = subprocess.run(['sh', str(entry), *args], env=env,
+                                            capture_output=True, text=True, timeout=5)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertNotIn('previous-run-marker', log.read_text())
+                    self.assertIn('安装入口', log.read_text())
+                    self.assertEqual(log.stat().st_mode & 0o777, 0o600)
+
+    def test_log_reset_keeps_subsequent_child_records_and_rejects_unsafe_path(self):
+        self.file('custom.log', 'old-run')
+        result = self.run_shell('''
+mp_init_log "$TEST_ROOT/custom.log" reset || exit 1
+mp_log_event entry
+sh -c '. "$MP_INST_DIR/sh/common.sh"; mp_init_log "$MP_LOG_FILE"; mp_log_event child'
+mp_log_event done
+''')
+        self.assert_ok(result)
+        content = (self.root/'custom.log').read_text()
+        self.assertNotIn('old-run', content)
+        for marker in ('entry', 'child', 'done'):
+            self.assertIn(marker, content)
+        self.file('target', 'untouched')
+        (self.root/'link.log').symlink_to(self.root/'target')
+        result = self.run_shell('mp_init_log "$TEST_ROOT/link.log" reset')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual((self.root/'target').read_text(), 'untouched')
 
     def test_fill_flag_optional_path_and_log_option(self):
         entry = self.root / 'entry'
