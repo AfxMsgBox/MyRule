@@ -289,8 +289,9 @@ inst_dependency_package() {
 
 inst_apt() {
     if [ -n "$_iip_sudo" ]; then
-        sudo env DEBIAN_FRONTEND=noninteractive apt-get "$@"
+        mp_run_download_command sudo env DEBIAN_FRONTEND=noninteractive apt-get "$@"
     else
+        mp_log_command env DEBIAN_FRONTEND=noninteractive apt-get "$@"
         DEBIAN_FRONTEND=noninteractive apt-get "$@"
     fi
 }
@@ -310,11 +311,11 @@ inst_install_packages() {
                 inst_apt install -y --no-install-recommends "$@" </dev/null || _iip_rc=$? ;;
         opkg)
             _iip_manual="opkg update && opkg install $*"
-            $_iip_sudo opkg update </dev/null && $_iip_sudo opkg install "$@" </dev/null || _iip_rc=$? ;;
+            mp_run_download_command $_iip_sudo opkg update </dev/null && mp_run_download_command $_iip_sudo opkg install "$@" </dev/null || _iip_rc=$? ;;
         apk)
             _iip_manual="apk update && apk add $*"
-            $_iip_sudo apk update </dev/null && $_iip_sudo apk add "$@" </dev/null || _iip_rc=$? ;;
-        brew) _iip_manual="brew install $*"; brew install "$@" || _iip_rc=$? ;;
+            mp_run_download_command $_iip_sudo apk update </dev/null && mp_run_download_command $_iip_sudo apk add "$@" </dev/null || _iip_rc=$? ;;
+        brew) _iip_manual="brew install $*"; mp_run_download_command brew install "$@" || _iip_rc=$? ;;
         *) say_err '没有可用的软件包管理器' ; return 1 ;;
     esac
     if [ "$_iip_rc" -ne 0 ]; then

@@ -49,31 +49,54 @@ if [ "$_inst_interactive" = 1 ]; then
     _inst_download_set=1
 fi
 [ "$_inst_download_set" = 1 ] || { [ -n "$_inst_target" ] || _inst_download_proxy=$_inst_proxy; }
-# 浏览器下载的单文件也能自举。完整依赖检查在模块中进行。
-_inst_packages=
-for _inst_tool in curl jq tar; do command -v "$_inst_tool" >/dev/null 2>&1 || _inst_packages="$_inst_packages $_inst_tool"; done
-if [ ! -s /etc/ssl/cert.pem ] && [ ! -s /etc/ssl/certs/ca-certificates.crt ]; then _inst_packages="$_inst_packages ca-certificates"; fi
-if [ -n "$_inst_packages" ]; then
-    printf '缺少依赖，准备安装：%s\n' "$_inst_packages"
-    _inst_sudo=; [ "$(id -u)" = 0 ] || _inst_sudo=sudo
-    if [ "$(uname -s)" = Darwin ] && command -v brew >/dev/null 2>&1; then brew install $_inst_packages || exit 1
-    elif command -v apk >/dev/null 2>&1; then $_inst_sudo apk update && $_inst_sudo apk add $_inst_packages || exit 1
-    elif command -v opkg >/dev/null 2>&1; then
-        _inst_packages=$(printf '%s' "$_inst_packages" | sed 's/ca-certificates/ca-bundle/g')
-        $_inst_sudo opkg update && $_inst_sudo opkg install $_inst_packages || exit 1
-    elif command -v apt-get >/dev/null 2>&1; then $_inst_sudo apt-get update && $_inst_sudo apt-get install -y $_inst_packages || exit 1
-    else echo '请手动安装上述工具；macOS 可使用 Homebrew' >&2; exit 1; fi
-fi
-_inst_boot=$(mktemp -d /tmp/myrule-bootstrap.XXXXXXXX) || exit 1
-chmod 700 "$_inst_boot" || exit 1
-trap 'rm -rf -- "$_inst_boot"' EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
-[ -z "$_inst_target" ] || _inst_install_dir=/etc/proxy
-_inst_port=$(awk '$1=="mixed-port:" {gsub(/[\047\042]/,"",$2); print $2; exit}' "$_inst_install_dir/core/config.yaml" 2>/dev/null)
-_inst_core=
-case "$_inst_port" in ''|*[!0-9]*) ;; *) _inst_core="socks5h://127.0.0.1:$_inst_port" ;; esac
 # BEGIN shared HTTP transport (also embedded in standalone inst.sh)
+# Keep public project download paths; private resource paths/queries may contain tokens.
+mp_log_url() (
+    _lu_url=$1; _lu_scheme=${1%%://*}; _lu_tail=${1#*://}
+    _lu_host=${_lu_tail%%[/?#]*}
+    case "$_lu_host" in *@*) _lu_host="<redacted>@${_lu_host##*@}" ;; esac
+    _lu_base=${_lu_url%%\?*}; _lu_base=${_lu_base%%\#*}
+    if [ "${2:-}" = proxy ]; then
+        _lu_safe="$_lu_scheme://$_lu_host"
+    else
+        case "$_lu_base" in
+            https://github.com/AfxMsgBox/MyRule/*|https://codeload.github.com/AfxMsgBox/MyRule/*|https://api.github.com/repos/AfxMsgBox/MyRule/*|https://raw.githubusercontent.com/AfxMsgBox/MyRule/*|\
+            https://github.com/MetaCubeX/mihomo/*|https://api.github.com/repos/MetaCubeX/mihomo/*|https://github.com/MetaCubeX/metacubexd/*|https://github.com/AdguardTeam/AdGuardHome/*|\
+            https://adguardteam.github.io/HostlistsRegistry/assets/*|https://raw.githubusercontent.com/Loyalsoldier/clash-rules/*)
+                _lu_safe=$_lu_base ;;
+            *) _lu_safe="$_lu_scheme://$_lu_host/<redacted>" ;;
+        esac
+    fi
+    case "$_lu_url" in *\?*) _lu_safe="$_lu_safe?<redacted>" ;; esac
+    case "$_lu_url" in *\#*) _lu_safe="$_lu_safe#<redacted>" ;; esac
+    printf '%s' "$_lu_safe"
+)
+
+# Shell-quote arguments without eval or external tools (also used before dependency setup).
+mp_log_command() (
+    printf '  [命令，敏感值已脱敏]'
+    _lc_kind=
+    for _lc_arg do
+        _lc_next=
+        case "$_lc_arg" in --proxy) _lc_next=proxy ;; esac
+        case "$_lc_arg" in
+            http://*|https://*|socks5://*|socks5h://*) _lc_arg=$(mp_log_url "$_lc_arg" "$_lc_kind") ;;
+            'Authorization:'*) _lc_arg='Authorization: <redacted>' ;;
+        esac
+        printf " '"
+        while :; do
+            case "$_lc_arg" in
+                *\'*) printf '%s' "${_lc_arg%%\'*}" "'\\''"; _lc_arg=${_lc_arg#*\'} ;;
+                *) printf "%s'" "$_lc_arg"; break ;;
+            esac
+        done
+        _lc_kind=$_lc_next
+    done
+    printf '\n'
+) >&2
+
+mp_run_download_command() { mp_log_command "$@"; "$@"; }
+
 # Render only byte counts and response size, never raw curl output or headers.
 mp_download_progress() {
     awk -v bytes="$1" -v seconds="$2" -v done="$3" '
@@ -93,7 +116,7 @@ mp_download_progress() {
     ' "$4" >&2
 }
 
-# URL/output/Core/fallback/label/timeout/min-size. Never print URLs or raw curl errors.
+# URL/output/Core/fallback/label/timeout/min-size. Only log sanitized commands.
 mp_http_download() (
     _hd_url=$1; _hd_dst=$2; _hd_core=$3; _hd_proxy=$4
     _hd_label=${5:-文件}; _hd_timeout=${6:-300}; _hd_min=${7:-0}
@@ -117,11 +140,12 @@ mp_http_download() (
             _hd_noproxy=; [ -n "$_hd_channel" ] || _hd_noproxy='*'
             set -- --disable --fail -L --connect-timeout 10 --max-time "$_hd_timeout" \
                 --speed-limit 1 --speed-time 30 --proxy "$_hd_channel" --noproxy "$_hd_noproxy" \
-                --write-out '%{http_code}' --dump-header "$_hd_meta/headers" "$_hd_url" -o "$_hd_dst"
+                --write-out '%{http_code}' --dump-header "$_hd_meta/headers" "$_hd_url" -o "$_hd_dst" --silent
             : > "$_hd_dst" || exit 1
             : > "$_hd_meta/headers"
             _hd_start=$(date +%s); _hd_last=-5; _hd_previous=0
-            curl "$@" --silent > "$_hd_meta/http" 2>/dev/null &
+            mp_log_command curl "$@"
+            curl "$@" > "$_hd_meta/http" 2>/dev/null &
             _hd_pid=$!
             while kill -0 "$_hd_pid" 2>/dev/null; do
                 _hd_bytes=$(wc -c < "$_hd_dst"); _hd_elapsed=$(($(date +%s) - _hd_start))
@@ -171,6 +195,31 @@ mp_http_download() (
     done
 )
 # END shared HTTP transport
+
+# 浏览器下载的单文件也能自举。完整依赖检查在模块中进行。
+_inst_packages=
+for _inst_tool in curl jq tar; do command -v "$_inst_tool" >/dev/null 2>&1 || _inst_packages="$_inst_packages $_inst_tool"; done
+if [ ! -s /etc/ssl/cert.pem ] && [ ! -s /etc/ssl/certs/ca-certificates.crt ]; then _inst_packages="$_inst_packages ca-certificates"; fi
+if [ -n "$_inst_packages" ]; then
+    printf '缺少依赖，准备安装：%s\n' "$_inst_packages"
+    _inst_sudo=; [ "$(id -u)" = 0 ] || _inst_sudo=sudo
+    if [ "$(uname -s)" = Darwin ] && command -v brew >/dev/null 2>&1; then mp_run_download_command brew install $_inst_packages || exit 1
+    elif command -v apk >/dev/null 2>&1; then mp_run_download_command $_inst_sudo apk update && mp_run_download_command $_inst_sudo apk add $_inst_packages || exit 1
+    elif command -v opkg >/dev/null 2>&1; then
+        _inst_packages=$(printf '%s' "$_inst_packages" | sed 's/ca-certificates/ca-bundle/g')
+        mp_run_download_command $_inst_sudo opkg update && mp_run_download_command $_inst_sudo opkg install $_inst_packages || exit 1
+    elif command -v apt-get >/dev/null 2>&1; then mp_run_download_command $_inst_sudo apt-get update && mp_run_download_command $_inst_sudo apt-get install -y $_inst_packages || exit 1
+    else echo '请手动安装上述工具；macOS 可使用 Homebrew' >&2; exit 1; fi
+fi
+_inst_boot=$(mktemp -d /tmp/myrule-bootstrap.XXXXXXXX) || exit 1
+chmod 700 "$_inst_boot" || exit 1
+trap 'rm -rf -- "$_inst_boot"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+[ -z "$_inst_target" ] || _inst_install_dir=/etc/proxy
+_inst_port=$(awk '$1=="mixed-port:" {gsub(/[\047\042]/,"",$2); print $2; exit}' "$_inst_install_dir/core/config.yaml" 2>/dev/null)
+_inst_core=
+case "$_inst_port" in ''|*[!0-9]*) ;; *) _inst_core="socks5h://127.0.0.1:$_inst_port" ;; esac
 
 _inst_download() {
     mp_http_download "$1" "$2" "$_inst_core" "$_inst_download_proxy" "${3:-安装器资源}" "${4:-300}"

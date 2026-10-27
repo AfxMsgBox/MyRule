@@ -10,19 +10,17 @@ core_secret=$(mp_core_value "" secret "$config_yaml" 2>/dev/null || :)
 
 # put_provider <kind> <name>：HTTP 204/200 视为成功
 put_provider() {
-    if [ -n "$core_secret" ]; then
-        code=$(curl --silent --show-error --max-time 30 -o /dev/null -w '%{http_code}' \
-                    --noproxy '*' \
-                    -H "Authorization: Bearer $core_secret" \
-                    -X PUT "$core_api/providers/$1/$2" 2>&1)
-    else
-        code=$(curl --silent --show-error --max-time 30 -o /dev/null -w '%{http_code}' \
-                    --noproxy '*' \
-                    -X PUT "$core_api/providers/$1/$2" 2>&1)
-    fi
-    case "$code" in
-        200|204) echo_log "刷新 $1/$2 OK" ;;
-        *)       echo_log "刷新 $1/$2 失败（HTTP $code）"; return 1 ;;
+    _pp_provider="$1/$2"
+    echo_log "开始刷新 $_pp_provider（由 Core 下载，等待 API 结果）"
+    set -- --disable --silent --max-time 30 -o /dev/null -w '%{http_code}' --proxy '' --noproxy '*'
+    [ -z "$core_secret" ] || set -- "$@" -H "Authorization: Bearer $core_secret"
+    set -- "$@" -X PUT "$core_api/providers/$_pp_provider"
+    mp_log_command curl "$@"
+    _pp_rc=0; code=$(curl "$@" 2>/dev/null) || _pp_rc=$?
+    case "$code" in [0-9][0-9][0-9]) ;; *) code=000 ;; esac
+    case "$_pp_rc:$code" in
+        0:200|0:204) echo_log "刷新 $_pp_provider OK" ;;
+        *) echo_log "刷新 $_pp_provider 失败（curl $_pp_rc，HTTP $code）"; return 1 ;;
     esac
 }
 

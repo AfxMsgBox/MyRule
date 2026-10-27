@@ -133,7 +133,8 @@ sys.exit(code)
         self.assert_ok(result)
         self.assertIn('已下载 14 字节', result.stderr)
         self.assertIn('下载完成', result.stderr)
-        self.assertNotIn('%', result.stderr)
+        progress = '\n'.join(line for line in result.stderr.splitlines() if 'MiB/s' in line)
+        self.assertNotIn('%', progress)
         self.assertNotIn('private-secret', result.stderr)
 
     def test_standalone_transport_matches_shared_transport(self):
