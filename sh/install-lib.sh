@@ -415,13 +415,11 @@ inst_validate_source() {
     [ -n "${_MP_SOURCE_DIR:-}" ] || return 0
     _MP_SOURCE_DIR=$(CDPATH= cd -- "$_MP_SOURCE_DIR" 2>/dev/null && pwd -P) \
         || { say_err '无法读取本地仓库目录'; return 1; }
-    for _ivs_rel in sh/inst.sh sh/portable.sh sh/install-lib.sh sh/install-remote.sh sh/uninstall.sh sh/env.conf sh/common.sh sh/update-scripts.sh \
+    for _ivs_rel in sh/inst.sh sh/portable.sh sh/install-lib.sh sh/install-remote.sh sh/uninstall.sh sh/migrate-legacy.sh sh/env.conf sh/common.sh sh/update-scripts.sh \
         sh/update-core-config.sh sh/update-agh-config.sh sh/update-bin.sh \
         sh/update-all-configs.sh sh/update-all-configs-restart-services.sh \
-        sh/update-proxy-rule.sh sh/keeplive.sh sh/setup-fake-ip-route.sh sh/run-scheduled-update.sh \
-        sh/etc/init.d/agh sh/etc/init.d/proxy_core \
-        sh/etc/systemd/system/agh.service sh/etc/systemd/system/proxy_core.service sh/etc/systemd/system/proxy_route.service \
-        core/config.yaml agh/agh.yaml agh/myupstream.txt domain/gpt.txt domain/myproxylist.txt; do
+        sh/update-proxy-rule.sh sh/keeplive.sh sh/run-scheduled-update.sh \
+        core/start.sh core/config.yaml agh/agh.yaml agh/myupstream.txt domain/gpt.txt domain/myproxylist.txt; do
         [ -f "$_MP_SOURCE_DIR/$_ivs_rel" ] && [ -r "$_MP_SOURCE_DIR/$_ivs_rel" ] \
             || { say_err "本地仓库缺少可读文件：$_ivs_rel"; return 1; }
     done
@@ -737,7 +735,7 @@ inst_snapshot() (
         || { say_err '无法解析仓库源目录'; exit 1; }
     mkdir -p "$_is_dst" || exit 1
     (cd "$_is_src" && find sh domain -type f -print) > "$_inst_tmp/source-files" || exit 1
-    printf '%s\n' core/config.yaml agh/agh.yaml agh/myupstream.txt >> "$_inst_tmp/source-files"
+    printf '%s\n' core/start.sh core/config.yaml agh/agh.yaml agh/myupstream.txt >> "$_inst_tmp/source-files"
     while IFS= read -r _is_rel; do
         case "$_is_rel" in sh/env.local.conf|sh/test-proxy.conf|sh/.install-state/*|sh/.schedule/*|*/myrule.inst.cfg|*/myrule.inst.log) continue ;; esac
         case "$_is_rel" in *[!a-zA-Z0-9_./-]*|*/../*|*/./*|*//*|/*) echo '仓库路径不受支持' >&2; exit 1 ;; esac
@@ -956,10 +954,8 @@ inst_apply() (
     say_step "同步仓库 sh/ 整树"
     mp_fetch_repo_sh "$DIR_SH" || { say_err "同步仓库脚本失败"; exit 1; }
 
-    # === sh/etc 路径占位替换（是否 cp 到 /etc 由后面 autostart 决定） ===
-    etc_rels=$(mp_etc_rels)
-    say_step "sh/etc 路径替换 /etc/proxy → $DIR_INST"
-    mp_sync_etc_files never || { say_err "处理 sh/etc 失败"; exit 1; }
+    say_step "同步 Core 启动器"
+    mp_sync_core_start || { say_err '同步 Core 启动器失败'; exit 1; }
 
     # === 三份配置先暂存，重装下载期间保留原正式配置和本机代理 ===
     core_pending="$MP_CORE_DIR/config.yaml.pending"
@@ -1005,29 +1001,12 @@ inst_apply() (
             else
                 mp_commit_pending_configs "$core_pending" "$dns_pending" \
                     || { say_err "首次安装配置写入失败"; exit 1; }
-                say_dim "服务文件保留在 $DIR_SH/etc/；手动启用："
-                case "$os_type" in
-                    openwrt)
-                        for rel in $etc_rels; do
-                            say_dim "  cp $DIR_SH/etc/$rel  /etc/$rel  && chmod +x /etc/$rel"
-                        done
-                        say_dim "  service proxy_core enable && service proxy_core start"
-                        say_dim "  # 确认 Core API 就绪后："
-                        say_dim "  service agh enable && service agh start"
-                        ;;
-                    systemd)
-                        for rel in $etc_rels; do
-                            say_dim "  cp $DIR_SH/etc/$rel  /etc/$rel"
-                        done
-                        say_dim "  systemctl daemon-reload"
-                        say_dim "  mkdir -p /etc/systemd/system/multi-user.target.wants"
-                        say_dim "  ln -sf /etc/systemd/system/proxy_core.service /etc/systemd/system/multi-user.target.wants/proxy_core.service"
-                        say_dim "  ln -sf /etc/systemd/system/agh.service /etc/systemd/system/multi-user.target.wants/agh.service"
-                        say_dim "  systemctl start proxy_core.service"
-                        say_dim "  # 确认 Core API 就绪后："
-                        say_dim "  systemctl start agh.service"
-                        ;;
-                esac
+                say_dim '稍后启用服务：'
+                say_dim "  export MP_INST_DIR='$DIR_INST'"
+                say_dim '  . "$MP_INST_DIR/sh/common.sh"'
+                say_dim '  mp_sync_etc_files always && mp_service_op enable_start proxy_core'
+                say_dim '  # 确认 Core 就绪后：mp_service_op enable_start agh'
+
             fi
             ;;
         *)

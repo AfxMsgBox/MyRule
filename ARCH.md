@@ -49,10 +49,10 @@ sh/test-proxy.py              独立节点诊断，复用 Mihomo，不修改生�
 sh/env.conf                   全局默认值、环境加载及派生路径
 sh/common.sh                  公共解析、下载、渲染、服务控制函数
 sh/update-*.sh                各类更新入口
-sh/setup-fake-ip-route.sh     fake-ip 路由修正
+core/start.sh                 Core 与 Netlink 监听统一启动、退出清理
 sh/keeplive.sh                Core 本机代理保活
 sh/run-scheduled-update.sh    按连续日间隔执行定时更新
-sh/etc/                       OpenWrt/systemd 服务文件模板
+sh/migrate-legacy.sh          旧服务/hotplug/脚本迁移清理的唯一入口
 ```
 
 安装后的根目录由 `MP_INST_DIR` 指定，固定包含：
@@ -144,7 +144,7 @@ AGH 运行时可能回写 `agh.yaml`，但仓库模板仍是权威来源。完�
 
 AGH 用户名默认 admin。选择设置密码时要求 bcrypt 哈希（`$2a$`、`$2b$`、`$2y$` 前缀）；安装器校验前缀，不校验完整哈希长度，不生成哈希或安装密码工具。向导明确询问是否设置；静默模式要求 `--agh-password` 与 `--no-auth` 二选一。临时 `INST_NO_AUTH` 标志随安装包参数 JSON 传递并校验，但不持久化；持久化的空 `MP_AGH_PASSWORD` 表示免登录。
 
-`sh/agh-password.py` 是用户单独使用的单文件工具，仅依赖 Python 3.6+ 标准库，不加载项目配置、不联网、不执行外部命令、不落盘。无参数通过 `getpass` 隐藏输入一次密码；无法关闭回显时拒绝降级。位置参数 `PASSWORD` 直接提供密码，`-- PASSWORD` 支持以连字符开头的密码，`-h/--help` 查看帮助。成功时标准输出只有一行 `$2b$10$` 哈希，不生成配置行或保存配置。密码保留空格，按 UTF-8 编码；拒绝空密码、NUL、超过 72 字节的输入，避免 bcrypt 静默截断。盐用 `os.urandom(16)`，命令行固定 cost=10，不因纯 Python 较慢而降低成本。内部函数可指定盐和成本，供兼容性测试使用。
+`sh/agh-password.py` 是用户单独使用的单文件工具，仅依赖 Python 3.6+ 标准库，不加载项目配置、不联网、不执行外部命令、不落盘。无参数通过 `getpass` 隐藏输入两次密码并检查一致；无法关闭回显时拒绝降级。位置参数 `PASSWORD` 直接提供密码，`-- PASSWORD` 支持以连字符开头的密码，`-h/--help` 查看帮助。成功时标准输出只有一行 `$2b$10$` 哈希，不生成配置行或保存配置。密码保留空格，按 UTF-8 编码；拒绝空密码、NUL、超过 72 字节的输入，避免 bcrypt 静默截断。盐用 `os.urandom(16)`，命令行固定 cost=10，不因纯 Python 较慢而降低成本。内部函数可指定盐和成本，供兼容性测试使用。
 
 算法来自 Passlib 1.7.4 的 `crypto/_blowfish/base.py` 和 `raw_bcrypt`，保留 BSD-3-Clause 与其 jBCrypt 来源的 ISC 许可证在脚本内。改动限于单文件整合、移除 Passlib 依赖、使用标准库字节重复与 base64 字母表转换、仅输出 2b 及输入校验。源码包来自 PyPI，SHA-256 `defd50f72b65c5402ab2c573830a6978e5f202ad0d984793c8dde2c4152ebe04`。测试使用固定 bcrypt 向量与独立实现生成的 UTF-8/边界向量；用户运行及回归测试均无需安装 Passlib/bcrypt。
 
@@ -212,6 +212,8 @@ HTTP 状态及响应头只保存在私有临时目录。进度只提取最后一
 prepare 将 sh/、domain/、core/config.yaml、agh/agh.yaml、agh/myupstream.txt 复制为快照；检查必需文件与路径边界。本机目标不能在源目录内；SSH 模式的源和目标属于不同机器，不作本地路径重叠判断。源根目录支持空格，仓库内文件名及目标安装路径限制为安全字符。
 
 快照复制 `inst_snapshot` 和资源读取 `mp_copy_repo_file` 都先用 `pwd -P` 解析源根目录，再与 `mp_realpath` 解析的文件路径做边界比较；这也适用于自举归档复用路径。不得将逻辑根目录与物理文件路径直接比较，否则 macOS `/tmp` → `/private/tmp` 等符号链接会被误判为越界。解析、越界和复制失败须指出相对文件名，资源读取日志记录逻辑根目录、物理根目录及解析后的文件路径。
+
+快照包含 `core/start.sh`，与 Core 配置模板分别同步。
 
 快照排除默认 `myrule.inst.cfg`、`myrule.inst.log`，并按真实路径排除当前使用的自定义配置及日志，避免将调试数据和订阅凭据打包上传。
 
@@ -366,10 +368,10 @@ OpenWrt 优先选择可用的 apk，否则 opkg；Debian/Ubuntu（含通过 `ID_
 入口：`update-scripts.sh`
 
 1. 通过 `mp_fetch_repo_sh` 下载仓库 tarball（本地来源标志只由安装器传给本次子进程）。
-2. 只覆盖 `$MP_INST_DIR/sh/`，不覆盖 `core/`、`agh/`、`domain/`。每个文件在目标目录中暂存，复制后设置权限，再以 mv 替换：`*.sh`、`etc/init.d/*`、`etc/hotplug.d/*` 为 0755，其余配置（包括 systemd unit）为 0644。权限设置失败保留该目标文件并中止同步，先前已完成的文件不回滚；安装也使用同一函数。私有 env.local.conf 及状态文件不参与同步，权限不变。
+2. 同步 `$MP_INST_DIR/sh/`；第二阶段额外下载并原子更新 `core/start.sh`（先 sh -n/chmod，再 mv），保留 Core 配置、二进制和运行数据，也不覆盖 `agh/`、`domain/`。每个文件在目标目录中暂存，复制后设置权限，再以 mv 替换：`*.sh`、`etc/init.d/*`、`etc/hotplug.d/*` 为 0755，其余配置（包括 systemd unit）为 0644。权限设置失败保留该目标文件并中止同步，先前已完成的文件不回滚；安装也使用同一函数。私有 env.local.conf 及状态文件不参与同步，权限不变。
 3. `exec` 新版自身，避免旧进程继续执行已被替换的脚本。
-4. 对已部署服务先检查并补装路由监听依赖，再替换路径和同步已有 `/etc` 服务文件；已有 Core unit 的升级额外补装 `proxy_route.service`。成功后通过独立的 `mp_migrate_legacy_routes()` 按归属清理旧 hotplug。此函数及同步函数中的调用是临时迁移入口，旧版本退出支持后可一起删除。
-5. `update-scripts.sh` 调用 `mp_restart_updated_services()`：比较 common/env/portable/路由监听脚本和已部署服务文件的 SHA-256 与上次成功生效记录。首次迁移无记录也执行。内容不变跳过；普通一次性更新脚本改变不触发重启。
+4. `mp_sync_etc_files` 先检查依赖，再调用 `mp_render_service` 动态生成服务文件；安装用 always，更新用 if-exists。同目录暂存、设置权限后 mv，相同内容不覆盖，systemd daemon-reload。never 不生成或清理任何系统文件。成功后调用 `sh/migrate-legacy.sh` 清理旧机制。
+5. `update-scripts.sh` 调用 `mp_restart_updated_services()`：比较 common/env/portable/core/start.sh和已部署服务文件的 SHA-256 与上次成功生效记录。首次迁移无记录也执行。内容不变跳过；普通一次性更新脚本改变不触发重启。
 6. 只重启原本运行的 Core/AGH，保留人工停止状态；Core 先重启并等待 API、TUN、完整 fake-IP 路由就绪，再重启原本运行的 AGH。失败返回非零，不写成功指纹。`.install-state/service-scripts.sha256.pending` 在操作前保存服务运行状态，失败重跑时恢复被 systemd 连带停止的 AGH；成功后原子写指纹并清理 pending。这些状态不随仓库复制、不入库。
 
 `env.local.conf` 不在仓库 tarball 中，不会被覆盖。
@@ -507,14 +509,14 @@ README 的接入示例限定为上述 IPv4 拓扑；跨网段、容器 NAT 或�
 
 ### 8.2 本机路由维护与防火墙
 
-`setup-fake-ip-route.sh` 从 Core 配置读取：
+`core/start.sh` 从 Core 配置读取：
 
 - `dns.fake-ip-range`：规范化为网络 CIDR。
 - `tun.device`：TUN 接口名。
 
 `/30` 是 Mihomo `parseTun` 显式设置的接口前缀，不是 fake-IP 池，也不是需要删除的错误路由。v1.19.33 与本次检查的 Meta 分支均使用 `netip.PrefixFrom(tunAddressPrefix.Addr(), 30)`；`sing-tun` 的 system/mixed 栈使用接口地址及其下一个地址做内部 TCP 转换。本项目关闭 `auto-route`，因此自己维护 main 表中的完整 fake-IP 路由。上游源码与自编译修改位置见 README 的“TUN /30 备忘”。blame 定位到 2022-10-09 的提交 `90688b238ad28aa8661372690778227b8655dd65`（fix: try let fakeip mode get real destination ip）：同时把接口前缀设为 `/30`，并把 fake-IP 分配起点从 `.3` 改成 `.4`。这是有意加入的修复；从变更推断，它将 TUN 小网段与分配地址分开，但提交未详细解释底层原因，不把推断写成维护者结论。`/16` 覆盖 `/30`，二者在本项目中同指 TUN；保留后者不是转发所必需，只是避免无益地删除内核自动路由。
 
-`setup-fake-ip-route.sh` 无参数或 `--once` 保持单次修复兼容；`--watch` 前台运行 `ip -o -4 monitor link address route`，通过 RTNETLINK 接收事件。逻辑全部位于此脚本：
+`core/start.sh --once` 只做单次修复；`--watch` 前台运行 `ip -o -4 monitor link address route`，通过 RTNETLINK 接收事件。逻辑全部位于此脚本：
 
 - 先订阅，等待 `/proc/net/netlink` 中 monitor 的 RTNETLINK port ID/组就绪，再检查初始状态，消除启动漏事件窗口；此有限等待仅在启动时发生，稳定运行阻塞读取 FIFO，无定时路由轮询。
 - 不给 monitor 传 `dev`，避免订阅锁定旧 ifindex；按事件中的设备名/网段筛选。每个事件重读磁盘 Core 配置，不承诺支持只修改 API 内存而不落盘的设备名/网段。
@@ -524,14 +526,19 @@ README 的接入示例限定为上述 IPv4 拓扑；跨网段、容器 NAT 或�
 
 调用与生命周期：
 
-- systemd：Core `Wants/After=proxy_route.service`；该 unit 调用 `/bin/sh setup-fake-ip-route.sh --watch`，以 `PartOf=proxy_core.service` 随 Core 停止/重启，监听失败自行重启。移除固定 sleep 的 ExecStartPost。无需单独 enable 路由服务。
-- OpenWrt：`proxy_core` 内新增 procd `routes` 实例，调用同一 `--watch`，随 Core 服务启停；不再安装 hotplug，与 Debian 使用同一套 Netlink 监听逻辑。
-- 安装同步新 unit 后启动 Core；脚本更新给已有 systemd Core 补装 `proxy_route.service` 并 daemon-reload，脚本更新成功后自动按需重启 Core 启用监听。仅有脚本、未安装服务的目录不创建系统服务。
-- 卸载先停止监听再清理路由，并检查仍存活的监听脚本，避免停止失败后继续删除文件。OpenWrt 的监听由 Core 同一 procd 服务停止。
+- 无参数的 `core/start.sh` 只保留一个常驻 shell；直接启动 Mihomo 和 ip monitor，主 shell 自己阻塞读取 Netlink FIFO。没有等待包装进程，也不重新启动 start.sh --watch。
+- 通过 CHLD 事件检查两个直接子进程，检查只用 kill/read 等 shell 内建读取 Linux /proc/PID/stat（含僵尸状态），没有周期性轮询。启动器明确从 PATH 定位外部 ip，避免 BusyBox ash 的内置 ip 覆盖 ip-full。任一子进程意外退出，包括 Mihomo 退出码 0，启动器退出非零；EXIT 清理回收另一子进程，交由 systemd/procd 恢复。此信号/read 行为以 Debian dash 和 BusyBox ash 为目标，不使用 bash 专有 wait -n。
+- 启动器独占 flock，子进程关闭该锁；TERM/INT/HUP 时直接终止并 wait 两个子进程，删除监听 FIFO 临时目录，保留锁 inode。手动 SIGKILL 启动器不能保证清理，服务管理器负责最终兜底。运行日志走 MyProxy，不向 systemd 只读限制下的 sh/ 写安装日志。
+- Debian 的 `proxy_core.service` 和 OpenWrt 的单个 procd Core 实例均调用 `/bin/sh core/start.sh`，没有独立路由服务或 routes 实例；网页内部重载仍由 Netlink 处理。
+- 服务定义只有 `common.sh:mp_render_service` 一份，使用 quoted heredoc 输出，再替换安装路径。Core/AGH 的 systemd unit 权限 0644，OpenWrt init 权限 0755。仓库及新安装均无 sh/etc 副本。
+- 安装快照、源目录必需文件列表含 core/start.sh。安装和更新均调用 mp_sync_core_start；旧 updater 即使第一阶段只同步 sh/，exec 新版后第二阶段也会下载启动器，避免旧版本缺文件。启动器更新失败保留旧文件，不生成服务、不重启。
+- 卸载兼容旧 route unit/hotplug，并同时检查旧路由脚本和 core/start.sh 的存活进程，停止失败保留数据。
 
-安装及更新已部署的服务前，复用安装器 `routes` 依赖检查：iproute2 的 monitor（OpenWrt 缺少时安装 ip-full）、flock、mkfifo。缺失时按原包管理逻辑补装，失败则停止服务同步和旧 hook 清理。更新成功后按需自动重启原本运行的服务；重启会短暂中断连接。
+安装及更新已部署的服务前，复用安装器 routes 依赖检查：iproute2 monitor（OpenWrt 缺少时安装 ip-full）、flock、mkfifo。更新成功后按需重启原本运行的服务，人工停止状态保持。
 
-服务文件同步成功后，由独立迁移函数 `mp_migrate_legacy_routes()` 清理安装目录 `sh/etc/hotplug.d/net/99-meta-route` 和系统 `/etc/hotplug.d/net/99-meta-route`。只删除普通非符号链接文件且执行路径精确匹配本安装的旧 hook（兼容带/不带 `/bin/sh`）；归属不符或删除失败返回非零。`never` 模式不清理系统文件；卸载继续兼容清理历史 hook。
+所有升级清理集中在 `sh/migrate-legacy.sh`：按归属检查并删除旧 hotplug、停止和移除独立 proxy_route unit 及其链接、删除旧 setup-fake-ip-route.sh 和 sh/etc 项目模板，只移除空目录。遇到非项目文件或符号链接拒绝处理，失败中止更新，不记录成功指纹；文件同步不是整批回滚。旧安装全部升级后，可以删除本脚本、源目录必需项及 mp_sync_etc_files 中唯一调用。卸载对旧安装的识别仍属于卸载兼容逻辑。
+
+旧 route unit 的归属同时核对项目 Documentation 与完整 ExecStart，兼容绝对路径及历史 `sh -c` 格式；后者保留字面量 `$MP_INST_DIR`，必须核对其目录赋值属于当前安装。不能仅 grep 展开后的路径，也不能执行 unit 内容来校验。
 
 监听需要上述依赖。服务统一以 `/bin/sh` 调用，不依赖脚本执行位。日志使用 `MyProxy` 标识。
 
@@ -613,19 +620,19 @@ ip -4 route del table 100 default via 192.168.1.1 dev eth0
 
 ### 9.1 systemd
 
-- `proxy_core.service` 运行 Mihomo，具备 TUN 所需 capability，并只开放 Core 工作目录写权限。
+- `proxy_core.service` 运行 core/start.sh，由启动器管理 Mihomo 与路由监听，具备 TUN 所需 capability，并只开放 Core 工作目录写权限。
 - `agh.service` 通过 `Requires`/`After` 依赖 `proxy_core.service`。
-- Core、AGH、路由监听三个 unit 都关闭 systemd 启动频率限制，由 `Restart=on-failure` 负责崩溃恢复。
+- Core、AGH 两个 unit 都关闭 systemd 启动频率限制，由 `Restart=on-failure` 负责崩溃恢复。
 - 服务文件用 `/etc/proxy` 作为仓库占位路径，安装/更新时替换为实际 `MP_INST_DIR`。
-- 脚本用 `logger -t MyProxy`，三个服务以 `SyslogIdentifier=MyProxy` 将 stdout/stderr 写入 journal；日常统一用 `journalctl -t MyProxy -f` 查看。排查服务启动、退出或重启问题时，用 `journalctl -u proxy_core -u agh -f` 补充查看 systemd 自身的管理消息。安装文件日志仍保留完整下载命令和进度。
+- 脚本用 `logger -t MyProxy`，两个服务以 `SyslogIdentifier=MyProxy` 将 stdout/stderr 写入 journal；日常统一用 `journalctl -t MyProxy -f` 查看。排查服务启动、退出或重启问题时，用 `journalctl -u proxy_core -u agh -f` 补充查看 systemd 自身的管理消息。安装文件日志仍保留完整下载命令和进度。
 
 ### 9.2 OpenWrt
 
 - `init.d/proxy_core` 和 `init.d/agh` 使用 procd 管理进程及 respawn。
 - Core 的 `START=98`，AGH 的 `START=99`；停止顺序相反。
-- `proxy_core` 的 `routes` 实例监听 Netlink，不使用 hotplug。
+- `proxy_core` 的单实例运行 core/start.sh，同时管理 Core 和 Netlink；不使用 hotplug。
 
-所有平台差异应收敛在公共服务函数和 `sh/etc/` 模板中，业务更新脚本不应直接分叉 OpenWrt/systemd 命令。
+所有平台差异应收敛在公共服务生成函数和 core/start.sh中，业务更新脚本不应直接分叉 OpenWrt/systemd 命令。
 
 ### 9.3 卸载流程
 
@@ -676,8 +683,8 @@ ip -4 route del table 100 default via 192.168.1.1 dev eth0
 | 修改 AGH 主配置 | `agh/agh.yaml`、`mp_prepare_agh_config`、filter 预下载逻辑 |
 | 修改域名分流 | `domain/*.txt`、`agh/myupstream.txt`、`update-agh-config.sh` |
 | 修改更新切换顺序 | `update-all-configs.sh`、`update-all-configs-restart-services.sh` |
-| 修改服务权限或依赖 | `sh/etc/`、`mp_service_op`、`mp_sync_etc_files` |
-| 修改 fake-ip/TUN | `core/config.yaml`、`setup-fake-ip-route.sh`、服务触发器 |
+| 修改服务权限或依赖 | `mp_render_service`、`mp_service_op`、`mp_sync_etc_files` |
+| 修改 fake-ip/TUN | `core/config.yaml`、`core/start.sh`、服务生成函数 |
 | 支持新 CPU 架构 | `sh/update-bin.sh`，并核对两个上游的实际发布文件名 |
 
 ## 12. 修改后的最低检查
@@ -686,7 +693,7 @@ ip -4 route del table 100 default via 192.168.1.1 dev eth0
 
 ```sh
 python3 -B -m unittest discover -s tests -v
-for f in sh/*.sh sh/env.conf sh/etc/init.d/*; do
+for f in sh/*.sh sh/env.conf core/start.sh; do
     sh -n "$f" || exit 1
 done
 git diff --check

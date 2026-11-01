@@ -20,7 +20,7 @@ class RouteWatchTests(unittest.TestCase):
     def setUp(self):
         self.setUp_base()
         self.env['TMPDIR'] = str(self.root)
-        self.script = self.root / 'sh/setup-fake-ip-route.sh'
+        self.script = self.root / 'core/start.sh'
         self.script.write_text(self.script.read_text()
             .replace('/sys/class/net/', str(self.root / 'sys/class/net') + '/')
             .replace('/proc/sys/kernel/random/boot_id', str(self.root / 'boot'))
@@ -75,7 +75,7 @@ else:
         self.file('sys/class/net/utun/ifindex', str(state['index'])+'\n')
 
     def once(self, *args):
-        return subprocess.run(['sh', str(self.script), *args], env=self.env,
+        return subprocess.run(['sh', str(self.script), *(args or ('--once',))], env=self.env,
                               capture_output=True, text=True, timeout=5)
 
     def calls(self):

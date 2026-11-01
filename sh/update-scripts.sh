@@ -1,14 +1,6 @@
 #!/bin/sh
-# 唯一负责"更新脚本"的入口：拉仓库 tarball，只覆盖 sh/ 子树（含 env.conf /
-# common.sh / 各 update-* / 自身 / sh/etc/* 等），然后 sed-patch sh/etc 路径占位，
-# 并把"当初 inst 选了自启动 → /etc 下已有副本"的服务文件同步覆盖一份。
-#
-# 流程：
-#   阶段 1（_MP_REEXEC 未设）：mp_fetch_repo_sh → exec 新版本
-#   阶段 2（_MP_REEXEC=1）   ：同步服务文件、迁移旧机制、按需重启运行中的服务
-#
-# 自更新安全性：tarball 已 mktemp + mv 落地后再 exec；新进程从干净状态跑阶段 2，
-# 即便旧进程的 shell 缓冲对自身脚本有任何疑虑，exec 后都不再相关。
+# 第一阶段同步 sh/ 并 exec 新版；第二阶段同步 core/start.sh、生成系统服务、
+# 调用独立迁移脚本清理旧机制，再按指纹重启原本运行的服务。
 . "$(dirname "$(readlink -f "$0" 2>/dev/null || printf '%s\n' "$0")")/common.sh"
 
 dir_sh="$MP_INST_DIR/sh"
@@ -21,10 +13,11 @@ if [ -z "$_MP_REEXEC" ]; then
     exec sh "$dir_sh/update-scripts.sh"
 fi
 
-# === 阶段 2：新版本已 exec 起来，做 sh/etc 路径替换与 /etc 同步 ===
-echo_log "============ patch sh/etc & sync /etc ============"
+# 第二阶段：新版本负责启动器更新、服务生成与旧版本迁移。
+echo_log "============ sync core/start.sh & generate services ============"
+mp_sync_core_start || { echo_log "Core 启动器同步失败"; exit 1; }
 mp_sync_etc_files if-exists \
-    || { echo_log "sh/etc 处理或同步失败"; exit 1; }
+    || { echo_log "系统服务生成或迁移失败"; exit 1; }
 mp_restart_updated_services \
     || { echo_log '脚本已更新，但服务生效失败，请检查 MyProxy 日志'; exit 1; }
 

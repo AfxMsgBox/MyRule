@@ -8,7 +8,7 @@
 
 准备订阅 URL；首次下载需要代理时，按向导填写代理地址。AGH 用户名默认 `admin`，可选择免登录；设置密码需填写 bcrypt 哈希（可用 `htpasswd -nB -C 10 admin` 生成，取 `admin:` 后的部分）。
 
-只有 Python 时：运行 `python3 sh/agh-password.py`，隐藏输入一次密码，输出哈希；也可用 `python3 sh/agh-password.py '密码'` 直接生成。脚本可单独复制使用，无需安装依赖；纯 Python 生成较慢。
+只有 Python 时：运行 `python3 sh/agh-password.py`，隐藏输入两次密码并确认，输出哈希；也可用 `python3 sh/agh-password.py '密码'` 直接生成。脚本可单独复制使用，无需安装依赖；纯 Python 生成较慢。
 
 ### 在线安装：只需一个 inst.sh
 
@@ -114,12 +114,13 @@ TCP 成功仅表示端口可达，需“代理 HTTPS”也成功；不同 DNS �
 | 目录 | 作用 |
 |---|---|
 | `sh/` | 安装、更新、卸载脚本及本机参数 |
-| `sh/etc/` | systemd/OpenWrt 服务模板 |
 | `core/` | 仓库中为 Mihomo 模板；安装后含程序、配置、订阅、面板 |
 | `agh/` | 仓库中为 AGH 模板及自定义上游；安装后含程序、过滤规则和运行数据 |
 | `domain/` | 仓库中的自定义分流域名 |
 | `tests/` | 开发用回归测试 |
 | `sh/.install-state/`、`sh/.schedule/` | 安装后生成的卸载恢复记录、自动更新状态 |
+
+`core/start.sh` 统一启动 Core 和 Netlink 路由监听，Debian/OpenWrt 共用。服务文件由安装和更新脚本动态生成，仓库不保存模板。
 
 以下脚本均在 `sh/`，一般只需使用上面的维护命令：
 
@@ -138,14 +139,12 @@ TCP 成功仅表示端口可达，需“代理 HTTPS”也成功；不同 DNS �
 | `update-core-config.sh` | 生成 Core 配置，预下载订阅及规则 |
 | `update-agh-config.sh` | 生成 AGH 域名上游 `dns.conf` |
 | `update-proxy-rule.sh` | 通过 Core API 刷新订阅和规则 |
-| `setup-fake-ip-route.sh` | 监听 TUN/路由事件，维护完整 fake-IP 路由 |
+| `migrate-legacy.sh` | 升级时清理旧服务、hotplug 和脚本；临时兼容入口 |
 | `run-scheduled-update.sh` | 按天数执行自动更新，防止重叠 |
 | `keeplive.sh` | 通过 Core 发起保活请求；默认未安排任务 |
 | `common.sh` | 配置解析、下载、渲染、服务控制公共函数 |
 | `portable.sh` | 路径、校验、下载、日志等便携函数 |
 | `env.conf` | 默认参数及 `env.local.conf` 加载逻辑 |
-| `etc/init.d/agh`、`etc/init.d/proxy_core` | OpenWrt 的 AGH、Core 服务模板 |
-| `etc/systemd/system/*.service` | systemd 的 AGH、Core、路由监听服务模板 |
 
 ## 5. 路由器设置
 
@@ -169,7 +168,7 @@ TCP 成功仅表示端口可达，需“代理 HTTPS”也成功；不同 DNS �
 
 ### TUN `/30` 备忘
 
-`/30` 是 Mihomo 有意设置的接口网段，**不是 fake-IP 池大小**，`/16` 虽覆盖 `/30`，但二者同指 TUN，无需删除内核直连路由。本项目关闭 `auto-route`，因此由 `setup-fake-ip-route.sh --watch` 监听内核事件，补齐完整 `/16` 路由，覆盖网页端重启。安装随 Core 自动启动监听；旧安装无需重装：执行 `sh /etc/proxy/sh/update-scripts.sh`，会补齐依赖、同步服务文件、清理旧 hotplug，并自动重启原本运行的服务。
+`/30` 是 Mihomo 有意设置的接口网段，**不是 fake-IP 池大小**，`/16` 虽覆盖 `/30`，但二者同指 TUN，无需删除内核直连路由。本项目关闭 `auto-route`，因此由 `core/start.sh` 监听内核事件，补齐完整 `/16` 路由，覆盖网页端重启。安装随 Core 自动启动监听；旧安装无需重装：执行 `sh /etc/proxy/sh/update-scripts.sh`，会补齐依赖、生成服务文件、清理旧 route 服务/hotplug/脚本，并自动重启原本运行的服务。
 
 源码备忘：[/30 于 2022 年作为修复引入](https://github.com/MetaCubeX/mihomo/commit/90688b238ad28aa8661372690778227b8655dd65)，同时把 fake-IP 分配起点改为 `.4`。v1.19.33 的 [config/config.go → parseTun](https://github.com/MetaCubeX/mihomo/blob/v1.19.33/config/config.go#L1692) 用 `netip.PrefixFrom(tunAddressPrefix.Addr(), 30)` 固定接口掩码。自编译时删除该行可沿用 fake-IP 掩码，但会改变栈的地址范围语义，需另行验证；本项目保留官方内核，用事件补路由。
 
@@ -258,7 +257,7 @@ sh /opt/myproxy/sh/uninstall.sh --install-dir /opt/myproxy --purge
 以 root 操作，只处理属于本安装目录的项目文件：
 
 1. 用 `crontab -e` 删除本目录的 `MyProxy:update-scripts`、`MyProxy:update-configs` 任务；若自行添加了保活任务，也删除。
-2. **systemd**：运行 `systemctl stop agh proxy_route proxy_core`，删除 `/etc/systemd/system/` 中 `agh.service`、`proxy_core.service`、`proxy_route.service` 及其 `.wants/`、`.requires/` 自启动链接，再运行 `systemctl daemon-reload`。**OpenWrt**：分别执行 `/etc/init.d/agh stop`、`/etc/init.d/proxy_core stop`，再分别执行 `disable`；删除这两个 init.d 文件及旧版可能残留的 `/etc/hotplug.d/net/99-meta-route`，检查 `/etc/rc.d/` 中对应链接已清理。
+2. **systemd**：运行 `systemctl stop agh proxy_core`，删除 `/etc/systemd/system/` 中 `agh.service`、`proxy_core.service`（旧版还需清理 `proxy_route.service`）及其 `.wants/`、`.requires/` 自启动链接，再运行 `systemctl daemon-reload`。**OpenWrt**：分别执行 `/etc/init.d/agh stop`、`/etc/init.d/proxy_core stop`，再分别执行 `disable`；删除这两个 init.d 文件及旧版可能残留的 `/etc/hotplug.d/net/99-meta-route`，检查 `/etc/rc.d/` 中对应链接已清理。
 3. 确认进程退出，检查 `ip route`。若本项目的 `198.18.0.0/16 dev utun` 仍残留，运行 `ip route del 198.18.0.0/16 dev utun`；修改过网段/接口时以 `core/.fake-ip-route` 记录为准。
 4. 删除数据前，按 `sh/.install-state/forward/` 的 `before`、`runtime`、`existed` 恢复 IPv4 转发：systemd 配置在 `/etc/sysctl.d/99-zz-myproxy.conf`，OpenWrt 在 `/etc/sysctl.conf`。保留后续其它改动；无记录时不要猜测原值或直接关闭路由器转发。具体规则见 [ARCH](ARCH.md#93-卸载流程)。
 5. 需要删除数据时，清理安装目录下的 `sh/`、`core/`、`agh/`，再删除空安装目录。保留系统软件包及其它文件。

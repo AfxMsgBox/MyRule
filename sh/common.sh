@@ -463,12 +463,160 @@ mp_wait_core_ready() {
     return 1
 }
 
-# 当前 OS 下 sh/etc/ 与 /etc/ 共用的相对路径清单；服务文件结构变了改这里一处
+# mp_render_service <relative-system-path>：服务定义的唯一来源。
+mp_render_service() {
+    case "$1" in
+        systemd/system/proxy_core.service) cat <<'MP_SERVICE_0'
+[Unit]
+# 服务名描述与项目链接
+Description=MyProxy core (mihomo / clash 兼容)
+Documentation=https://github.com/AfxMsgBox/MyRule
+# 等本机网络与 DNS 就绪后再启动
+Wants=network-online.target
+After=network-online.target nss-lookup.target
+# 在 AGH 之前启动，保证 fake-ip 解析端口先就绪
+Before=adguardhome.service agh.service
+# 关闭启动限流。注意 systemd 的 StartLimit 与 procd 的 respawn 语义不同：
+# procd 只计崩溃重生次数，systemd 计的是「所有启动」，包括人工 systemctl restart。
+# 原来的 3600/5 会让调试时连续重启 5 次后服务被锁死一小时（Start request repeated
+# too quickly），而调试恰恰最需要频繁起停。
+# 必须显式写 0 才是关闭：删掉本行会退回全局默认 DefaultStartLimitIntervalSec=10s
+# + DefaultStartLimitBurst=5，即「10 秒内 5 次」，快速连续重启仍会被拦。
+# 崩溃保护仍由下方 Restart=on-failure + RestartSec=5 承担（代价：真崩溃时会无限重试）。
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+# 启动器加载本机配置并同时管理 Core 和 Netlink 监听
+ExecStart=/bin/sh /etc/proxy/core/start.sh
+
+# 进程崩溃自动重启
+Restart=on-failure
+RestartSec=5
+
+# 内核要管理 TUN，需要 NET_ADMIN；同时放开 53/853 等低位端口绑定
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+
+# 日志走 journald；journalctl -t MyProxy / -u proxy_core 都能看
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=MyProxy
+
+# 进程隔离：strict 只读全局，再显式放开 core 目录（provider/ruleset 写入需要）
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/etc/proxy/core
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
+MP_SERVICE_0
+            ;;
+        systemd/system/agh.service) cat <<'MP_SERVICE_1'
+[Unit]
+# 服务名描述与项目链接
+Description=AdGuardHome (MyProxy 部署)
+Documentation=https://github.com/AfxMsgBox/MyRule
+# 等本机网络与代理内核就绪后再启动
+Wants=network-online.target
+Requires=proxy_core.service
+After=network-online.target proxy_core.service
+# 关闭启动限流，理由同 proxy_core.service：systemd 的 StartLimit 把人工 restart
+# 也算进配额，调试时会把服务锁死。必须显式写 0，删掉本行会退回全局默认 10s/5 次。
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+# 用 sh -c 引导以便 source env.conf 与可选的 env.local.conf
+ExecStart=/bin/sh -c 'MP_INST_DIR=/etc/proxy; export MP_INST_DIR; . "$MP_INST_DIR/sh/env.conf"; exec "$MP_AGH_DIR/AdGuardHome" -c "$MP_AGH_DIR/agh.yaml" -w "$MP_AGH_DIR" --no-check-update'
+
+# 进程崩溃自动重启
+Restart=on-failure
+RestartSec=5
+
+# 绑定 53 端口需要 NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_RAW
+
+# 日志走 journald
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=MyProxy
+
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+MP_SERVICE_1
+            ;;
+        init.d/proxy_core) cat <<'MP_SERVICE_2'
+#!/bin/sh /etc/rc.common
+# OpenWrt procd：启动 mihomo
+START=98
+STOP=2
+USE_PROCD=1
+
+MP_INST_DIR=/etc/proxy
+export MP_INST_DIR
+. "$MP_INST_DIR/sh/env.conf"
+
+start_service() {
+    [ -x "$MP_CORE_DIR/mihomo" ] || { logger -t MyProxy "代理内核不存在或不可执行：$MP_CORE_DIR/mihomo"; return 1; }
+    procd_open_instance
+    procd_set_param command /bin/sh "$MP_CORE_DIR/start.sh"
+    procd_set_param respawn 3600 5 5
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+    procd_close_instance
+}
+
+stop_service()   { return 0; }
+reload_service() { stop; start; }
+MP_SERVICE_2
+            ;;
+        init.d/agh) cat <<'MP_SERVICE_3'
+#!/bin/sh /etc/rc.common
+# OpenWrt procd：启动 AdGuardHome
+START=99
+STOP=1
+USE_PROCD=1
+
+MP_INST_DIR=/etc/proxy
+export MP_INST_DIR
+. "$MP_INST_DIR/sh/env.conf"
+
+start_service() {
+    procd_open_instance
+    procd_set_param command "$MP_AGH_DIR/AdGuardHome" -c "$MP_AGH_DIR/agh.yaml" -w "$MP_AGH_DIR" --no-check-update
+    procd_set_param respawn 3600 5 5
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+    procd_close_instance
+}
+
+stop_service()   { return 0; }
+reload_service() { stop; start; }
+MP_SERVICE_3
+            ;;
+        *) return 1 ;;
+    esac
+}
+
+mp_sync_core_start() (
+    mkdir -p "$MP_CORE_DIR" || exit 1
+    stage=$(mktemp "$MP_CORE_DIR/.start.XXXXXX") || exit 1
+    trap 'rm -f "$stage"' EXIT
+    download_file "$MP_REPO_RAW_URL/core/start.sh" "$stage" true 8 'Core 启动器' || exit 1
+    sh -n "$stage" && chmod 0755 "$stage" && mv "$stage" "$MP_CORE_DIR/start.sh"
+)
+
+# 当前 OS 生成到 /etc 的相对服务路径清单
 mp_etc_rels() {
     _mer_os=$(mp_detect_os) || return 1
     case "$_mer_os" in
         openwrt) echo "init.d/proxy_core init.d/agh" ;;
-        systemd) echo "systemd/system/proxy_core.service systemd/system/agh.service systemd/system/proxy_route.service" ;;
+        systemd) echo "systemd/system/proxy_core.service systemd/system/agh.service" ;;
     esac
 }
 
@@ -489,81 +637,46 @@ mp_require_route_tools() (
     inst_detect_os && inst_require_tools routes
 )
 
-# 临时迁移（2026-11）：旧 hotplug -> Netlink。
-# 旧安装全部升级后，可整体删除此函数及 mp_sync_etc_files 中的调用。
-# 仅清理本安装留下的旧 hook；同名的其它文件拒绝删除。
-mp_migrate_legacy_routes() {
-    for _mlrh_file in "$MP_INST_DIR/sh/etc/hotplug.d/net/99-meta-route" \
-        /etc/hotplug.d/net/99-meta-route; do
-        [ -e "$_mlrh_file" ] || [ -L "$_mlrh_file" ] || continue
-        if [ ! -L "$_mlrh_file" ] && [ -f "$_mlrh_file" ] && {
-            grep -qxF "exec /bin/sh $MP_INST_DIR/sh/setup-fake-ip-route.sh" "$_mlrh_file" \
-                || grep -qxF "exec $MP_INST_DIR/sh/setup-fake-ip-route.sh" "$_mlrh_file";
-        }; then
-            rm -f "$_mlrh_file" || return 1
-            echo_log "已清理旧路由 hotplug：$_mlrh_file"
-        else
-            echo_log "旧路由 hotplug 归属不匹配，请检查：$_mlrh_file"
-            return 1
-        fi
-    done
-}
-
 # mp_sync_etc_files <never|always|if-exists>
-# 统一完成路径占位替换、文件模式设置和可选的 /etc 同步。
+# 按平台动态生成；不创建 sh/etc 副本。
 mp_sync_etc_files() {
     _msef_mode="$1"
-    case "$_msef_mode" in never|always|if-exists) ;; *) return 1 ;; esac
+    case "$_msef_mode" in never) return 0 ;; always|if-exists) ;; *) return 1 ;; esac
     _msef_os=$(mp_detect_os) || return 1
     _msef_rels=$(mp_etc_rels) || return 1
-    if [ "$_msef_mode" != never ] && { [ "$_msef_mode" = always ] \
-        || [ -f /etc/init.d/proxy_core ] || [ -f /etc/systemd/system/proxy_core.service ]; }; then
+    if [ "$_msef_mode" = always ] || [ -f /etc/init.d/proxy_core ] || [ -f /etc/systemd/system/proxy_core.service ]; then
         mp_require_route_tools || return 1
     fi
-    _msef_changed=0; _msef_rc=0
+    _msef_changed=0
     for _msef_rel in $_msef_rels; do
-        _msef_src="$MP_INST_DIR/sh/etc/$_msef_rel"
-        [ -f "$_msef_src" ] || { echo_log "$_msef_rel 不存在，跳过"; continue; }
-        if ! sed -i "s|/etc/proxy|$MP_INST_DIR|g" "$_msef_src" \
-           || ! mp_set_etc_mode "$_msef_src"; then
-            echo_log "处理 $_msef_src 失败"
-            _msef_rc=1
-            continue
+        _msef_target="/etc/$_msef_rel"
+        if [ "$_msef_mode" = if-exists ] && [ ! -e "$_msef_target" ]; then continue; fi
+        [ ! -L "$_msef_target" ] || { echo_log "服务文件不能是符号链接：$_msef_target"; return 1; }
+        mkdir -p "$(dirname "$_msef_target")" || return 1
+        _msef_stage=$(mktemp "$_msef_target.XXXXXX") || return 1
+        if ! mp_render_service "$_msef_rel" | sed "s|/etc/proxy|$MP_INST_DIR|g" > "$_msef_stage" \
+            || ! mp_set_etc_mode "$_msef_stage"; then
+            rm -f "$_msef_stage"; return 1
         fi
-        case "$_msef_mode" in
-            never) continue ;;
-            if-exists)
-                if [ ! -e "/etc/$_msef_rel" ]; then
-                    # 升级已有 Core 时一并安装新的依赖 unit；不对纯脚本目录创建服务。
-                    [ "$_msef_rel" = systemd/system/proxy_route.service ] \
-                        && [ -f /etc/systemd/system/proxy_core.service ] || continue
-                fi ;;
-            always) mkdir -p "/etc/$(dirname "$_msef_rel")" \
-                        || { _msef_rc=1; continue; } ;;
-        esac
-        if cp "$_msef_src" "/etc/$_msef_rel" \
-           && mp_set_etc_mode "/etc/$_msef_rel"; then
-            echo_log "同步 /etc/$_msef_rel"
-            _msef_changed=1
+        # mktemp 的后缀不能用来判断 unit 的权限。
+        case "$_msef_rel" in *.service) chmod 0644 "$_msef_stage" ;; *) chmod 0755 "$_msef_stage" ;; esac \
+            || { rm -f "$_msef_stage"; return 1; }
+        if [ -f "$_msef_target" ] && cmp -s "$_msef_target" "$_msef_stage"; then
+            rm -f "$_msef_stage"
         else
-            echo_log "同步 /etc/$_msef_rel 失败"
-            _msef_rc=1
+            mv "$_msef_stage" "$_msef_target" || { rm -f "$_msef_stage"; return 1; }
+            _msef_changed=1
         fi
     done
-    if [ "$_msef_changed" -eq 1 ] && [ "$_msef_os" = systemd ]; then
-        systemctl daemon-reload || _msef_rc=1
-    fi
-    if [ "$_msef_rc" -eq 0 ] && [ "$_msef_mode" != never ]; then
-        mp_migrate_legacy_routes || _msef_rc=1
-    fi
-    return "$_msef_rc"
+    sh "$MP_INST_DIR/sh/migrate-legacy.sh" || return 1
+    if [ "$_msef_os" = systemd ]; then systemctl daemon-reload || return 1; fi
 }
 
 # 只比较常驻进程会读取的脚本和已部署服务文件；普通更新脚本变更不打断连接。
 mp_service_scripts_signature() (
     signature=
     for file in "$MP_INST_DIR/sh/common.sh" "$MP_INST_DIR/sh/env.conf" \
-        "$MP_INST_DIR/sh/portable.sh" "$MP_INST_DIR/sh/setup-fake-ip-route.sh"; do
+        "$MP_INST_DIR/sh/portable.sh" "$MP_CORE_DIR/start.sh"; do
         digest=$(mp_sha256 < "$file") || exit 1
         signature="$signature $digest"
     done

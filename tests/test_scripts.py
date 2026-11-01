@@ -19,8 +19,15 @@ def function_source(path, name):
     """Read an installer function without executing its top-level system changes."""
     source = path.read_text()
     start = source.index(name + "() {")
-    end = source.index("\n}", start) + 2
+    end = source.index("\n}\n\nmp_sync_core_start" if name == "mp_render_service" else "\n}", start) + 2
     return source[start:end]
+
+
+def service_template(relative):
+    body = function_source(ROOT/'sh/common.sh', 'mp_render_service')
+    result = subprocess.run(['sh', '-c', body+'\nmp_render_service "$1"', 'sh', relative],
+                            text=True, capture_output=True, check=True)
+    return result.stdout
 
 
 class ShellTests(unittest.TestCase):
@@ -42,6 +49,7 @@ class ShellTests(unittest.TestCase):
         shutil.copytree(ROOT / "sh", self.root / "sh")
         for directory in ("core", "agh", "fixtures", "commands"):
             (self.root / directory).mkdir()
+        shutil.copyfile(ROOT/"core/start.sh", self.root/"core/start.sh")
         self.env = {"PATH": str(self.root / "commands") + os.pathsep + os.environ["PATH"],
                     "MP_INST_DIR": str(self.root), "TEST_ROOT": str(self.root),
                     "MP_LOG_FILE": str(self.root / 'myrule.inst.log'),
@@ -145,53 +153,36 @@ mp_sync_etc_files() { printf 'sync %s\n' "$1" >> "$TEST_ROOT/events"; }
         self.assertEqual(target.stat().st_mode & 0o777, 0o755)
         self.assertFalse(list((self.root / "sh").glob(".sync.*")))
 
-    def test_service_route_hooks_run_without_execute_permission(self):
-        route = self.file("sh/setup-fake-ip-route.sh", 'printf "route-called\\n" >> "$TEST_ROOT/routes"\n')
-        route.chmod(0o644)
-        self.command("sleep", "exit 0\n")
-        unit = (ROOT / "sh/etc/systemd/system/proxy_route.service").read_text()
-        post = next(line.split("=", 1)[1] for line in unit.splitlines() if line.startswith("ExecStart="))
-        self.assert_ok(self.run_shell(post.replace("/etc/proxy", str(self.root)), source=False))
-        self.assertEqual((self.root / "routes").read_text().splitlines(), ["route-called"])
+    def test_generated_services_share_launcher_and_no_route_unit(self):
+        unit = service_template('systemd/system/proxy_core.service')
+        self.assertIn('ExecStart=/bin/sh /etc/proxy/core/start.sh', unit)
+        self.assertNotIn('proxy_route', unit)
+        self.assertIn('command /bin/sh "$MP_CORE_DIR/start.sh"', service_template('init.d/proxy_core'))
+        self.assertNotIn('routes', service_template('init.d/proxy_core'))
 
-    def test_script_upgrade_installs_route_unit_only_for_existing_core_service(self):
+    def test_script_upgrade_generates_only_existing_services(self):
         body = function_source(ROOT/'sh/common.sh', 'mp_sync_etc_files')
         body = body.replace('"/etc/', '"$TEST_ROOT/etc/')
         body = body.replace('[ -f /etc/', '[ -f "$TEST_ROOT"/etc/')
-        script = '''
+        body = body.replace('    sh \"$MP_INST_DIR/sh/migrate-legacy.sh\" || return 1', '    :')
+        script = """
 mp_detect_os() { echo systemd; }
 systemctl() { printf '%s\\n' "$*" >> "$TEST_ROOT/systemctl"; }
 mp_require_route_tools() { :; }
 mp_migrate_legacy_routes() { :; }
-''' + body + '\nmp_sync_etc_files if-exists'
+mp_migrate_legacy_core() { :; }
+""" + body + '\nmp_sync_etc_files if-exists'
         self.assert_ok(self.run_shell(script))
-        self.assertFalse((self.root/'etc/systemd/system/proxy_route.service').exists())
-        self.file('etc/systemd/system/proxy_core.service', 'old core unit\n')
+        unit = self.root/'etc/systemd/system/proxy_core.service'
+        self.assertFalse(unit.exists())
+        self.file(str(unit.relative_to(self.root)), 'old unit\n')
         self.assert_ok(self.run_shell(script))
-        route_unit = self.root/'etc/systemd/system/proxy_route.service'
-        self.assertTrue(route_unit.exists())
-        self.assertIn(str(self.root), route_unit.read_text())
-        self.assertIn('--watch', route_unit.read_text())
-        self.assertEqual(route_unit.stat().st_mode & 0o777, 0o644)
-        self.assertIn('Wants=proxy_route.service', (route_unit.parent/'proxy_core.service').read_text())
-        self.assertIn('daemon-reload', (self.root/'systemctl').read_text())
-
-    def test_openwrt_supervises_core_and_route_listener_together(self):
-        self.file('core/mihomo', '#!/bin/sh\nexit 0\n').chmod(0o755)
-        init = (ROOT/'sh/etc/init.d/proxy_core').read_text().replace('/etc/proxy', str(self.root))
-        result = self.run_shell(init + '''
-procd_open_instance() { instance=${1:-core}; }
-procd_set_param() { printf '%s: %s\\n' "$instance" "$*"; }
-procd_close_instance() { :; }
-start_service
-''', source=False)
-        self.assert_ok(result)
-        self.assertIn(f'core: command {self.root}/core/mihomo', result.stdout)
-        self.assertIn(f'routes: command /bin/sh {self.root}/sh/setup-fake-ip-route.sh --watch', result.stdout)
-        self.assertIn('routes: respawn 3600 2 0', result.stdout)
+        self.assertIn(str(self.root)+'/core/start.sh', unit.read_text())
+        self.assertEqual(unit.stat().st_mode & 0o777, 0o644)
+        self.assertFalse((unit.parent/'proxy_route.service').exists())
 
     def legacy_hook_cleanup(self):
-        body = function_source(ROOT/'sh/common.sh', 'mp_migrate_legacy_routes')
+        body = function_source(ROOT/'sh/migrate-legacy.sh', 'mp_migrate_legacy_routes')
         body = body.replace('\n        /etc/hotplug', '\n        "$TEST_ROOT"/etc/hotplug')
         return self.run_shell(body + '\nmp_migrate_legacy_routes')
 

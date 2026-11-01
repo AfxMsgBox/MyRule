@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -119,7 +120,7 @@ class AGHPasswordTests(unittest.TestCase):
             prompt.assert_called_once()
             self.assertEqual(out.getvalue(), "")
 
-    def test_hidden_input_once_on_real_terminal(self):
+    def test_hidden_input_twice_on_real_terminal(self):
         master, slave = pty.openpty()
         try:
             with subprocess.Popen(
@@ -130,6 +131,14 @@ class AGHPasswordTests(unittest.TestCase):
                     self.assertTrue(select.select([process.stderr], [], [], 5)[0])
                     prompt = os.read(process.stderr.fileno(), 1024)
                     self.assertIn("密码 > ".encode(), prompt)
+                    self.assertFalse(termios.tcgetattr(slave)[3] & termios.ECHO)
+                    os.write(master, b"hidden-password\n")
+                    confirmation = b""
+                    deadline = time.monotonic() + 5
+                    while "再次输入 > ".encode() not in confirmation and time.monotonic() < deadline:
+                        if select.select([process.stderr], [], [], .1)[0]:
+                            confirmation += os.read(process.stderr.fileno(), 1024)
+                    self.assertIn("再次输入 > ".encode(), confirmation)
                     self.assertFalse(termios.tcgetattr(slave)[3] & termios.ECHO)
                     os.write(master, b"hidden-password\n")
                     out, err = process.communicate(timeout=60)
@@ -146,6 +155,16 @@ class AGHPasswordTests(unittest.TestCase):
         finally:
             os.close(master)
             os.close(slave)
+
+    def test_password_mismatch_never_generates_hash(self):
+        with patch.object(agh_password.getpass, "getpass", side_effect=["first", "different"]), \
+                patch.object(agh_password, "hash_password") as hashed, \
+                contextlib.redirect_stdout(io.StringIO()) as out, \
+                contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(agh_password.main([]), 1)
+        hashed.assert_not_called()
+        self.assertEqual(out.getvalue(), "")
+        self.assertIn("不一致", err.getvalue())
 
     def test_command_line_preserves_password_and_never_prompts(self):
         for args, password in ((["  密码$'  "], "  密码$'  "), (["--", "--help"], "--help")):

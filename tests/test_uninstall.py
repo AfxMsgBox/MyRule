@@ -235,7 +235,7 @@ esac
     def platform(self, platform):
         if platform == "systemd":
             for service in ("agh", "proxy_route", "proxy_core"):
-                template = (ROOT / f"sh/etc/systemd/system/{service}.service").read_text()
+                template = test_scripts.service_template(f"systemd/system/{service}.service") if service != 'proxy_route' else 'Documentation=https://github.com/AfxMsgBox/MyRule\nExecStart=/bin/sh -c \'MP_INST_DIR=/etc/proxy; exec /bin/sh /etc/proxy/sh/setup-fake-ip-route.sh --watch\'\n'
                 self.file(f"etc/systemd/system/{service}.service", template.replace("/etc/proxy", str(self.target)))
                 link = self.etc / f"systemd/system/multi-user.target.wants/{service}.service"
                 link.parent.mkdir(parents=True, exist_ok=True)
@@ -244,7 +244,7 @@ esac
             shutil.rmtree(self.etc / "systemd")
             self.file("etc/openwrt_release", "OpenWrt")
             for service in ("agh", "proxy_core"):
-                template = (ROOT / f"sh/etc/init.d/{service}").read_text()
+                template = test_scripts.service_template(f"init.d/{service}")
                 self.file(f"etc/init.d/{service}", template.replace("/etc/proxy", str(self.target)))
                 for prefix in ("S99", "K01"):
                     link = self.etc / f"rc.d/{prefix}{service}"
@@ -277,12 +277,14 @@ esac
         self.assertFalse(list((self.etc / "systemd").rglob("*.service")))
 
     def test_live_route_listener_prevents_purge(self):
-        self.file('proc/54321/cmdline', f'/bin/sh\0{self.target}/sh/setup-fake-ip-route.sh\0--watch\0')
         self.command('sleep', 'exit 0\n')
-        result = self.run_uninstall('--purge')
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn('路由监听进程仍在运行', result.stderr)
-        self.assertTrue((self.target/'sh/env.local.conf').exists())
+        for relative in ('sh/setup-fake-ip-route.sh', 'core/start.sh'):
+            with self.subTest(script=relative):
+                self.file('proc/54321/cmdline', f'/bin/sh\0{self.target}/{relative}\0--watch\0')
+                result = self.run_uninstall('--purge')
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('路由监听进程仍在运行', result.stderr)
+                self.assertTrue((self.target/'sh/env.local.conf').exists())
 
     def test_foreign_route_unit_is_rejected_before_any_changes(self):
         unit = self.etc/'systemd/system/proxy_route.service'

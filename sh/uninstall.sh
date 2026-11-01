@@ -87,7 +87,7 @@ un_check_file() {
     case "$un_cf_kind" in
         unit)
             grep -qxF 'Documentation=https://github.com/AfxMsgBox/MyRule' "$un_cf_path" \
-                && awk -v dir="$un_dir" 'index($0,"ExecStart=")==1 && index($0,"MP_INST_DIR=" dir ";") { ok=1 }
+                && awk -v dir="$un_dir" 'index($0,"ExecStart=")==1 && (index($0,"MP_INST_DIR=" dir ";") || $0=="ExecStart=/bin/sh " dir "/core/start.sh") { ok=1 }
                     END { exit !ok }' "$un_cf_path" ;;
         init)
             grep -qxF "MP_INST_DIR=$un_dir" "$un_cf_path" \
@@ -187,7 +187,7 @@ un_check_processes() {
     # 监听器是 shell 进程，不能只匹配 /proc/PID/exe。
     for un_cmd in "$un_proc"/[0-9]*/cmdline; do
         [ -r "$un_cmd" ] || continue
-        if tr '\000' '\n' < "$un_cmd" | grep -qxF "$un_dir/sh/setup-fake-ip-route.sh"; then
+        if tr '\000' '\n' < "$un_cmd" | grep -qxF -e "$un_dir/sh/setup-fake-ip-route.sh" -e "$un_dir/core/start.sh"; then
             un_fail '路由监听进程仍在运行，保留服务文件和数据，请停止后重试'; return 1
         fi
     done

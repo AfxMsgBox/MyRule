@@ -297,6 +297,7 @@ sys.exit(subprocess.run(["sh", "-c", command], env=os.environ | {"REMOTE_CPU": "
             self.assertIn('独立安装入口', log)
             self.assertIn('安装器仓库归档', log)
         self.assertTrue((target / "core/mihomo").exists())
+        self.assertEqual((target / "core/start.sh").stat().st_mode & 0o777, 0o755)
         self.assertTrue((target / "core/ui/index.html").exists())
         self.assertTrue((target / "agh/AdGuardHome").exists())
         for path in (target / "sh").glob("*.sh"):
@@ -318,7 +319,7 @@ sys.exit(subprocess.run(["sh", "-c", command], env=os.environ | {"REMOTE_CPU": "
         self.assertTrue(all(line.startswith("http://proxy.invalid:1080 ") for line in downloads))
         self.assertEqual(sum("codeload.github.com" in line for line in downloads), int(online))
         self.assertEqual((self.root / "events").read_text().splitlines(),
-                         ["sync never", "sync always", "enable_start proxy_core", "ready", "enable_start agh"])
+                         ["sync always", "enable_start proxy_core", "ready", "enable_start agh"])
         if remote:
             self.assertTrue(any("mihomo-linux-arm64-" in line for line in downloads))
             self.assertTrue(any("AdGuardHome_linux_arm64" in line for line in downloads))

@@ -3,7 +3,7 @@
 """独立生成 AdGuard Home bcrypt 密码哈希；只需 Python 3.6+ 标准库。
 
 用法：python3 agh-password.py [PASSWORD]
-无参数：隐藏输入一次密码；固定 cost=10，只打印一行 $2b$ 哈希。
+无参数：隐藏输入两次密码并确认；固定 cost=10，只打印一行 $2b$ 哈希。
 PASSWORD：直接指定密码，不交互；以 - 开头的密码用 -- PASSWORD 传入。
 -h / --help：显示帮助，不读取密码。
 不读取项目配置，不联网，不调用外部程序，不保存密码或修改文件。
@@ -560,6 +560,9 @@ def main(argv=None):
             with warnings.catch_warnings():
                 warnings.simplefilter("error", getpass.GetPassWarning)
                 password = getpass.getpass("密码 > ")
+                _password_bytes(password)
+                if getpass.getpass("再次输入 > ") != password:
+                    raise ValueError("两次输入的密码不一致")
         print(hash_password(password))
         return 0
     except getpass.GetPassWarning:

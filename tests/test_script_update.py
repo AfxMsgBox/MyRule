@@ -76,7 +76,7 @@ mp_wait_core_ready() {
 
     def test_watcher_and_service_file_changes_restart_without_reinstall(self):
         self.assert_ok(self.activate())
-        for path in ('sh/setup-fake-ip-route.sh', 'etc/systemd/system/proxy_core.service'):
+        for path in ('core/start.sh', 'etc/systemd/system/proxy_core.service'):
             self.clear_events()
             with (self.root/path).open('a') as f: f.write('\n# updated\n')
             self.assert_ok(self.activate())
@@ -110,6 +110,7 @@ mp_wait_core_ready() {
 
     def test_update_entry_does_not_restart_after_sync_failure(self):
         self.add_common('''
+mp_sync_core_start() { :; }
 mp_sync_etc_files() { echo sync >> "$TEST_ROOT/events"; return "${FAIL_SYNC:-0}"; }
 ''')
         result = self.run_shell('sh "$MP_INST_DIR/sh/update-scripts.sh"',
