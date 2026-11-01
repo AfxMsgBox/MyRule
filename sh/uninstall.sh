@@ -110,7 +110,7 @@ un_check_link() {
 
 un_preflight_services() {
     : > "$un_tmp/files" && : > "$un_tmp/links" && : > "$un_tmp/services" || return 1
-    for un_svc in agh proxy_core; do
+    for un_svc in agh proxy_route proxy_core; do
         un_unit="$un_etc/systemd/system/$un_svc.service"
         un_init="$un_etc/init.d/$un_svc"
         un_check_file "$un_unit" unit && un_check_file "$un_init" init || return 1
@@ -184,6 +184,13 @@ un_prepare_cron() {
 }
 
 un_check_processes() {
+    # 监听器是 shell 进程，不能只匹配 /proc/PID/exe。
+    for un_cmd in "$un_proc"/[0-9]*/cmdline; do
+        [ -r "$un_cmd" ] || continue
+        if tr '\000' '\n' < "$un_cmd" | grep -qxF "$un_dir/sh/setup-fake-ip-route.sh"; then
+            un_fail '路由监听进程仍在运行，保留服务文件和数据，请停止后重试'; return 1
+        fi
+    done
     for un_exe in "$un_proc"/[0-9]*/exe; do
         un_bin=$(readlink "$un_exe" 2>/dev/null) || continue
         case "$un_bin" in "$un_real/core/mihomo"|"$un_real/core/mihomo (deleted)"|\

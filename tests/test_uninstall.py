@@ -234,7 +234,7 @@ esac
 
     def platform(self, platform):
         if platform == "systemd":
-            for service in ("agh", "proxy_core"):
+            for service in ("agh", "proxy_route", "proxy_core"):
                 template = (ROOT / f"sh/etc/systemd/system/{service}.service").read_text()
                 self.file(f"etc/systemd/system/{service}.service", template.replace("/etc/proxy", str(self.target)))
                 link = self.etc / f"systemd/system/multi-user.target.wants/{service}.service"
@@ -250,7 +250,8 @@ esac
                     link = self.etc / f"rc.d/{prefix}{service}"
                     link.parent.mkdir(parents=True, exist_ok=True)
                     link.symlink_to(f"../init.d/{service}")
-            template = (ROOT / "sh/etc/hotplug.d/net/99-meta-route").read_text()
+            # Fixture from the previous installer: new installs no longer create it.
+            template = '#!/bin/sh\n[ "$ACTION" = add ] || exit 0\nexec /bin/sh /etc/proxy/sh/setup-fake-ip-route.sh\n'
             self.file("etc/hotplug.d/net/99-meta-route", template.replace("/etc/proxy", str(self.target)))
 
     def run_uninstall(self, *args, extra=None, yes=True, script=None, directory=None):
@@ -268,12 +269,26 @@ esac
         forward = self.file("etc/sysctl.d/99-zz-myproxy.conf", "net.ipv4.ip_forward=1\n")
         result = self.run_uninstall()
         self.assert_ok(result)
-        self.assertEqual(self.events(), ["systemctl stop agh.service", "systemctl stop proxy_core.service",
+        self.assertEqual(self.events(), ["systemctl stop agh.service", "systemctl stop proxy_route.service", "systemctl stop proxy_core.service",
                                          "systemctl daemon-reload"])
         self.assertTrue((self.target / "core/config.yaml").exists())
         self.assertTrue((self.target / "sh/env.local.conf").exists())
         self.assertEqual(forward.read_text(), "net.ipv4.ip_forward=1\n")
         self.assertFalse(list((self.etc / "systemd").rglob("*.service")))
+
+    def test_live_route_listener_prevents_purge(self):
+        self.file('proc/54321/cmdline', f'/bin/sh\0{self.target}/sh/setup-fake-ip-route.sh\0--watch\0')
+        self.command('sleep', 'exit 0\n')
+        result = self.run_uninstall('--purge')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('路由监听进程仍在运行', result.stderr)
+        self.assertTrue((self.target/'sh/env.local.conf').exists())
+
+    def test_foreign_route_unit_is_rejected_before_any_changes(self):
+        unit = self.etc/'systemd/system/proxy_route.service'
+        unit.write_text(unit.read_text().replace(str(self.target), '/other/install'))
+        self.assertNotEqual(self.run_uninstall().returncode, 0)
+        self.assertEqual(self.events(), [])
 
     def test_openwrt_removes_services_links_hotplug_keeps_sysctl(self):
         self.platform("openwrt")

@@ -1,51 +1,108 @@
 #!/bin/sh
-# 修复 mihomo TUN 路由 /30 bug：先删错路由，再加正确网段。
-# 触发器：OpenWrt hotplug（99-meta-route）/ Debian systemd ExecStartPost。
+# auto-route:false 时维护完整 fake-IP 路由；/30 是 TUN 正常的接口网段。
+# 所有监听/修复逻辑在此；systemd/procd 只负责进程生命周期。
+case "${1:-}" in
+    -h|--help)
+        printf '%s\n' '用法：sh setup-fake-ip-route.sh [--watch|--once]' \
+            '  --watch  前台监听 Netlink，接口重建或路由变化后修复；供服务管理器调用。' \
+            '  --once   检查并修复一次（默认）；接口尚未就绪时不操作。' \
+            '配置读取安装目录的 core/config.yaml，无额外必填参数。'
+        exit 0 ;;
+    ''|--once|--watch) [ "$#" -le 1 ] || exit 2 ;;
+    *) printf '%s\n' '未知参数，请使用 --help' >&2; exit 2 ;;
+esac
 . "$(dirname "$(readlink -f "$0" 2>/dev/null || printf '%s\n' "$0")")/common.sh"
 
-# hotplug 只对 add 事件响应；其它调用方不传 ACTION，视为 add
-[ "${ACTION:-add}" = "add" ] || exit 0
+route_config() {
+    tun_device=$(mp_core_value tun device "$MP_CORE_DIR/config.yaml") || return 1
+    case "$tun_device" in ''|*[!a-zA-Z0-9_-]*) return 1 ;; esac
+    fake_ip_cidr=$(mp_core_fake_ip_cidr) || return 1
+}
 
-# 从 mihomo 配置的 dns.fake-ip-range 读取并规范化为网络 CIDR。
-# DNS/fake-ip 是本方案的必需项：不另设默认值，也不检查 enable/enhanced-mode。
-config_yaml="$MP_CORE_DIR/config.yaml"
-# TUN 设备名也直接读取配置，避免另设一个可能失配的接口变量。
-tun_device=$(mp_core_value tun device "$config_yaml" 2>/dev/null || :)
-[ -n "$tun_device" ] || { logger -t MyProxy "Core 配置缺少 tun.device"; exit 1; }
-
-fake_ip_cidr=$(mp_core_fake_ip_cidr "$config_yaml" 2>/dev/null || :)
-
-if [ -z "$fake_ip_cidr" ]; then
-    logger -t MyProxy "Core 配置缺少有效的 IPv4 dns.fake-ip-range"
-    exit 1
-fi
-
-base_ip="${fake_ip_cidr%/*}"
-
-# 仅操作配置里声明且已经创建的 TUN 设备。
-if ip link show "$tun_device" >/dev/null 2>&1; then
-    ip route del "$base_ip/30" 2>/dev/null || :
-    if ! ip route replace "$fake_ip_cidr" dev "$tun_device"; then
-        logger -t MyProxy "fake-ip 路由设置失败：$fake_ip_cidr -> $tun_device"
+route_apply() (
+    # 与手工 --once 串行；锁文件不删除，避免锁住不同 inode。
+    exec 8>"$MP_CORE_DIR/.fake-ip-route.lock" || exit 1
+    flock -x 8 || exit 1
+    route_config || { logger -t MyProxy '无效的 TUN / fake-IP 配置'; exit 1; }
+    link=$(ip -o link show dev "$tun_device" 2>/dev/null) || exit 0
+    printf '%s\n' "$link" | grep -Eq '<([^>]*,)?UP(,|>)' || exit 0
+    # add 事件可能先于地址配置，等 address/link 事件，不用 sleep 猜时序。
+    ip -4 -o address show dev "$tun_device" | grep -q ' inet ' || exit 0
+    route_index=$(cat "/sys/class/net/$tun_device/ifindex") || exit 0
+    route_boot=$(cat /proc/sys/kernel/random/boot_id) || exit 1
+    route_record="$fake_ip_cidr $tun_device $route_index $route_boot"
+    routes=$(ip -4 route show table main exact "$fake_ip_cidr") || exit 1
+    if printf '%s\n' "$routes" | awk -v cidr="$fake_ip_cidr" -v dev="$tun_device" '
+        $1==cidr && $2=="dev" && $3==dev && !/ via / { found=1 }
+        END { exit !found }'; then
+        # 不认领外部预置的正确路由，也不因自己的路由事件重复写入。
+        exit 0
+    fi
+    if ! ip -4 route replace "$fake_ip_cidr" dev "$tun_device"; then
+        ip link show dev "$tun_device" >/dev/null 2>&1 || exit 0
+        logger -t MyProxy "fake-IP 路由设置失败：$fake_ip_cidr -> $tun_device"
         exit 1
     fi
-    # 记录本项目实际创建的路由及接口身份，卸载时只清理仍匹配的路由。
-    route_index=$(cat "/sys/class/net/$tun_device/ifindex" 2>/dev/null) || route_index=
-    route_boot=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null) || route_boot=
-    case "$route_boot" in ''|*[!a-f0-9-]*) route_index= ;; esac
-    case "$route_index" in ''|*[!0-9]*)
-        logger -t MyProxy '无法记录 TUN 接口身份；卸载将依靠接口销毁清理路由' ;;
-        *)
-            route_record=$(mktemp "$MP_CORE_DIR/.route.XXXXXX") || exit 1
-            if ! printf '%s %s %s %s\n' "$fake_ip_cidr" "$tun_device" "$route_index" "$route_boot" > "$route_record" \
-                || ! mv "$route_record" "$MP_CORE_DIR/.fake-ip-route"; then
-                rm -f "$route_record"
-                logger -t MyProxy '保存路由卸载记录失败'
-                exit 1
-            fi ;;
-    esac
-    logger -t MyProxy "fake-ip 路由 $fake_ip_cidr -> $tun_device"
-    exit 0
-fi
+    # 若接口刚被重建，不把新接口误记为本次路由的所有者。
+    [ "$(cat "/sys/class/net/$tun_device/ifindex" 2>/dev/null)" = "$route_index" ] || exit 0
+    tmp=$(mktemp "$MP_CORE_DIR/.route.XXXXXX") || exit 1
+    if ! printf '%s\n' "$route_record" > "$tmp" || ! mv "$tmp" "$MP_CORE_DIR/.fake-ip-route"; then
+        rm -f "$tmp"
+        logger -t MyProxy '保存路由卸载记录失败'
+        exit 1
+    fi
+    logger -t MyProxy "fake-IP 路由已恢复：$fake_ip_cidr -> $tun_device (ifindex=$route_index)"
+)
 
-logger -t MyProxy "TUN 接口 ($tun_device) 未上线，跳过路由配置"
+route_watch_cleanup() {
+    trap '' HUP INT TERM
+    if [ -n "${monitor_pid:-}" ]; then
+        kill "$monitor_pid" 2>/dev/null || :
+        wait "$monitor_pid" 2>/dev/null || :
+    fi
+    [ -z "${watch_dir:-}" ] || rm -rf "$watch_dir"
+}
+
+route_watch() {
+    exec 9>"$MP_CORE_DIR/.fake-ip-watch.lock" || return 1
+    flock -n 9 || { logger -t MyProxy 'fake-IP 事件监听已运行'; return 1; }
+    watch_dir=$(mktemp -d) || return 1
+    trap route_watch_cleanup EXIT
+    trap 'exit 0' HUP INT TERM
+    mkfifo "$watch_dir/events" || return 1
+    # 不用 dev 过滤：ip monitor 会把名称解析成旧 ifindex，漏掉同名重建。
+    (exec 9>&-; exec ip -o -4 monitor link address route) > "$watch_dir/events" 2>&1 &
+    monitor_pid=$!
+    exec 7<"$watch_dir/events"
+    # 仅启动时等待订阅完成，再做快照，消除“快照与订阅之间”的漏事件窗口。
+    # iproute2 的 RTNETLINK port ID 为进程 ID；无事件期间只阻塞 read。
+    ready=0; attempts=0
+    while [ "$attempts" -lt 100 ]; do
+        if awk -v pid="$monitor_pid" '$2==0 && $3==pid && $4!="00000000" {ok=1}
+            END {exit !ok}' /proc/net/netlink; then ready=1; break; fi
+        kill -0 "$monitor_pid" 2>/dev/null || break
+        attempts=$((attempts + 1))
+        sleep 0.05
+    done
+    [ "$ready" -eq 1 ] || { logger -t MyProxy '无法订阅 Netlink，请检查 iproute2/ip-full'; return 1; }
+    route_apply || return 1
+    logger -t MyProxy 'fake-IP 路由事件监听已启动'
+    while IFS= read -r event <&7; do
+        case "$event" in
+            *'No buffer space'*|*'Message truncated'*)
+                logger -t MyProxy 'Netlink 事件丢失，重新订阅并核对路由'; return 1 ;;
+        esac
+        # 网页重载可能修改配置，每个事件按当前文件读取设备名和网段。
+        route_config || return 1
+        case "$event" in
+            *" $tun_device:"*|*" $tun_device "*|*"$fake_ip_cidr"*) route_apply || return 1 ;;
+        esac
+    done
+    logger -t MyProxy 'Netlink 监听中断，等待服务管理器重新启动'
+    return 1
+}
+
+case "${1:-}" in
+    --watch) route_watch ;;
+    *) route_apply ;;
+esac

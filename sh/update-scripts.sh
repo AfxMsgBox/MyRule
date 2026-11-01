@@ -5,7 +5,7 @@
 #
 # 流程：
 #   阶段 1（_MP_REEXEC 未设）：mp_fetch_repo_sh → exec 新版本
-#   阶段 2（_MP_REEXEC=1）   ：sed-patch sh/etc + 同步 /etc（如存在）
+#   阶段 2（_MP_REEXEC=1）   ：同步服务文件、迁移旧机制、按需重启运行中的服务
 #
 # 自更新安全性：tarball 已 mktemp + mv 落地后再 exec；新进程从干净状态跑阶段 2，
 # 即便旧进程的 shell 缓冲对自身脚本有任何疑虑，exec 后都不再相关。
@@ -25,5 +25,7 @@ fi
 echo_log "============ patch sh/etc & sync /etc ============"
 mp_sync_etc_files if-exists \
     || { echo_log "sh/etc 处理或同步失败"; exit 1; }
+mp_restart_updated_services \
+    || { echo_log '脚本已更新，但服务生效失败，请检查 MyProxy 日志'; exit 1; }
 
 echo_log "============ done ============"

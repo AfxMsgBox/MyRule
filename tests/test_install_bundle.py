@@ -63,6 +63,7 @@ _MP_RESOURCE_DIR=$_MP_CACHE_WRITE
         source = self.local_source()
         (source / 'domain/new.txt').write_text("payload:\n  - '+.new.test'\n")
         (source / 'sh/env.local.conf').write_text('SECRET=source')
+        (source / 'sh/test-proxy.conf').write_text('{"source":"private subscription"}')
         (source / 'sh/.schedule').mkdir()
         (source / 'sh/.schedule/local').write_text('local state')
         result = self.installer(self.args(['--source-dir', str(source), '--target', 'user@host']) + r'''
@@ -73,6 +74,7 @@ inst_snapshot "$TEST_ROOT/snapshot"
         self.assert_ok(result)
         self.assertTrue((self.root / 'snapshot/domain/new.txt').is_file())
         self.assertFalse((self.root / 'snapshot/sh/env.local.conf').exists())
+        self.assertFalse((self.root / 'snapshot/sh/test-proxy.conf').exists())
         self.assertFalse((self.root / 'snapshot/sh/.schedule').exists())
 
     def test_local_inference_and_remote_paths_are_on_different_machines(self):

@@ -1,5 +1,7 @@
 # 本地覆盖（设备侧或开发机侧），不进仓库
 sh/env.local.conf
+sh/test-proxy.conf
+tmp/
 sh/.schedule/
 sh/.install-state/
 myrule.inst.log

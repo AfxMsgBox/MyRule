@@ -270,6 +270,11 @@ inst_package_manager() {
 }
 
 inst_dependency_present() {
+    if [ "$1" = ip ]; then
+        # BusyBox 的 ip 不一定含 monitor；help 不订阅事件也不修改网络。
+        ip monitor help 2>&1 | grep -Eq 'OBJECTS|OBJECT-LIST'
+        return $?
+    fi
     if [ "$1" = ssh ]; then
         case "$(ssh -V 2>&1)" in *OpenSSH*) return 0 ;; *) return 1 ;; esac
     fi
@@ -291,7 +296,7 @@ inst_dependency_package() {
     if [ "$os_type" = openwrt ]; then
         case "$1" in
             ca-certificates) printf '%s\n' ca-bundle ;;
-            ip) printf '%s\n' ip-tiny ;;
+            ip) printf '%s\n' ip-full ;;
             sysctl) printf '%s\n' procps-ng-sysctl ;;
             awk) printf '%s\n' gawk ;;
             find) printf '%s\n' findutils-find ;;
@@ -359,14 +364,16 @@ inst_install_packages() {
 inst_require_tools() {
     if [ "${1:-}" = cron ]; then
         _irt_tools='crontab flock'
+    elif [ "${1:-}" = routes ]; then
+        _irt_tools='ip flock mkfifo'
     elif [ "${1:-}" = launcher ]; then
         _irt_tools='curl jq ca-certificates tar gzip gunzip awk sed grep find cat chmod cp mv rm mkdir mktemp dirname basename readlink date sleep head sort tr wc uname id'
         [ -z "${INST_TARGET:-}" ] || _irt_tools="$_irt_tools ssh"
     else
         _irt_tools='curl jq ca-certificates tar gzip gunzip ip sysctl logger awk sed grep find
-            cat chmod cp mv rm mkdir mktemp dirname basename readlink date sleep head sort tr wc ln uname id'
+            cat chmod cp mv rm mkdir mktemp mkfifo flock dirname basename readlink date sleep head sort tr wc ln uname id'
     fi
-    if [ "${1:-}" != cron ] && ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1; then
+    if [ "${1:-}" != cron ] && [ "${1:-}" != routes ] && ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1; then
         _irt_tools="$_irt_tools sha256sum"
     fi
     _irt_missing=
@@ -412,8 +419,8 @@ inst_validate_source() {
         sh/update-core-config.sh sh/update-agh-config.sh sh/update-bin.sh \
         sh/update-all-configs.sh sh/update-all-configs-restart-services.sh \
         sh/update-proxy-rule.sh sh/keeplive.sh sh/setup-fake-ip-route.sh sh/run-scheduled-update.sh \
-        sh/etc/init.d/agh sh/etc/init.d/proxy_core sh/etc/hotplug.d/net/99-meta-route \
-        sh/etc/systemd/system/agh.service sh/etc/systemd/system/proxy_core.service \
+        sh/etc/init.d/agh sh/etc/init.d/proxy_core \
+        sh/etc/systemd/system/agh.service sh/etc/systemd/system/proxy_core.service sh/etc/systemd/system/proxy_route.service \
         core/config.yaml agh/agh.yaml agh/myupstream.txt domain/gpt.txt domain/myproxylist.txt; do
         [ -f "$_MP_SOURCE_DIR/$_ivs_rel" ] && [ -r "$_MP_SOURCE_DIR/$_ivs_rel" ] \
             || { say_err "本地仓库缺少可读文件：$_ivs_rel"; return 1; }
@@ -732,7 +739,7 @@ inst_snapshot() (
     (cd "$_is_src" && find sh domain -type f -print) > "$_inst_tmp/source-files" || exit 1
     printf '%s\n' core/config.yaml agh/agh.yaml agh/myupstream.txt >> "$_inst_tmp/source-files"
     while IFS= read -r _is_rel; do
-        case "$_is_rel" in sh/env.local.conf|sh/.install-state/*|sh/.schedule/*|*/myrule.inst.cfg|*/myrule.inst.log) continue ;; esac
+        case "$_is_rel" in sh/env.local.conf|sh/test-proxy.conf|sh/.install-state/*|sh/.schedule/*|*/myrule.inst.cfg|*/myrule.inst.log) continue ;; esac
         case "$_is_rel" in *[!a-zA-Z0-9_./-]*|*/../*|*/./*|*//*|/*) echo '仓库路径不受支持' >&2; exit 1 ;; esac
         _is_real=$(mp_realpath "$_is_src/$_is_rel") \
             || { say_err "无法解析仓库文件：$_is_rel"; exit 1; }

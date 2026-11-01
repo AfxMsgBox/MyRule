@@ -74,7 +74,7 @@ inst_require_tools "${TEST_MODE:-}"
                 calls = (self.root / 'packages').read_text().splitlines()
                 self.assertEqual(calls[0], manager + '|update|')
                 self.assertEqual(set(calls[1].split('|')[1].split()), {action, 'curl', 'jq',
-                                 'ca-bundle', 'ip-tiny', 'procps-ng-sysctl', 'logger',
+                                 'ca-bundle', 'ip-full', 'procps-ng-sysctl', 'logger',
                                  'gawk', 'findutils-find', 'coreutils-head'})
                 log = (self.root / 'myrule.inst.log').read_text()
                 self.assertIn(f"'{manager}' 'update'", log)
@@ -111,6 +111,14 @@ inst_require_tools "${TEST_MODE:-}"
         self.file('ca.pem', 'test CA bundle')
         self.assert_ok(self.run_shell(script, source=False))
 
+    def test_ip_must_support_monitor_not_just_exist(self):
+        for help_text, supported in [('Usage: ip [OPTIONS] OBJECT', False),
+                                     ('OBJECTS := address | link | route', True),
+                                     ('Usage: ip monitor [ all | OBJECT-LIST ]', True)]:
+            self.command('ip', f"printf '%s\\n' '{help_text}' >&2; exit 255\n")
+            result = self.installer('inst_dependency_present ip')
+            self.assertEqual(result.returncode == 0, supported)
+
     def test_bootstrap_without_curl_jq_or_other_external_commands(self):
         # A shell loaded from a browser-downloaded file can reach the package manager
         # with no external tools on PATH. The fake manager creates executable stubs.
@@ -120,8 +128,8 @@ inst_require_tools "${TEST_MODE:-}"
         manager.write_text('''#!/bin/sh
 printf '%s\n' "$*" >> "$TEST_ROOT/minimal-calls"
 if [ "$1" = install ]; then
-    for tool in curl jq tar gzip gunzip ip sysctl logger awk sed grep find cat chmod cp mv rm mkdir mktemp dirname basename readlink date sleep head sort tr wc ln uname id sha256sum; do
-        printf '#!/bin/sh\nexit 0\n' > "$TEST_ROOT/minimal/$tool"
+    for tool in curl jq tar gzip gunzip ip sysctl logger awk sed grep find cat chmod cp mv rm mkdir mktemp mkfifo flock dirname basename readlink date sleep head sort tr wc ln uname id sha256sum; do
+        printf '#!/bin/sh\necho OBJECT-LIST\nexit 0\n' > "$TEST_ROOT/minimal/$tool"
         /bin/chmod +x "$TEST_ROOT/minimal/$tool"
     done
 fi
@@ -150,6 +158,12 @@ inst_require_tools
                 self.assert_ok(self.bootstrap(manager, 'crontab', {'TEST_MODE': 'cron'}))
                 calls = (self.root / 'packages').read_text().splitlines()
                 self.assertEqual(calls[-1].split('|')[1].split()[-1], package)
+
+    def test_route_upgrade_installs_only_missing_route_dependencies(self):
+        self.assert_ok(self.bootstrap('opkg', 'ip flock mkfifo curl crontab', {'TEST_MODE': 'routes'}))
+        calls = (self.root/'packages').read_text().splitlines()
+        self.assertEqual(set(calls[-1].split('|')[1].split()),
+                         {'install', 'ip-full', 'flock', 'coreutils-mkfifo'})
 
     def test_skip_cron_does_not_install_or_write(self):
         result = self.installer('''

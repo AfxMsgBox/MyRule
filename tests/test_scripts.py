@@ -52,6 +52,10 @@ class ShellTests(unittest.TestCase):
         for command in ("curl", "systemctl", "service", "sysctl", "crontab", "ip",
                         "apt-get", "opkg", "apk"):
             self.command(command, "echo unexpected-command >&2; exit 99\n")
+        self.command('ip', '''
+if [ "$*" = 'monitor help' ]; then echo 'Usage: ip monitor OBJECTS'; exit 255; fi
+echo unexpected-command >&2; exit 99
+''')
 
     def command(self, name, script):
         path = self.root / "commands" / name
@@ -119,12 +123,15 @@ mp_sync_etc_files() { printf 'sync %s\n' "$1" >> "$TEST_ROOT/events"; }
             self.file("source/sh/" + name, "payload\n").chmod(0o600)
         private = self.file("sh/env.local.conf", "# private\n")
         private.chmod(0o600)
+        diagnostic_conf = self.file("sh/test-proxy.conf", "private diagnostic config\n")
+        self.file("source/sh/test-proxy.conf", "other machine credentials\n")
         result = self.run_shell('set -f\nmp_fetch_repo_sh "$MP_INST_DIR/sh"',
                                 extra={"_MP_SOURCE_DIR": str(source)})
         self.assert_ok(result)
         for name, mode in files.items():
             self.assertEqual((self.root / "sh" / name).stat().st_mode & 0o777, mode, name)
         self.assertEqual(private.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(diagnostic_conf.read_text(), "private diagnostic config\n")
 
     def test_script_sync_chmod_failure_preserves_old_script(self):
         self.file("source/sh/route.sh", "new\n")
@@ -142,13 +149,90 @@ mp_sync_etc_files() { printf 'sync %s\n' "$1" >> "$TEST_ROOT/events"; }
         route = self.file("sh/setup-fake-ip-route.sh", 'printf "route-called\\n" >> "$TEST_ROOT/routes"\n')
         route.chmod(0o644)
         self.command("sleep", "exit 0\n")
-        unit = (ROOT / "sh/etc/systemd/system/proxy_core.service").read_text()
-        post = next(line.split("=", 1)[1] for line in unit.splitlines() if line.startswith("ExecStartPost="))
+        unit = (ROOT / "sh/etc/systemd/system/proxy_route.service").read_text()
+        post = next(line.split("=", 1)[1] for line in unit.splitlines() if line.startswith("ExecStart="))
         self.assert_ok(self.run_shell(post.replace("/etc/proxy", str(self.root)), source=False))
-        hotplug = (ROOT / "sh/etc/hotplug.d/net/99-meta-route").read_text()
-        self.assert_ok(self.run_shell(hotplug.replace("/etc/proxy", str(self.root)),
-                                      source=False, extra={"ACTION": "add"}))
-        self.assertEqual((self.root / "routes").read_text().splitlines(), ["route-called", "route-called"])
+        self.assertEqual((self.root / "routes").read_text().splitlines(), ["route-called"])
+
+    def test_script_upgrade_installs_route_unit_only_for_existing_core_service(self):
+        body = function_source(ROOT/'sh/common.sh', 'mp_sync_etc_files')
+        body = body.replace('"/etc/', '"$TEST_ROOT/etc/')
+        body = body.replace('[ -f /etc/', '[ -f "$TEST_ROOT"/etc/')
+        script = '''
+mp_detect_os() { echo systemd; }
+systemctl() { printf '%s\\n' "$*" >> "$TEST_ROOT/systemctl"; }
+mp_require_route_tools() { :; }
+mp_migrate_legacy_routes() { :; }
+''' + body + '\nmp_sync_etc_files if-exists'
+        self.assert_ok(self.run_shell(script))
+        self.assertFalse((self.root/'etc/systemd/system/proxy_route.service').exists())
+        self.file('etc/systemd/system/proxy_core.service', 'old core unit\n')
+        self.assert_ok(self.run_shell(script))
+        route_unit = self.root/'etc/systemd/system/proxy_route.service'
+        self.assertTrue(route_unit.exists())
+        self.assertIn(str(self.root), route_unit.read_text())
+        self.assertIn('--watch', route_unit.read_text())
+        self.assertEqual(route_unit.stat().st_mode & 0o777, 0o644)
+        self.assertIn('Wants=proxy_route.service', (route_unit.parent/'proxy_core.service').read_text())
+        self.assertIn('daemon-reload', (self.root/'systemctl').read_text())
+
+    def test_openwrt_supervises_core_and_route_listener_together(self):
+        self.file('core/mihomo', '#!/bin/sh\nexit 0\n').chmod(0o755)
+        init = (ROOT/'sh/etc/init.d/proxy_core').read_text().replace('/etc/proxy', str(self.root))
+        result = self.run_shell(init + '''
+procd_open_instance() { instance=${1:-core}; }
+procd_set_param() { printf '%s: %s\\n' "$instance" "$*"; }
+procd_close_instance() { :; }
+start_service
+''', source=False)
+        self.assert_ok(result)
+        self.assertIn(f'core: command {self.root}/core/mihomo', result.stdout)
+        self.assertIn(f'routes: command /bin/sh {self.root}/sh/setup-fake-ip-route.sh --watch', result.stdout)
+        self.assertIn('routes: respawn 3600 2 0', result.stdout)
+
+    def legacy_hook_cleanup(self):
+        body = function_source(ROOT/'sh/common.sh', 'mp_migrate_legacy_routes')
+        body = body.replace('\n        /etc/hotplug', '\n        "$TEST_ROOT"/etc/hotplug')
+        return self.run_shell(body + '\nmp_migrate_legacy_routes')
+
+    def test_upgrade_cleans_only_owned_legacy_hooks_and_is_repeatable(self):
+        for prefix in ('exec ', 'exec /bin/sh '):
+            local = self.file('sh/etc/hotplug.d/net/99-meta-route',
+                              prefix + str(self.root) + '/sh/setup-fake-ip-route.sh\n')
+            system = self.file('etc/hotplug.d/net/99-meta-route', local.read_text())
+            unrelated = self.file('etc/hotplug.d/net/other', 'keep\n')
+            self.assert_ok(self.legacy_hook_cleanup())
+            self.assertFalse(local.exists())
+            self.assertFalse(system.exists())
+            self.assertEqual(unrelated.read_text(), 'keep\n')
+            self.assert_ok(self.legacy_hook_cleanup())
+
+    def test_upgrade_refuses_foreign_or_symlinked_legacy_hook(self):
+        hook = self.file('etc/hotplug.d/net/99-meta-route',
+                         'exec /bin/sh /other/sh/setup-fake-ip-route.sh\n')
+        self.assertNotEqual(self.legacy_hook_cleanup().returncode, 0)
+        hook.unlink()
+        target = self.file('owned', f'exec /bin/sh {self.root}/sh/setup-fake-ip-route.sh\n')
+        hook.symlink_to(target)
+        self.assertNotEqual(self.legacy_hook_cleanup().returncode, 0)
+        self.assertTrue(hook.is_symlink())
+        self.assertTrue(target.exists())
+
+    def test_upgrade_dependency_failure_keeps_old_services_and_hook(self):
+        body = function_source(ROOT/'sh/common.sh', 'mp_sync_etc_files')
+        body = body.replace('"/etc/', '"$TEST_ROOT/etc/')
+        body = body.replace('[ -f /etc/', '[ -f "$TEST_ROOT"/etc/')
+        core = self.file('etc/init.d/proxy_core', 'old-service\n')
+        hook = self.file('etc/hotplug.d/net/99-meta-route', 'old-hook\n')
+        result = self.run_shell('''
+mp_detect_os() { echo openwrt; }
+mp_require_route_tools() { return 1; }
+mp_migrate_legacy_routes() { echo unexpected-cleanup; return 99; }
+''' + body + '\nmp_sync_etc_files if-exists')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(core.read_text(), 'old-service\n')
+        self.assertEqual(hook.read_text(), 'old-hook\n')
+        self.assertNotIn('unexpected-cleanup', result.stdout)
 
     def test_dns_environment_priority_and_empty(self):
         for local, caller, expected in [
@@ -343,23 +427,6 @@ printf '%s' "$TEST_VALUE"
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual((self.root / "agh/dns.conf").read_text(), "old-dns")
         self.assertNotIn("生成完成", result.stdout)
-
-    def test_route_failure_and_missing_old_route(self):
-        self.file("core/config.yaml", (ROOT / "core/config.yaml").read_text())
-        self.file("sys/class/net/utun/ifindex", "7\n")
-        self.file("proc/sys/kernel/random/boot_id", "11111111-1111-1111-1111-111111111111\n")
-        script = self.root / "sh/setup-fake-ip-route.sh"
-        script.write_text(script.read_text().replace("/sys/class/net/", str(self.root / "sys/class/net") + "/")
-                          .replace("/proc/sys/kernel/random/boot_id", str(self.root / "proc/sys/kernel/random/boot_id")))
-        self.command("ip", 'case "$1 $2" in "link show") exit 0;; "route del") exit 1;; '
-                           '"route replace") exit "$TEST_ROUTE_RC";; esac\n')
-        for status in ("0", "1"):
-            with self.subTest(status=status):
-                result = self.run_shell('sh "$MP_INST_DIR/sh/setup-fake-ip-route.sh"',
-                                        extra={"TEST_ROUTE_RC": status})
-                self.assertEqual(result.returncode, int(status), result.stderr)
-                self.assertEqual((self.root / "core/.fake-ip-route").read_text(),
-                                 "198.18.0.0/16 utun 7 11111111-1111-1111-1111-111111111111\n")
 
     def run_install_flow(self, *, reinstall, answer="Y", fail_download=False):
         self.configure_downloads()

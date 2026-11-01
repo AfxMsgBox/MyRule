@@ -8,16 +8,18 @@
 
 准备订阅 URL；首次下载需要代理时，按向导填写代理地址。AGH 用户名默认 `admin`，可选择免登录；设置密码需填写 bcrypt 哈希（可用 `htpasswd -nB -C 10 admin` 生成，取 `admin:` 后的部分）。
 
+只有 Python 时：运行 `python3 sh/agh-password.py`，隐藏输入一次密码，输出哈希；也可用 `python3 sh/agh-password.py '密码'` 直接生成。脚本可单独复制使用，无需安装依赖；纯 Python 生成较慢。
+
 ### 在线安装：只需一个 inst.sh
 
 在目标机或 SSH 发起端下载并运行（本机安装以 root 运行）：
 
 ```sh
-curl -fL -o inst.sh https://raw.githubusercontent.com/AfxMsgBox/MyRule/refs/heads/claude/update-readme-overview-pU5D3/sh/inst.sh
+curl -fL -o inst.sh https://raw.githubusercontent.com/AfxMsgBox/MyRule/refs/heads/main/sh/inst.sh
 sh inst.sh
 ```
 
-也可用浏览器下载。上例为当前开发分支，向导中选同一分支；其它分支需包含新版安装器。
+也可用浏览器下载。上例使用 main 分支；安装向导中可选择其它包含新版安装器的分支。
 
 ### 本地仓库安装：使用 ZIP 或开发目录
 
@@ -66,11 +68,12 @@ sh inst.sh --fill-from ./debug.cfg  # 使用指定文件
 | 更新所有脚本 | `sh /etc/proxy/sh/update-scripts.sh` |
 | 更新配置、订阅、规则并重启 | `sh /etc/proxy/sh/update-all-configs-restart-services.sh` |
 | 更新 Mihomo、AGH、面板 | `sh /etc/proxy/sh/update-bin.sh` |
+| 诊断节点 DNS、TCP、代理 HTTPS | `python3 /etc/proxy/sh/test-proxy.py` |
 | 查看自动更新任务 | `crontab -l` |
 | OpenWrt 日志 | `logread -e MyProxy -f` |
 | systemd 日志（脚本、Core、AGH） | `journalctl -t MyProxy -f` |
 
-二进制更新成功后重启服务：
+脚本更新会按需自动重启原本运行的服务；运行脚本未变化则不重启。二进制更新后手工重启：
 
 ```sh
 # systemd Linux
@@ -80,6 +83,15 @@ systemctl restart proxy_core agh
 ```
 
 安装日志位于入口脚本同目录的 `myrule.inst.log`，每次安装覆盖旧记录。下载命令含完整凭据；调试时复制“调试重放命令”下一行，结果写到当前目录，分享日志前清理私密内容。
+
+节点诊断需 Python 3.8+ 和已有 Mihomo，使用独立临时实例，不改正式服务。支持 v2rayN 的 VMess TCP/WS 订阅或本地 Mihomo JSON 节点；无参数交互，末尾可保存配置。命令行示例：
+
+```sh
+python3 /etc/proxy/sh/test-proxy.py --source '订阅URL' --node '节点名称'
+# --dns 可重复指定 DNS，--ip 可重复指定节点 IP；更多参数见 --help
+```
+
+TCP 成功仅表示端口可达，需“代理 HTTPS”也成功；不同 DNS 结果可能轮换，固定 IP 行用于确认具体地址是否可用。保存的 `test-proxy.conf` 含订阅凭据，权限为 600。
 
 ## 3. env.local.conf
 
@@ -102,7 +114,7 @@ systemctl restart proxy_core agh
 | 目录 | 作用 |
 |---|---|
 | `sh/` | 安装、更新、卸载脚本及本机参数 |
-| `sh/etc/` | systemd/OpenWrt 服务、hotplug 路由修复模板 |
+| `sh/etc/` | systemd/OpenWrt 服务模板 |
 | `core/` | 仓库中为 Mihomo 模板；安装后含程序、配置、订阅、面板 |
 | `agh/` | 仓库中为 AGH 模板及自定义上游；安装后含程序、过滤规则和运行数据 |
 | `domain/` | 仓库中的自定义分流域名 |
@@ -117,6 +129,8 @@ systemctl restart proxy_core agh
 | `install-lib.sh` | 向导、依赖检查、资源准备、安装 |
 | `install-remote.sh` | SSH 探测、上传和远程部署 |
 | `uninstall.sh` | 卸载服务、系统集成及可选数据清理 |
+| `agh-password.py` | 独立生成 AGH bcrypt 密码哈希，仅需 Python 3.6+ |
+| `test-proxy.py` | 调用临时 Mihomo，比较 DNS、逐 IP 连接和完整代理请求 |
 | `update-scripts.sh` | 更新全部脚本及已有服务文件 |
 | `update-bin.sh` | 更新 Mihomo、AGH、面板 |
 | `update-all-configs-restart-services.sh` | 更新全部配置并切换、重启服务 |
@@ -124,15 +138,14 @@ systemctl restart proxy_core agh
 | `update-core-config.sh` | 生成 Core 配置，预下载订阅及规则 |
 | `update-agh-config.sh` | 生成 AGH 域名上游 `dns.conf` |
 | `update-proxy-rule.sh` | 通过 Core API 刷新订阅和规则 |
-| `setup-fake-ip-route.sh` | 修复、维护 fake-ip 到 TUN 的路由 |
+| `setup-fake-ip-route.sh` | 监听 TUN/路由事件，维护完整 fake-IP 路由 |
 | `run-scheduled-update.sh` | 按天数执行自动更新，防止重叠 |
 | `keeplive.sh` | 通过 Core 发起保活请求；默认未安排任务 |
 | `common.sh` | 配置解析、下载、渲染、服务控制公共函数 |
 | `portable.sh` | 路径、校验、下载、日志等便携函数 |
 | `env.conf` | 默认参数及 `env.local.conf` 加载逻辑 |
 | `etc/init.d/agh`、`etc/init.d/proxy_core` | OpenWrt 的 AGH、Core 服务模板 |
-| `etc/systemd/system/*.service` | systemd 的 AGH、Core 服务模板 |
-| `etc/hotplug.d/net/99-meta-route` | OpenWrt 网络变化时触发路由修复 |
+| `etc/systemd/system/*.service` | systemd 的 AGH、Core、路由监听服务模板 |
 
 ## 5. 路由器设置
 
@@ -153,6 +166,47 @@ systemctl restart proxy_core agh
 4. **端口与防火墙**：AGH 需独占 TCP/UDP 53；已有 DNS 服务应调整监听，保留 DHCP。允许客户端 DNS 请求、LAN 与 TUN 转发及 TUN 回送本机流量。安装器开启 IPv4 转发；容器需宿主机开放 TUN。
 
 **DNS 和 fake-ip 路由缺一不可。** 安装器不会修改主路由的 DHCP、防火墙或手工静态路由；改 fake-ip 网段后应同步改主路由。
+
+### TUN `/30` 备忘
+
+`/30` 是 Mihomo 有意设置的接口网段，**不是 fake-IP 池大小**，`/16` 虽覆盖 `/30`，但二者同指 TUN，无需删除内核直连路由。本项目关闭 `auto-route`，因此由 `setup-fake-ip-route.sh --watch` 监听内核事件，补齐完整 `/16` 路由，覆盖网页端重启。安装随 Core 自动启动监听；旧安装无需重装：执行 `sh /etc/proxy/sh/update-scripts.sh`，会补齐依赖、同步服务文件、清理旧 hotplug，并自动重启原本运行的服务。
+
+源码备忘：[/30 于 2022 年作为修复引入](https://github.com/MetaCubeX/mihomo/commit/90688b238ad28aa8661372690778227b8655dd65)，同时把 fake-IP 分配起点改为 `.4`。v1.19.33 的 [config/config.go → parseTun](https://github.com/MetaCubeX/mihomo/blob/v1.19.33/config/config.go#L1692) 用 `netip.PrefixFrom(tunAddressPrefix.Addr(), 30)` 固定接口掩码。自编译时删除该行可沿用 fake-IP 掩码，但会改变栈的地址范围语义，需另行验证；本项目保留官方内核，用事件补路由。
+
+### 旁路部署的不对称回程
+
+旁路设备与客户端同网段时，可能出现“去程经主路由，回程直接到客户端”，影响主路由的连接跟踪。需要对称回程时，在**旁路设备**上配置：目的 fake-IP 仍进 TUN，源 fake-IP 的回包经主路由；无需 SNAT，保留客户端真实 IP。
+
+以下主路由为 `192.168.1.1`，网关、接口按实际替换；表 `100`、优先级 `90/100` 须未被其它策略占用，已有规则不要重复添加。
+
+**OpenWrt**：在 `/etc/config/network` 添加以下配置，`lan` 是连接主路由的逻辑接口；保存后执行 `service network reload`：
+
+```uci
+config route 'fakeip_return_route'
+    option interface 'lan'
+    option target '0.0.0.0/0'
+    option gateway '192.168.1.1'
+    option table '100'
+    option onlink '1'
+config rule 'fakeip_internal_rule'
+    option dest '198.18.0.0/16'
+    option lookup 'main'
+    option priority '90'
+config rule 'fakeip_return_rule'
+    option src '198.18.0.0/16'
+    option lookup '100'
+    option priority '100'
+```
+
+**Debian**：以 root 执行，`eth0` 是连接主路由的网卡；立即生效，重启失效，持久化方法见 [ARCH](ARCH.md#83-旁路设备的对称回程)：
+
+```sh
+ip -4 route replace table 100 default via 192.168.1.1 dev eth0 onlink
+ip -4 rule add priority 90 to 198.18.0.0/16 lookup main
+ip -4 rule add priority 100 from 198.18.0.0/16 lookup 100
+```
+
+**目的 fake-IP 的规则不可省略**，否则当前 mixed 栈的内部 TCP 回复也可能被送往主路由。前提是 main 表已有 fake-IP → TUN 路由。若仍异常，检查 ICMP 重定向是否让客户端绕过主路由，以及多网卡严格 `rp_filter` 是否丢包。卸载时另行撤销这些手工配置。
 
 ## 6. 下载代理与下载列表
 
@@ -197,14 +251,14 @@ sh /etc/proxy/sh/uninstall.sh
 sh /opt/myproxy/sh/uninstall.sh --install-dir /opt/myproxy --purge
 ```
 
-脚本清理项目服务、自启动、hotplug、定时任务及已记录的残留路由，按安装记录恢复转发设置；选择删除时清理程序、配置、运行数据和已空的安装目录。**不卸载系统软件包，不改其它任务。**
+脚本清理项目服务、自启动、旧版 hotplug、定时任务及已记录的残留路由，按安装记录恢复转发设置；选择删除时清理程序、配置、运行数据和已空的安装目录。**不卸载系统软件包，不改其它任务。**
 
 ### 手工卸载
 
 以 root 操作，只处理属于本安装目录的项目文件：
 
 1. 用 `crontab -e` 删除本目录的 `MyProxy:update-scripts`、`MyProxy:update-configs` 任务；若自行添加了保活任务，也删除。
-2. **systemd**：运行 `systemctl stop agh proxy_core`，删除 `/etc/systemd/system/` 中 `agh.service`、`proxy_core.service` 及其 `.wants/`、`.requires/` 自启动链接，再运行 `systemctl daemon-reload`。**OpenWrt**：分别执行 `/etc/init.d/agh stop`、`/etc/init.d/proxy_core stop`，再分别执行 `disable`；删除这两个 init.d 文件及 `/etc/hotplug.d/net/99-meta-route`，检查 `/etc/rc.d/` 中对应链接已清理。
+2. **systemd**：运行 `systemctl stop agh proxy_route proxy_core`，删除 `/etc/systemd/system/` 中 `agh.service`、`proxy_core.service`、`proxy_route.service` 及其 `.wants/`、`.requires/` 自启动链接，再运行 `systemctl daemon-reload`。**OpenWrt**：分别执行 `/etc/init.d/agh stop`、`/etc/init.d/proxy_core stop`，再分别执行 `disable`；删除这两个 init.d 文件及旧版可能残留的 `/etc/hotplug.d/net/99-meta-route`，检查 `/etc/rc.d/` 中对应链接已清理。
 3. 确认进程退出，检查 `ip route`。若本项目的 `198.18.0.0/16 dev utun` 仍残留，运行 `ip route del 198.18.0.0/16 dev utun`；修改过网段/接口时以 `core/.fake-ip-route` 记录为准。
 4. 删除数据前，按 `sh/.install-state/forward/` 的 `before`、`runtime`、`existed` 恢复 IPv4 转发：systemd 配置在 `/etc/sysctl.d/99-zz-myproxy.conf`，OpenWrt 在 `/etc/sysctl.conf`。保留后续其它改动；无记录时不要猜测原值或直接关闭路由器转发。具体规则见 [ARCH](ARCH.md#93-卸载流程)。
 5. 需要删除数据时，清理安装目录下的 `sh/`、`core/`、`agh/`，再删除空安装目录。保留系统软件包及其它文件。

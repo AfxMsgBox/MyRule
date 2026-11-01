@@ -4,7 +4,8 @@ Description=MyProxy core (mihomo / clash 兼容)
 Documentation=https://github.com/AfxMsgBox/MyRule
 # 等本机网络与 DNS 就绪后再启动
 Wants=network-online.target
-After=network-online.target nss-lookup.target
+Wants=proxy_route.service
+After=network-online.target nss-lookup.target proxy_route.service
 # 在 AGH 之前启动，保证 fake-ip 解析端口先就绪
 Before=adguardhome.service agh.service
 # 关闭启动限流。注意 systemd 的 StartLimit 与 procd 的 respawn 语义不同：
@@ -20,8 +21,7 @@ StartLimitIntervalSec=0
 Type=simple
 # 用 sh -c 引导以便 source env.conf；systemd 的 EnvironmentFile 解析不了变量引用
 ExecStart=/bin/sh -c 'MP_INST_DIR=/etc/proxy; export MP_INST_DIR; . "$MP_INST_DIR/sh/env.conf"; exec "$MP_CORE_DIR/mihomo" -d "$MP_CORE_DIR"'
-# 等 mihomo 起好后修正 fake-ip 路由；sleep 5 给 TUN 创建与 /30 出现留时间
-ExecStartPost=/bin/sh -c 'sleep 5 && /bin/sh /etc/proxy/sh/setup-fake-ip-route.sh || true'
+# proxy_route 监听 TUN/路由事件，覆盖启动和网页端重载。
 
 # 进程崩溃自动重启
 Restart=on-failure

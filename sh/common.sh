@@ -467,18 +467,46 @@ mp_wait_core_ready() {
 mp_etc_rels() {
     _mer_os=$(mp_detect_os) || return 1
     case "$_mer_os" in
-        openwrt) echo "init.d/proxy_core init.d/agh hotplug.d/net/99-meta-route" ;;
-        systemd) echo "systemd/system/proxy_core.service systemd/system/agh.service" ;;
+        openwrt) echo "init.d/proxy_core init.d/agh" ;;
+        systemd) echo "systemd/system/proxy_core.service systemd/system/agh.service systemd/system/proxy_route.service" ;;
     esac
 }
 
 # mp_set_etc_mode <path>
-# systemd unit 是配置文件，不应带可执行位；OpenWrt init/hotplug 文件需要可执行。
+# systemd unit 是配置文件，不应带可执行位；OpenWrt init 文件需要可执行。
 mp_set_etc_mode() {
     case "$1" in
         *.service) chmod 0644 "$1" ;;
         *)         chmod 0755 "$1" ;;
     esac
+}
+
+mp_require_route_tools() (
+    # 复用安装器的软件包映射；隔离其变量，不运行安装主流程。
+    set --
+    . "$MP_INST_DIR/sh/install-lib.sh" || exit 1
+    inst_colors
+    inst_detect_os && inst_require_tools routes
+)
+
+# 临时迁移（2026-11）：旧 hotplug -> Netlink。
+# 旧安装全部升级后，可整体删除此函数及 mp_sync_etc_files 中的调用。
+# 仅清理本安装留下的旧 hook；同名的其它文件拒绝删除。
+mp_migrate_legacy_routes() {
+    for _mlrh_file in "$MP_INST_DIR/sh/etc/hotplug.d/net/99-meta-route" \
+        /etc/hotplug.d/net/99-meta-route; do
+        [ -e "$_mlrh_file" ] || [ -L "$_mlrh_file" ] || continue
+        if [ ! -L "$_mlrh_file" ] && [ -f "$_mlrh_file" ] && {
+            grep -qxF "exec /bin/sh $MP_INST_DIR/sh/setup-fake-ip-route.sh" "$_mlrh_file" \
+                || grep -qxF "exec $MP_INST_DIR/sh/setup-fake-ip-route.sh" "$_mlrh_file";
+        }; then
+            rm -f "$_mlrh_file" || return 1
+            echo_log "已清理旧路由 hotplug：$_mlrh_file"
+        else
+            echo_log "旧路由 hotplug 归属不匹配，请检查：$_mlrh_file"
+            return 1
+        fi
+    done
 }
 
 # mp_sync_etc_files <never|always|if-exists>
@@ -488,6 +516,10 @@ mp_sync_etc_files() {
     case "$_msef_mode" in never|always|if-exists) ;; *) return 1 ;; esac
     _msef_os=$(mp_detect_os) || return 1
     _msef_rels=$(mp_etc_rels) || return 1
+    if [ "$_msef_mode" != never ] && { [ "$_msef_mode" = always ] \
+        || [ -f /etc/init.d/proxy_core ] || [ -f /etc/systemd/system/proxy_core.service ]; }; then
+        mp_require_route_tools || return 1
+    fi
     _msef_changed=0; _msef_rc=0
     for _msef_rel in $_msef_rels; do
         _msef_src="$MP_INST_DIR/sh/etc/$_msef_rel"
@@ -500,7 +532,12 @@ mp_sync_etc_files() {
         fi
         case "$_msef_mode" in
             never) continue ;;
-            if-exists) [ -e "/etc/$_msef_rel" ] || continue ;;
+            if-exists)
+                if [ ! -e "/etc/$_msef_rel" ]; then
+                    # 升级已有 Core 时一并安装新的依赖 unit；不对纯脚本目录创建服务。
+                    [ "$_msef_rel" = systemd/system/proxy_route.service ] \
+                        && [ -f /etc/systemd/system/proxy_core.service ] || continue
+                fi ;;
             always) mkdir -p "/etc/$(dirname "$_msef_rel")" \
                         || { _msef_rc=1; continue; } ;;
         esac
@@ -516,8 +553,78 @@ mp_sync_etc_files() {
     if [ "$_msef_changed" -eq 1 ] && [ "$_msef_os" = systemd ]; then
         systemctl daemon-reload || _msef_rc=1
     fi
+    if [ "$_msef_rc" -eq 0 ] && [ "$_msef_mode" != never ]; then
+        mp_migrate_legacy_routes || _msef_rc=1
+    fi
     return "$_msef_rc"
 }
+
+# 只比较常驻进程会读取的脚本和已部署服务文件；普通更新脚本变更不打断连接。
+mp_service_scripts_signature() (
+    signature=
+    for file in "$MP_INST_DIR/sh/common.sh" "$MP_INST_DIR/sh/env.conf" \
+        "$MP_INST_DIR/sh/portable.sh" "$MP_INST_DIR/sh/setup-fake-ip-route.sh"; do
+        digest=$(mp_sha256 < "$file") || exit 1
+        signature="$signature $digest"
+    done
+    rels=$(mp_etc_rels) || exit 1
+    for rel in $rels; do
+        digest=absent
+        [ ! -f "/etc/$rel" ] || digest=$(mp_sha256 < "/etc/$rel") || exit 1
+        signature="$signature $rel:$digest"
+    done
+    printf '%s' "$signature" | mp_sha256
+)
+
+mp_service_running() {
+    case "$(mp_detect_os)" in
+        systemd) systemctl is-active --quiet "$1.service" ;;
+        openwrt) service "$1" running >/dev/null 2>&1 ;;
+        *) return 1 ;;
+    esac
+}
+
+# 更新成功后生效；保留人工停止的服务，失败不写成功指纹，下次仍会重试。
+mp_restart_updated_services() (
+    stamp="$MP_INST_DIR/sh/.install-state/service-scripts.sha256"
+    pending="$stamp.pending"
+    signature=$(mp_service_scripts_signature) || exit 1
+    if [ ! -f "$pending" ] && [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$signature" ]; then
+        echo_log '服务运行脚本未变化，无需重启'
+        exit 0
+    fi
+    mkdir -p "${stamp%/*}" || exit 1
+    if [ -f "$pending" ]; then
+        read -r core_running agh_running < "$pending" || exit 1
+        case "$core_running:$agh_running" in 0:0|0:1|1:0|1:1) ;; *) exit 1 ;; esac
+    else
+        core_running=0; agh_running=0
+        mp_service_running proxy_core && core_running=1
+        mp_service_running agh && agh_running=1
+        # 失败重试时仍能恢复原本运行、被 systemd 连带停止的 AGH。
+        tmp=$(mktemp "$pending.XXXXXX") || exit 1
+        if ! printf '%s %s\n' "$core_running" "$agh_running" > "$tmp" || ! mv "$tmp" "$pending"; then
+            rm -f "$tmp"; exit 1
+        fi
+    fi
+    # systemd 重启 Core 会连带停止依赖它的 AGH；在操作前记录状态。
+    if [ "$core_running" -eq 1 ]; then
+        echo_log '应用脚本更新：重启 Core 和路由监听'
+        mp_service_op restart proxy_core || exit 1
+        mp_wait_core_ready 30 || { echo_log 'Core 重启后未就绪，更新失败'; exit 1; }
+    fi
+    if [ "$agh_running" -eq 1 ]; then
+        mp_service_op restart agh || exit 1
+    fi
+    if [ "$core_running$agh_running" = 00 ]; then
+        echo_log '服务未运行，保留停止状态；下次启动将使用新版脚本'
+    fi
+    tmp=$(mktemp "$stamp.XXXXXX") || exit 1
+    if ! printf '%s\n' "$signature" > "$tmp" || ! mv "$tmp" "$stamp"; then
+        rm -f "$tmp"; exit 1
+    fi
+    rm -f "$pending"
+)
 
 # mp_fetch_repo_sh <dst-sh-dir>
 # 仓库固定，压缩包地址只从 env.conf 派生的分支路径生成。
@@ -557,7 +664,7 @@ mp_fetch_repo_sh() {
     while IFS= read -r _mfr_file; do
         _mfr_rel=${_mfr_file#"$_mfr_src"/}
         # 手工下载或 git 工作目录可能带有本机私有配置，不能覆盖本次安装参数。
-        case "$_mfr_rel" in env.local.conf|.install-state/*|.schedule/*) continue ;; esac
+        case "$_mfr_rel" in env.local.conf|test-proxy.conf|.install-state/*|.schedule/*) continue ;; esac
         _mfr_target="$_mfr_dst/$_mfr_rel"
         _mfr_target_dir=$(dirname "$_mfr_target")
         mkdir -p "$_mfr_target_dir" || { _mfr_failed=1; break; }
