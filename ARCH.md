@@ -96,7 +96,7 @@ AGH 运行时可能回写 `agh.yaml`，但仓库模板仍是权威来源。完�
 
 - `MP_INST_DIR`：安装根目录。
 - `MP_REPO_BRANCH`：固定仓库 AfxMsgBox/MyRule 的分支名，省略或空值为 main。
-- `MP_PROXY`：唯一外部后备代理；安装、自举和日常更新均排在 Core 之后。
+- 下载不再接受外部后备代理；安装及脚本更新迁移时移除旧 `env.local.conf` 的 `MP_PROXY` 赋值。
 - `MP_SUBSCRIBE_URL`：Core provider 订阅模板参数。
 - `MP_AGH_USER_NAME`、`MP_AGH_PASSWORD`：AGH 管理员信息。
 - `MP_LOCAL_DNS`：AGH 默认直连上游 DNS。
@@ -105,7 +105,7 @@ AGH 运行时可能回写 `agh.yaml`，但仓库模板仍是权威来源。完�
 
 独立入口在补装依赖和下载前校验所有公开选项名称、重复项、缺失值及无值开关的错误赋值；消费其它业务选项的值，避免将值误认为选项。业务取值范围由模块继续校验。入口及模块支持 `--help`、`-h`、`help`，无需联网。两处 `shared installer help` 块保持一致，每个选项独立一行说明用途、默认值或限制；测试核对解析器公开选项均有说明，并核对独立文件、本地入口及帮助别名输出一致。
 
-安装入口的优先级与日常脚本不同：无参数交互，有参数默认静默，`--interactive` 可显式进入向导。公开参数由命名参数及默认值确定，不从调用环境或旧配置补齐；向导使用本次参数作为默认值。静默模式必填订阅，并明确选择 bcrypt 哈希或 `--no-auth`；用户名默认 admin。解析后导出本次值，防止子脚本重载旧配置时覆盖。分支默认 main，外部代理默认空；独立自举输入的本次下载代理传给向导。写入本机配置时保留其它自定义行。
+安装入口的优先级与日常脚本不同：无参数交互，有参数默认静默，`--interactive` 可显式进入向导。公开参数由命名参数及默认值确定，不从调用环境或旧配置补齐；向导使用本次参数作为默认值。静默模式必填订阅，并明确选择 bcrypt 哈希或 `--no-auth`；用户名默认 admin。解析后导出本次值，防止子脚本重载旧配置时覆盖。分支默认 main；不再提供外部下载代理参数。写入本机配置时保留其它自定义行。
 
 `MP_REPO_RAW_URL` 仅为内部派生变量，不再接受配置输入。`env.conf` 在本机配置和调用环境加载后强制重算地址，旧 URL 不迁移；安装器保存时删除旧 URL 行。`MP_REPO_BRANCH_PATH` 使用 jq 对分支名按 `/` 分段编码，再拼接固定 Raw 与 codeload 地址。脚本、模板和仓库规则使用同一分支。jq 是安装和运行更新脚本的依赖；安装器会自动补装，日常更新缺少时仍提示并退出，不用文本替换解析分支 JSON。
 
@@ -180,12 +180,10 @@ DNS 和节点连接超时由参数控制（1–30 秒）；临时实例启动异
 ```text
 从当前正式 core/config.yaml 派生的本机 Core 代理
     ↓ 失败或不可用
-MP_PROXY 外部代理
-    ↓ 失败、不存在或与本机代理相同
 强制直连
 ```
 
-`download_file` 使用目标目录内的临时文件，检查 curl 状态与最小文件大小，成功后以 `mv` 原子替换。不做进程、API 或网站预探测，由真实下载决定回退；Core 只读当前正式配置，端口按 mixed-port → port → socks-port 选择首个有效值。相同的 Core/外部代理不重复尝试。
+`download_file` 使用目标目录内的临时文件，检查 curl 状态与最小文件大小，成功后以 `mv` 原子替换。不做进程、API 或网站预探测，由真实下载决定回退；Core 只读当前正式配置，端口按 mixed-port → port → socks-port 选择首个有效值。不读取已废弃的外部代理参数。
 
 curl 的首个参数为 `--disable`，避免读取用户配置。代理通道使用显式 `--proxy URL --noproxy ''`，直连使用 `--proxy '' --noproxy '*'`，消除系统代理变量与 NO_PROXY 干扰。每次通道尝试与重试都在执行前通过 `mp_log_download_command` 将完整命令写入文件，终端输出资源名称、状态、进度及诊断；不打印原始凭据或 curl 错误。
 
@@ -254,7 +252,7 @@ GFW 和非中国顶级域名列表参与生成 `agh/dns.conf.pending`，配置�
 
 订阅和过滤器清单由 `core/config.yaml` 与 `agh/agh.yaml` 决定；修改模板后，下载项也会变化。当前 `whitelist_filters` 为空，没有额外白名单下载；GPT 规则来自本仓库，不列入 README 下载列表。GitHub Release 下载会跟随 HTTP 重定向，表中列的是脚本使用的入口地址。
 
-README 下载列表统计安装脚本主动下载的文件及版本信息，以及补装缺失依赖时由包管理器下载的索引和软件包。软件包使用系统软件源及包管理器自己的代理设置，不走项目的 Core → 外部代理 → 直连链路。服务启动后的订阅/过滤器刷新、`www.gstatic.com/generate_204` 节点健康检查和 DNS 查询属于运行期网络访问，未计入；健康检查不下载安装文件。
+README 下载列表统计安装脚本主动下载的文件及版本信息，以及补装缺失依赖时由包管理器下载的索引和软件包。软件包使用系统软件源及包管理器自己的代理设置，不走项目的 Core → 直连链路。服务启动后的订阅/过滤器刷新、`www.gstatic.com/generate_204` 节点健康检查和 DNS 查询属于运行期网络访问，未计入；健康检查不下载安装文件。
 
 GFW 域名列表使用 Loyalsoldier/clash-rules 已整理的 Clash payload，直接转换为 AGH 上游规则；不再下载或解析官方 AutoProxy 列表，也不生成跳过规则报告。
 
@@ -272,10 +270,10 @@ GFW 域名列表使用 Loyalsoldier/clash-rules 已整理的 Clash payload，直
 
 支持三条路径：本机在线、SSH 在线、SSH 本地仓库；另保留本机本地仓库安装。发起端适配 Linux/macOS/OpenWrt；安装目标为 OpenWrt/procd 和 Linux/systemd。macOS 仅作为资源下载与 SSH 部署发起端，不安装或运行代理服务，无需实现 launchd、macOS TUN、路由及服务卸载适配。
 
-命令行支持 `--key value` / `--key=value`，无参数交互，有参数默认静默；`--interactive` 可带预设参数进入向导。必填订阅，认证选择 bcrypt 哈希或 `--no-auth`，用户名默认 admin，目录默认 /etc/proxy、分支 main、DNS 默认值保持原样。安装路径要求安全绝对路径。SSH 参数含用户@主机、端口、私钥、auto/password/key。间隔参数 `--scripts-days` / `--configs-days` 为 1–365，省略保留已有任务；`--no-start` 延后配置启用。
+命令行支持 `--key value` / `--key=value`，无参数交互，有参数默认静默；`--interactive` 可带预设参数进入向导。必填订阅，认证选择 bcrypt 哈希或 `--no-auth`，用户名默认 admin，目录默认 /etc/proxy、分支 main、DNS 默认值保持原样。安装路径要求安全绝对路径。SSH 参数含用户@主机、端口、私钥、password/key，默认 key；静默模式使用 BatchMode，不提示密码，password 必须配合交互模式。间隔参数 `--scripts-days` / `--configs-days` 为 1–365，省略保留已有任务；`--no-start` 延后配置启用。
 
 ```text
-入口定位/获取模块 → 检查发起端依赖 → 收集并校验参数
+入口定位/获取模块 → 检查发起端依赖 → SSH 设置后立即连接验证 → 收集并校验其它参数
     ↓
 本机识别或 SSH 只读探测目标 OS、CPU、UID、sudo 可用性
     → 检查目标 TUN 设备
@@ -310,11 +308,15 @@ SSH 设置 `LogLevel=ERROR`，抑制正常 TTY 结束的 `Shared connection ... 
 
 目标机日志 `commands.log` 由 SSH 登录用户在私有临时目录内创建，确保 sudo 部署后仍可读取；预检及 apply 继承该路径。远端退出时清理 bundle，保留日志，由发起端取回追加到同一安装日志后统一清理临时目录。取日志失败仅提示警告，不能覆盖原部署退出码。
 
-`--download-proxy` 只属于发起端，SSH 模式默认空；`--proxy` 保存为目标机后备代理。本机安装未显式给 download-proxy 时沿用 proxy。资源准备读取发起端现有 Core（本机目标目录，SSH 发起端 /etc/proxy）；在 staging 中用 `_MP_DOWNLOAD_CORE_CONFIG` 指向它，不能误用目标地址或 staging 配置。后续目标更新仍为自己的 Core → MP_PROXY → 直连。
+安装器移除 `--download-proxy`、`--proxy` 和相关向导。资源准备只使用发起端现有 Core（本机目标目录，SSH 发起端 /etc/proxy）及直连；staging 中用 `_MP_DOWNLOAD_CORE_CONFIG` 指向正式配置。目标 apply 仅读安装包，日常更新为本机 Core → 直连。旧 `MP_PROXY` 不再影响下载；重装和脚本更新清理其赋值。
 
-向导走 /dev/tty 的 fd 3，可见输入、空行保留默认值，DNS 输入 `-` 清空。所有来源均分页获取 GitHub 分支列表，main 置顶；本地来源所选分支用于后续在线更新。密码选择默认不设置，选择设置后输入用户名及 bcrypt 哈希。颜色仅对 TTY 启用，NO_COLOR/TERM=dumb 禁用，日志不显示订阅或代理凭据；SSH 自身管理密码输入。
+向导走 /dev/tty 的 fd 3，普通字段可见输入、空行保留默认值；必填字段标红并拒绝空值，订阅立即校验 HTTP/HTTPS 格式，DNS 输入 `-` 清空。所有来源均分页获取 GitHub 分支列表，main 置顶；本地来源所选分支用于后续在线更新。密码选择默认不设置，选择设置后输入用户名及 bcrypt 哈希。颜色仅对 TTY 启用，NO_COLOR/TERM=dumb 禁用，日志不显示订阅或代理凭据；SSH 自身管理隐藏密码输入，密码不进入脚本变量、配置文件或日志。数字 1=password、2=key，保存认证名称而非序号；选定后立即探测，失败可重填并重连。认证重试关闭旧复用连接；成功后复用 ControlMaster，不到后续步骤才首次认证。
 
 `--fill-from [PATH]` 强制交互模式，省略 PATH 时使用入口同目录 `myrule.inst.cfg`；不带参数不读取或写入任何默认值文件。配置为 JSON 对象，所有值必须为不含 NUL 的字符串；不 source/eval 配置内容。`prompt_to` 按变量名读取默认值（含空字符串），缺键回退原默认值，每次输入后以同目录临时文件和原子 mv 写回，权限 0600；日志只记字段名。分支保存 `MP_REPO_BRANCH` 名称，动态映射列表序号，不保存序号。独立入口与安装模块共用上述函数；配置路径与日志相同、文件非法或保存失败均停止，SSH/sudo 密码不进入配置。
+
+目标安装失败由 EXIT 诊断打印最近阶段、退出码、日志位置及部分写入提示；远端预检另报告权限/依赖、包校验/解压、apply 阶段。交互端可选择重试整个 apply，复用本地已下载且校验过的 bundle；SSH 重试重新连接探测并上传，不重新下载资源。静默模式不询问。SSH 返回 255 时保留未确认结束的远端临时目录，避免删除仍在运行的安装资源；取日志及清理均使用 BatchMode，不额外弹出密码提示。目标用 `sh/.install-state/apply.lock` 的非阻塞 flock 拒绝同目录并发安装，断线后重试也不能覆盖仍在运行的 apply；此锁不是回滚机制，也不协调手动更新/卸载。重试输入不读写 fill 配置。
+
+迁移清理例外：`/etc/hotplug.d/net/99-meta-route` 和安装目录 `sh/etc/hotplug.d/net/99-meta-route` 是用户指定的保留文件名，直接删除普通文件或符号链接，不校验内容、不跟随链接、不递归删除目录。其它 route unit、启动脚本和旧服务模板仍校验归属。
 
 外部下载清单保留在 [README 下载列表](README.md#下载列表)。每次安装重新准备最新资源，不因目标已有文件跳过。只有下载与包校验成功才开始覆盖目标项目文件；软件依赖补装不在此保证范围内。覆盖应用不承诺整批事务回滚。
 
@@ -353,7 +355,7 @@ AGH 依赖 Core，因为部分域名上游指向 Core DNS，且 AGH 自身的 `h
 
 普通命令按 `command -v` 检查；`ip` 额外检查 `monitor help` 支持，已有兼容 applet 可满足依赖，不因包名不同重复安装。证书检查系统 `/etc/ssl/certs/ca-certificates.crt` 或 `/etc/ssl/cert.pem` 是否可读且非空；不执行联网探测。只对缺失项映射包名、去重后批量安装，再清除 shell 命令缓存并复查全部依赖。包管理器返回成功但工具或证书仍缺失时，也返回失败；例如定制 OpenWrt 的 BusyBox 禁用了 crontab 时，需使用提供该功能的固件或包，不能将安装 busybox 成功视为功能已可用。
 
-OpenWrt 优先选择可用的 apk，否则 opkg；Debian/Ubuntu（含通过 `ID_LIKE` 识别的衍生系统）使用 apt-get。其它 systemd 系统在依赖齐全时仍可继续，缺失时提示手工补齐。软件包操作仅刷新索引并安装缺失项，不执行整体 upgrade、不修改软件源或永久代理配置，也不关闭 TLS/签名校验。操作使用包管理器自身的网络配置；用户提供的 `MP_PROXY` 不参与这一阶段。apt-get 使用非交互模式，所有包管理器均从 `/dev/null` 读取标准输入，避免吞掉管道中的脚本或向导输入。
+OpenWrt 优先选择可用的 apk，否则 opkg；Debian/Ubuntu（含通过 `ID_LIKE` 识别的衍生系统）使用 apt-get。其它 systemd 系统在依赖齐全时仍可继续，缺失时提示手工补齐。软件包操作仅刷新索引并安装缺失项，不执行整体 upgrade、不修改软件源或永久代理配置，也不关闭 TLS/签名校验。操作使用包管理器自身的网络配置。apt-get 使用非交互模式，所有包管理器均从 `/dev/null` 读取标准输入，避免吞掉管道中的脚本或向导输入。
 
 刷新索引或安装失败时保留原始错误输出，打印退出码及手动安装命令并停止。软件包补装不提供回滚，已安装的包保留。没有选择定时任务时不检查 crontab；flock 是路由监听的必需依赖。macOS 使用系统 shasum；缺少其它工具时调用已有 Homebrew，未安装 Homebrew 时提示手动补齐。非 root Linux 发起端补包使用 sudo。
 
@@ -442,7 +444,7 @@ sh "$MP_INST_DIR/sh/update-bin.sh" &&
 mp_activate_configs restart
 ```
 
-这个流程在配置落盘后下载二进制/UI；若同时改了代理端口，需确保外部代理或直连可用。
+这个流程在配置落盘后下载二进制/UI；若同时改了代理端口，需确保本机 Core 或直连可用。
 
 ### 6.5 fake-ip 缓存维护
 
@@ -465,14 +467,14 @@ fi
 
 ### 6.6 定时任务
 
-交互安装只询问两项：“每隔几天更新脚本？”和“每隔几天更新配置？”，默认 3 天，范围 1–365，输入 n 跳过并保留对应旧任务。选中任一任务后补齐 crontab/flock，再写 root crontab：
+交互安装只询问两项：“每隔几天更新脚本？”和“每隔几天更新配置？”，脚本默认 7 天、配置默认 3 天，范围 1–365，输入 n 跳过并保留对应旧任务。选中任一任务后补齐 crontab/flock，再写 root crontab：
 
 ```cron
-0 3 * * * sh '/etc/proxy/sh/run-scheduled-update.sh' scripts 3 # MyProxy:update-scripts
+0 3 * * * sh '/etc/proxy/sh/run-scheduled-update.sh' scripts 7 # MyProxy:update-scripts
 5 3 * * * sh '/etc/proxy/sh/run-scheduled-update.sh' configs 3 # MyProxy:update-configs
 ```
 
-第三个参数位置的数字是用户填写的间隔（上例均为 3）；cron 每天触发检查，到期才执行。调度器以 `date +%s / 86400` 的 UTC 连续日编号计算日期差，跨月不重置，不承诺精确到小时的 N×24 小时间隔。首次设置时写入当前日作为起点；之后只有目标更新成功才原子更新 `sh/.schedule/scripts.last` 或 `configs.last`，失败则次日重试，关机错过的任务在下次定时检查补做一次。系统时钟回拨时等待日期重新达到间隔。
+第三个参数位置的数字是用户填写的间隔（上例脚本为 7、配置为 3）；cron 每天触发检查，到期才执行。调度器以 `date +%s / 86400` 的 UTC 连续日编号计算日期差，跨月不重置，不承诺精确到小时的 N×24 小时间隔。首次设置时写入当前日作为起点；之后只有目标更新成功才原子更新 `sh/.schedule/scripts.last` 或 `configs.last`，失败则次日重试，关机错过的任务在下次定时检查补做一次。系统时钟回拨时等待日期重新达到间隔。
 
 间隔保存在 cron 参数里，成功日记录随本机状态保留；重复安装保留已有日期记录，调整间隔后在下次检查按新值判断。安装器仅替换匹配本安装目录、命令和 marker 的对应任务，兼容清理旧的直接调用更新脚本的 cron；读取 crontab 异常时停止该项写入，不覆盖未知任务。卸载同时识别新旧形式。
 
@@ -536,7 +538,7 @@ README 的接入示例限定为上述 IPv4 拓扑；跨网段、容器 NAT 或�
 
 安装及更新已部署的服务前，复用安装器 routes 依赖检查：iproute2 monitor（OpenWrt 缺少时安装 ip-full）、flock、mkfifo。更新成功后按需重启原本运行的服务，人工停止状态保持。
 
-所有升级清理集中在 `sh/migrate-legacy.sh`：按归属检查并删除旧 hotplug、停止和移除独立 proxy_route unit 及其链接、删除旧 setup-fake-ip-route.sh 和 sh/etc 项目模板，只移除空目录。遇到非项目文件或符号链接拒绝处理，失败中止更新，不记录成功指纹；文件同步不是整批回滚。旧安装全部升级后，可以删除本脚本、源目录必需项及 mp_sync_etc_files 中唯一调用。卸载对旧安装的识别仍属于卸载兼容逻辑。
+所有升级清理集中在 `sh/migrate-legacy.sh`：按固定文件名删除旧 hotplug、按归属停止和移除独立 proxy_route unit 及其链接、删除旧 setup-fake-ip-route.sh 和 sh/etc 项目模板，只移除空目录。除固定名称 hotplug 外，遇到非项目文件或符号链接拒绝处理，失败中止更新，不记录成功指纹；文件同步不是整批回滚。旧安装全部升级后，可以删除本脚本、源目录必需项及 mp_sync_etc_files 中唯一调用。卸载对旧安装的识别仍属于卸载兼容逻辑。
 
 旧 route unit 的归属同时核对项目 Documentation 与完整 ExecStart，兼容绝对路径及历史 `sh -c` 格式；后者保留字面量 `$MP_INST_DIR`，必须核对其目录赋值属于当前安装。不能仅 grep 展开后的路径，也不能执行 unit 内容来校验。
 
@@ -660,7 +662,7 @@ ip -4 route del table 100 default via 192.168.1.1 dev eth0
 
 1. 修改前先确定变更属于脚本、配置还是二进制更新，不得隐式跨越边界。
 2. 常规远程文件下载统一走 `download_file`，它与安装 bootstrap 均调用 `mp_http_download`；独立入口嵌入同一传输函数并通过测试保证一致。
-3. 所有安装和日常下载优先使用当前正式 Core 配置派生的本机代理，然后 `MP_PROXY`，最后直连。
+3. 所有安装和日常下载优先使用当前正式 Core 配置派生的本机代理，失败后强制直连。
 4. 完整更新的全部下载完成前不得重启或停止 Core。
 5. 安装及完整更新的服务切换流程须等待 Core API、TUN 与 fake-ip 路由就绪后启动 AGH。重装提交正式配置前先停 AGH；日常更新的 Core 落盘边界见第 6.2 节。平台开机启动仍使用现有依赖/顺序机制，不额外增加 API 检查。
 6. Core 端口、API、DNS、fake-ip、TUN、UI 等参数只能从目标 Core 配置读取。
@@ -689,7 +691,7 @@ ip -4 route del table 100 default via 192.168.1.1 dev eth0
 
 ## 12. 修改后的最低检查
 
-测试使用 Python 3 标准库、POSIX shell 与 jq，在临时安装目录中运行 shell 函数及脚本，以模拟命令替代下载和服务操作。覆盖两平台卸载、确认取消、归属检查、cron 精确清理、purge 边界和失败保留数据，以及本地来源校验、路径边界、缺文件失败、私有配置保留、本地安装结合外部代理的完整流程，以及参数解析及空值、无 TTY 拒绝交互、有 TTY 静默不提示、缺失 jq、分支分页与异常响应、代理通道顺序和环境隔离、终端颜色与日志脱敏，以及重装接受/拒绝启动、首次安装、失败中止、参数优先级及空值、特殊字符持久化、分支一致性、配置落盘边界、二进制/UI 安装失败、路由失败，以及两个平台的服务命令派发。提交前至少应执行：
+测试使用 Python 3 标准库、POSIX shell 与 jq，在临时安装目录中运行 shell 函数及脚本，以模拟命令替代下载和服务操作。覆盖两平台卸载、确认取消、归属检查、cron 精确清理、purge 边界和失败保留数据，以及本地来源校验、路径边界、缺文件失败、私有配置保留、本地安装结合 Core 代理的完整流程，以及参数解析及空值、无 TTY 拒绝交互、有 TTY 静默不提示、缺失 jq、分支分页与异常响应、代理通道顺序和环境隔离、终端颜色与日志脱敏，以及重装接受/拒绝启动、首次安装、失败中止、参数优先级及空值、特殊字符持久化、分支一致性、配置落盘边界、二进制/UI 安装失败、路由失败，以及两个平台的服务命令派发。提交前至少应执行：
 
 ```sh
 python3 -B -m unittest discover -s tests -v

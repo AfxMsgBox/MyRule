@@ -3,21 +3,16 @@
 . "$(dirname "$(readlink -f "$0" 2>/dev/null || printf '%s\n' "$0")")/common.sh" || exit 1
 
 # 旧 hotplug -> Netlink 的迁移清理。
-# 仅清理本安装留下的旧 hook；同名的其它文件拒绝删除。
+# 99-meta-route 是本项目保留名称；只清理下列两个固定路径。
 mp_migrate_legacy_routes() {
     for _mlrh_file in "$MP_INST_DIR/sh/etc/hotplug.d/net/99-meta-route" \
         /etc/hotplug.d/net/99-meta-route; do
         [ -e "$_mlrh_file" ] || [ -L "$_mlrh_file" ] || continue
-        if [ ! -L "$_mlrh_file" ] && [ -f "$_mlrh_file" ] && {
-            grep -qxF "exec /bin/sh $MP_INST_DIR/sh/setup-fake-ip-route.sh" "$_mlrh_file" \
-                || grep -qxF "exec $MP_INST_DIR/sh/setup-fake-ip-route.sh" "$_mlrh_file";
-        }; then
-            rm -f "$_mlrh_file" || return 1
-            echo_log "已清理旧路由 hotplug：$_mlrh_file"
-        else
-            echo_log "旧路由 hotplug 归属不匹配，请检查：$_mlrh_file"
-            return 1
-        fi
+        # 用户指定：按保留文件名清理，不再检查历史文件内容；不跟随符号链接。
+        rm -f -- "$_mlrh_file" || {
+            echo_log "无法删除旧 hotplug：$_mlrh_file；请检查权限或同名目录"; return 1;
+        }
+        echo_log "已清理旧路由 hotplug：$_mlrh_file"
     done
 }
 
@@ -63,4 +58,18 @@ mp_migrate_legacy_core() {
 }
 
 
-mp_migrate_legacy_routes && mp_migrate_legacy_core
+mp_migrate_legacy_proxy() {
+    _mlp_file="$MP_INST_DIR/sh/env.local.conf"
+    [ -f "$_mlp_file" ] || return 0
+    [ ! -L "$_mlp_file" ] || { echo_log '本机配置不能是符号链接'; return 1; }
+    grep -Eq '^[[:space:]]*(export[[:space:]]+)?MP_PROXY=' "$_mlp_file" || return 0
+    _mlp_tmp=$(mktemp "$MP_INST_DIR/sh/.env-migrate.XXXXXX") || return 1
+    if awk '!/^[[:space:]]*(export[[:space:]]+)?MP_PROXY=/' "$_mlp_file" > "$_mlp_tmp" \
+        && chmod 600 "$_mlp_tmp" && mv "$_mlp_tmp" "$_mlp_file"; then
+        echo_log '已移除废弃的外部下载代理配置'
+    else
+        rm -f "$_mlp_tmp"; return 1
+    fi
+}
+
+mp_migrate_legacy_routes && mp_migrate_legacy_core && mp_migrate_legacy_proxy

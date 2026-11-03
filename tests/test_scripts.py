@@ -198,15 +198,15 @@ mp_migrate_legacy_core() { :; }
             self.assertEqual(unrelated.read_text(), 'keep\n')
             self.assert_ok(self.legacy_hook_cleanup())
 
-    def test_upgrade_refuses_foreign_or_symlinked_legacy_hook(self):
+    def test_upgrade_removes_reserved_hook_without_following_symlink(self):
         hook = self.file('etc/hotplug.d/net/99-meta-route',
                          'exec /bin/sh /other/sh/setup-fake-ip-route.sh\n')
-        self.assertNotEqual(self.legacy_hook_cleanup().returncode, 0)
-        hook.unlink()
+        self.assert_ok(self.legacy_hook_cleanup())
+        self.assertFalse(hook.exists())
         target = self.file('owned', f'exec /bin/sh {self.root}/sh/setup-fake-ip-route.sh\n')
         hook.symlink_to(target)
-        self.assertNotEqual(self.legacy_hook_cleanup().returncode, 0)
-        self.assertTrue(hook.is_symlink())
+        self.assert_ok(self.legacy_hook_cleanup())
+        self.assertFalse(hook.is_symlink())
         self.assertTrue(target.exists())
 
     def test_upgrade_dependency_failure_keeps_old_services_and_hook(self):

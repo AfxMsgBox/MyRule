@@ -34,12 +34,10 @@ MyRule 安装器
   --target USER@HOST         通过 SSH 安装到目标机；省略则安装到本机
   --ssh-port PORT            SSH 端口；默认 22
   --ssh-key FILE             SSH 私钥文件；省略则使用默认密钥或 agent
-  --ssh-auth MODE            SSH 认证：auto / password / key；默认 auto，密码由 SSH 提示
+  --ssh-auth MODE            SSH 认证：password / key；默认 key，密码模式需 --interactive
   --install-dir DIR          目标安装目录；默认 /etc/proxy，不支持空格和中文
   --dns 'DNS1 DNS2'          直连上游 DNS；默认 '223.5.5.5 119.29.29.29'，空值使用目标机系统 DNS
-  --proxy URL                保存到目标机的外部后备代理；默认空，Core 代理优先
-  --download-proxy URL       发起端本次下载代理；不保存到目标机，本机未指定时沿用 --proxy
-  --scripts-days N           自动更新脚本的间隔（1–365 天）；省略或 n 保留已有任务
+  --scripts-days N           自动更新脚本间隔（1–365 天）；交互默认 7 天，静默省略或 n 保留旧任务
   --configs-days N           自动更新配置的间隔（1–365 天）；省略或 n 保留已有任务
   --no-start                 部署文件、暂存配置，不启用或重启服务
   --interactive              带参数时仍进入交互向导
@@ -60,7 +58,7 @@ USAGE
 # END shared installer help
 
 # 自举前校验全部选项及取值结构；业务值仍由模块校验。
-_inst_branch=main; _inst_proxy=; _inst_download_proxy=; _inst_download_set=0
+_inst_branch=main
 _inst_log_file=${MP_LOG_FILE:-$_inst_dir/myrule.inst.log}; INST_FILL_FILE=
 _inst_source=; _inst_target=; _inst_install_dir=/etc/proxy; _inst_interactive=0; _inst_next=
 [ "$#" -ne 0 ] || _inst_interactive=1
@@ -79,8 +77,7 @@ for _inst_arg do
     case "$_inst_seen" in *" $_inst_key "*) printf '重复参数：%s\n' "$_inst_key" >&2; exit 1 ;; esac
     _inst_seen="$_inst_seen$_inst_key "
     case "$_inst_key" in
-        --branch) _inst_var=_inst_branch ;; --proxy) _inst_var=_inst_proxy ;;
-        --download-proxy) _inst_var=_inst_download_proxy; _inst_download_set=1 ;;
+        --branch) _inst_var=_inst_branch ;;
         --source-dir) _inst_var=_inst_source ;; --target) _inst_var=_inst_target ;;
         --install-dir) _inst_var=_inst_install_dir ;;
         --log-file) _inst_var=_inst_log_file ;;
@@ -276,10 +273,10 @@ mp_download_progress() {
     mp_log_event "$_dp_line"
 }
 
-# URL/output/Core/fallback/label/timeout/min-size. Only log sanitized commands.
+# URL/output/Core/label/timeout/min-size. Commands are written to the private log.
 mp_http_download() (
-    _hd_url=$1; _hd_dst=$2; _hd_core=$3; _hd_proxy=$4
-    _hd_label=${5:-文件}; _hd_timeout=${6:-300}; _hd_min=${7:-0}
+    _hd_url=$1; _hd_dst=$2; _hd_core=$3
+    _hd_label=${4:-文件}; _hd_timeout=${5:-300}; _hd_min=${6:-0}
     _hd_meta=$(mktemp -d) || exit 1
     _hd_pid=
     trap '[ -z "$_hd_pid" ] || { kill "$_hd_pid" 2>/dev/null; wait "$_hd_pid" 2>/dev/null; }; rm -rf -- "$_hd_meta"' EXIT
@@ -290,11 +287,9 @@ mp_http_download() (
     _hd_round=0
     while :; do
         _hd_transient=0
-        for _hd_kind in core fallback direct; do
+        for _hd_kind in core direct; do
             case "$_hd_kind" in
                 core) [ -n "$_hd_core" ] || continue; _hd_channel=$_hd_core; _hd_name='Core 本机代理' ;;
-                fallback) [ -n "$_hd_proxy" ] && [ "$_hd_proxy" != "$_hd_core" ] || continue
-                    _hd_channel=$_hd_proxy; _hd_name='外部后备代理' ;;
                 direct) _hd_channel=; _hd_name=直连 ;;
             esac
             mp_download_message "  尝试：$_hd_name"
@@ -380,15 +375,9 @@ fi
 mp_fill_init || exit 1
 if [ "$_inst_interactive" = 1 ]; then
     ( : <>/dev/tty ) 2>/dev/null || { echo '交互安装需要终端' >&2; exit 1; }
-    _inst_download_proxy=$(mp_fill_default INST_DOWNLOAD_PROXY "$_inst_download_proxy") || exit 1
-    printf '\nMyRule · 获取安装器模块\n发起端下载代理（空值直连）[%s]> ' "$_inst_download_proxy" > /dev/tty
-    IFS= read -r _inst_input < /dev/tty || exit 1
-    _inst_download_proxy=${_inst_input:-$_inst_download_proxy}
-    mp_fill_save INST_DOWNLOAD_PROXY "$_inst_download_proxy" || exit 1
-    _inst_download_set=1
+    printf '\nMyRule · 获取安装器模块\n' > /dev/tty
     _inst_branch=$(mp_fill_default MP_REPO_BRANCH "$_inst_branch") || exit 1
 fi
-[ "$_inst_download_set" = 1 ] || { [ -n "$_inst_target" ] || _inst_download_proxy=$_inst_proxy; }
 _inst_boot=$(mktemp -d /tmp/myrule-bootstrap.XXXXXXXX) || exit 1
 chmod 700 "$_inst_boot" || exit 1
 trap '_inst_rc=$?; mp_log_event "独立入口退出码：$_inst_rc"; rm -rf -- "$_inst_boot"' EXIT
@@ -400,7 +389,7 @@ _inst_core=
 case "$_inst_port" in ''|*[!0-9]*) ;; *) _inst_core="socks5h://127.0.0.1:$_inst_port" ;; esac
 
 _inst_download() {
-    mp_http_download "$1" "$2" "$_inst_core" "$_inst_download_proxy" "${3:-安装器资源}" "${4:-300}"
+    mp_http_download "$1" "$2" "$_inst_core" "${3:-安装器资源}" "${4:-300}"
 }
 # 选择必须发生在下载模块之前；独立文件无法得知自己来自哪个分支。
 if [ "$_inst_interactive" = 1 ]; then
@@ -418,15 +407,15 @@ if [ "$_inst_interactive" = 1 ]; then
     done
     grep -qxF main "$_inst_boot/branches" || { echo '分支列表缺少 main' >&2; exit 1; }
     { printf 'main\n'; LC_ALL=C sort -u "$_inst_boot/branches" | sed '/^main$/d'; } > "$_inst_boot/choices"
-    _inst_color=; _inst_reset=
+    _inst_color=; _inst_reset=; _inst_red=
     if [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != dumb ]; then
-        _inst_color=$(printf '\033[1;36m'); _inst_reset=$(printf '\033[0m')
+        _inst_color=$(printf '\033[1;36m'); _inst_reset=$(printf '\033[0m'); _inst_red=$(printf '\033[31m')
     fi
     printf '\n%sGitHub 分支%s\n' "$_inst_color" "$_inst_reset" > /dev/tty
     awk '{ printf "  %d) %s\n", NR, $0 }' "$_inst_boot/choices" > /dev/tty
     _inst_default=$(awk -v branch="${_inst_branch:-main}" '$0 == branch { print NR; exit }' "$_inst_boot/choices")
     while :; do
-        printf '选择分支编号 [%s]> ' "${_inst_default:-1}" > /dev/tty
+        printf '%s选择分支编号 [%s]（必填）%s> ' "$_inst_red" "${_inst_default:-1}" "$_inst_reset" > /dev/tty
         IFS= read -r _inst_choice < /dev/tty || exit 1
         _inst_choice=${_inst_choice:-${_inst_default:-1}}
         case "$_inst_choice" in *[!0-9]*) continue ;; esac
@@ -440,12 +429,11 @@ fi
 _inst_branch=$(printf '%s' "${_inst_branch:-main}" | jq -sRr '@uri') || exit 1
 _inst_url="https://codeload.github.com/AfxMsgBox/MyRule/tar.gz/refs/heads/$_inst_branch"
 _inst_download "$_inst_url" "$_inst_boot/repo.tgz" "安装器仓库归档" \
-    || { echo '安装器下载失败，请检查分支、网络或下载代理' >&2; exit 1; }
+    || { echo '安装器下载失败，请检查分支、网络或本机 Core 代理' >&2; exit 1; }
 tar -xzf "$_inst_boot/repo.tgz" -C "$_inst_boot" || exit 1
 set +f
 for _inst_main in "$_inst_boot"/*/sh/install-lib.sh; do
     [ -f "$_inst_main" ] || { printf '分支 %s 缺少 sh/install-lib.sh，请选择包含新版安装器的分支\n' "$_inst_branch" >&2; exit 1; }
-    _INST_BOOT_PROXY=$_inst_download_proxy; export _INST_BOOT_PROXY
     _INST_BOOT_REPO=${_inst_main%/sh/install-lib.sh}
     _INST_BOOT_BRANCH=$_inst_branch
     export _INST_BOOT_REPO _INST_BOOT_BRANCH

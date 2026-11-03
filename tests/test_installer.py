@@ -69,6 +69,7 @@ prompt_to() {
         _ici_mode) _ici_mode=4 ;;
         _MP_SOURCE_DIR) _MP_SOURCE_DIR="$TEST_SOURCE" ;;
         _ica_answer) _ica_answer=n ;;
+        MP_SUBSCRIBE_URL) MP_SUBSCRIBE_URL=https://example.invalid/sub ;;
         *) : ;;
     esac
 }
@@ -110,10 +111,11 @@ test "$_MP_SOURCE_DIR" = "$TEST_SOURCE" && test "$MP_REPO_BRANCH" = feature/loca
         self.assertEqual((self.root / "result").read_text(), "old")
         self.assertFalse(list(self.root.glob(".local-copy.*")))
 
-    def test_external_download_still_uses_proxy_in_local_mode(self):
+    def test_external_download_still_uses_core_in_local_mode(self):
         source = self.local_source()
         self.curl_mock()
-        proxy = "http://proxy.invalid:1080"
+        proxy = "socks5h://127.0.0.1:7890"
+        self.file("core/config.yaml", "mixed-port: 7890\n")
         result = self.run_shell('download_file https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/gfw.txt '
                                 '"$TEST_ROOT/result"', extra={"_MP_SOURCE_DIR": str(source),
                                                             "MP_PROXY": proxy, "SUCCEED_PROXY": proxy})
@@ -260,7 +262,7 @@ cp "$TEST_ROOT/fixtures/$fixture" "$out"
         target = self.root / "installed"
         auth_args = REQUIRED[:2] + ["--no-auth"] if no_auth else REQUIRED
         args = ["sh", str(script), *auth_args, "--source-dir", str(source), "--install-dir", str(target),
-                "--proxy", "http://proxy.invalid:1080", "--branch", "feature/local"]
+                "--branch", "feature/local"]
         if online:
             with tarfile.open(self.root / "fixtures/repo.tgz", "w:gz") as tar:
                 tar.add(source, arcname="MyRule-test")
@@ -284,8 +286,7 @@ if command.startswith("[ -c /dev/net/tun ]"):
 sys.exit(subprocess.run(["sh", "-c", command], env=os.environ | {"REMOTE_CPU": "aarch64"}).returncode)
 ''')
             ssh.chmod(0o755)
-            args += ["--target", "installer@example.invalid", "--download-proxy", "http://proxy.invalid:1080"]
-            args[args.index("--proxy") + 1] = "http://target-proxy.invalid:1080"
+            args += ["--target", "installer@example.invalid"]
         self.file('myrule.inst.log', 'previous-install-marker\n')
         result = subprocess.run(args, cwd=self.root, env=self.env, text=True, capture_output=True, timeout=10)
         self.assert_ok(result)
@@ -316,7 +317,7 @@ sys.exit(subprocess.run(["sh", "-c", command], env=os.environ | {"REMOTE_CPU": "
         downloads = (self.root / "downloads").read_text().splitlines()
         self.assertTrue(any("/gfw.txt" in line for line in downloads))
         self.assertTrue(any("example.invalid/sub" in line for line in downloads))
-        self.assertTrue(all(line.startswith("http://proxy.invalid:1080 ") for line in downloads))
+        self.assertTrue(all(line.startswith(" ") for line in downloads))
         self.assertEqual(sum("codeload.github.com" in line for line in downloads), int(online))
         self.assertEqual((self.root / "events").read_text().splitlines(),
                          ["sync always", "enable_start proxy_core", "ready", "enable_start agh"])
@@ -324,7 +325,7 @@ sys.exit(subprocess.run(["sh", "-c", command], env=os.environ | {"REMOTE_CPU": "
             self.assertTrue(any("mihomo-linux-arm64-" in line for line in downloads))
             self.assertTrue(any("AdGuardHome_linux_arm64" in line for line in downloads))
             conf = (target / "sh/env.local.conf").read_text()
-            self.assertIn("MP_PROXY='http://target-proxy.invalid:1080'", conf)
+            self.assertNotIn("MP_PROXY=", conf)
             self.assertNotIn("http://proxy.invalid:1080", conf)
             ssh_commands = (self.root / "ssh-commands").read_text()
             self.assertNotIn("private", ssh_commands)
@@ -368,30 +369,29 @@ sys.exit(subprocess.run(["sh", "-c", command], env=os.environ | {"REMOTE_CPU": "
                 os.close(slave)
 
     def test_interactive_inputs_echo_paste_and_preserve_defaults(self):
-        values = ["http://user:p%40ss@proxy.invalid:1080",
-                  "https://example.invalid/sub?token=a'b&path=\\test",
+        values = ["https://example.invalid/sub?token=a'b&path=\\test",
                   "admin", "$2b$10$test'quoted\\hash", "1.1.1.1 9.9.9.9"]
         script = PREFIX + r'''
 exec 3<&0
 inst_colors
 INSTALL_MODE=interactive
 inst_parse_args --interactive
-MP_PROXY=$TEST_PROXY; MP_SUBSCRIBE_URL=$TEST_SUB; MP_AGH_USER_NAME=$TEST_USER
+MP_SUBSCRIBE_URL=$TEST_SUB; MP_AGH_USER_NAME=$TEST_USER
 MP_AGH_PASSWORD=$TEST_HASH; MP_LOCAL_DNS=$TEST_DNS
 inst_choose_branch() { return 0; }
 # Exercise the real wizard; only unrelated choices accept their defaults automatically.
 PROMPT_REAL
 prompt_to() {
-    case "$1" in _ica_answer) _ica_answer=y ;; MP_PROXY|MP_SUBSCRIBE_URL|MP_AGH_USER_NAME|MP_AGH_PASSWORD|MP_LOCAL_DNS) prompt_visible "$@" ;;
+    case "$1" in _ica_answer) _ica_answer=y ;; MP_SUBSCRIBE_URL|MP_AGH_USER_NAME|MP_AGH_PASSWORD|MP_LOCAL_DNS) prompt_visible "$@" ;;
         *) eval "$1=\$2" ;;
     esac
 }
 inst_collect_inputs || exit 1
-printf '%s\n' "$MP_PROXY" "$MP_SUBSCRIBE_URL" "$MP_AGH_USER_NAME" "$MP_AGH_PASSWORD" "$MP_LOCAL_DNS" > "$TEST_ROOT/inputs"
+printf '%s\n' "$MP_SUBSCRIBE_URL" "$MP_AGH_USER_NAME" "$MP_AGH_PASSWORD" "$MP_LOCAL_DNS" > "$TEST_ROOT/inputs"
 '''.replace('PROMPT_REAL', test_scripts.function_source(LIBRARY, 'prompt_to').replace('prompt_to()', 'prompt_visible()', 1))
         for retain_defaults in (False, True):
             with self.subTest(retain_defaults=retain_defaults):
-                extra = dict(zip(('TEST_PROXY', 'TEST_SUB', 'TEST_USER', 'TEST_HASH', 'TEST_DNS'),
+                extra = dict(zip(('TEST_SUB', 'TEST_USER', 'TEST_HASH', 'TEST_DNS'),
                                  values if retain_defaults else [''] * len(values)))
                 master, slave = pty.openpty()
                 proc = subprocess.Popen(['sh', '-c', script], stdin=slave, stdout=slave, stderr=slave,
@@ -445,7 +445,7 @@ printf '%s\n' "$MP_PROXY" "$MP_SUBSCRIBE_URL" "$MP_AGH_USER_NAME" "$MP_AGH_PASSW
                          ["silent", "/etc/proxy", "main", "223.5.5.5 119.29.29.29", "proxy="])
 
     def test_named_empty_and_equals_values(self):
-        result = self.installer(self.args(["--branch=", "--dns=", "--proxy=", "--install-dir=" + str(self.root / "custom")])
+        result = self.installer(self.args(["--branch=", "--dns=", "--install-dir=" + str(self.root / "custom")])
                                 + 'inst_validate || exit 1\n'
                                 'printf "%s|%s|%s|%s" "$MP_REPO_BRANCH" "$MP_LOCAL_DNS" "$MP_PROXY" "$DIR_INST"')
         self.assert_ok(result)
@@ -599,9 +599,9 @@ with open(args[args.index("-o") + 1], "w") as out:
         self.curl_mock()
         core = "socks5h://127.0.0.1:7890"
         external = "http://user:private@external.invalid:8080"
-        cases = [(True, external, "", [core, external, ""]),
+        cases = [(True, external, "", [core, ""]),
                  (True, "", core, [core]), (True, "", "", [core, ""]),
-                 (False, external, external, [external]), (False, "", "", [""]),
+                 (False, external, "", [""]), (False, "", "", [""]),
                  (True, core, "", [core, ""])]
         for bootstrap in (True, False):
             for configured, proxy, succeeds, expected in cases:
@@ -661,7 +661,7 @@ with open(args[args.index("-o") + 1], "w") as out:
         # Prepare runs in a child process and explicitly exports the chosen values.
         source = self.local_source()
         for name in ("update-core-config.sh", "update-bin.sh", "update-agh-config.sh"):
-            (source / "sh" / name).write_text('test "$_MP_NONINTERACTIVE" = 1 && test "$MP_PROXY" = "" && test "$MP_REPO_BRANCH" = main\n')
+            (source / "sh" / name).write_text('test "$_MP_NONINTERACTIVE" = 1 && test "$MP_REPO_BRANCH" = main\n')
         with (source / "sh/common.sh").open("a") as stream:
             stream.write('\nmp_prepare_agh_config() { :; }\n')
         result = self.installer(self.args(["--source-dir", str(source)]) + r'''

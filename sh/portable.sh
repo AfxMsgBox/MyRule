@@ -220,10 +220,10 @@ mp_download_progress() {
     mp_log_event "$_dp_line"
 }
 
-# URL/output/Core/fallback/label/timeout/min-size. Only log sanitized commands.
+# URL/output/Core/label/timeout/min-size. Commands are written to the private log.
 mp_http_download() (
-    _hd_url=$1; _hd_dst=$2; _hd_core=$3; _hd_proxy=$4
-    _hd_label=${5:-文件}; _hd_timeout=${6:-300}; _hd_min=${7:-0}
+    _hd_url=$1; _hd_dst=$2; _hd_core=$3
+    _hd_label=${4:-文件}; _hd_timeout=${5:-300}; _hd_min=${6:-0}
     _hd_meta=$(mktemp -d) || exit 1
     _hd_pid=
     trap '[ -z "$_hd_pid" ] || { kill "$_hd_pid" 2>/dev/null; wait "$_hd_pid" 2>/dev/null; }; rm -rf -- "$_hd_meta"' EXIT
@@ -234,11 +234,9 @@ mp_http_download() (
     _hd_round=0
     while :; do
         _hd_transient=0
-        for _hd_kind in core fallback direct; do
+        for _hd_kind in core direct; do
             case "$_hd_kind" in
                 core) [ -n "$_hd_core" ] || continue; _hd_channel=$_hd_core; _hd_name='Core 本机代理' ;;
-                fallback) [ -n "$_hd_proxy" ] && [ "$_hd_proxy" != "$_hd_core" ] || continue
-                    _hd_channel=$_hd_proxy; _hd_name='外部后备代理' ;;
                 direct) _hd_channel=; _hd_name=直连 ;;
             esac
             mp_download_message "  尝试：$_hd_name"

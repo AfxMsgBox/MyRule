@@ -128,7 +128,7 @@ printf '%s' "$MP_SUBSCRIBE_URL"
         self.assertEqual(result.stdout, value)
         self.assertFalse((self.root / 'PWNED').exists())
         data = json.loads((self.root / 'config.json').read_text())
-        data['MP_PROXY'] = None
+        data['MP_LOCAL_DNS'] = None
         (self.root / 'config.json').write_text(json.dumps(data))
         result = self.installer('inst_load_config "$TEST_ROOT/config.json"')
         self.assertNotEqual(result.returncode, 0)
@@ -170,7 +170,7 @@ inst_save_config "$TEST_ROOT/config.json" && inst_load_config "$TEST_ROOT/config
         valid = json.loads(config.read_text())
         for value in ('before\0after', '\0', None, 1):
             with self.subTest(value=value):
-                config.write_text(json.dumps(valid | {'MP_PROXY': value}))
+                config.write_text(json.dumps(valid | {'MP_LOCAL_DNS': value}))
                 result = self.installer('inst_load_config "$TEST_ROOT/config.json"')
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn('安装包参数校验失败', result.stdout)
@@ -216,8 +216,8 @@ inst_print_result
     def test_ssh_auth_keeps_arguments_and_enables_native_password_or_key(self):
         self.command('ssh', 'printf "%s\\n" "$@"\n')
         key = self.file('key with spaces', 'fake key')
-        for auth in ('auto', 'password', 'key'):
-            result = self.installer(self.args(['--target', 'user@host', '--ssh-key', str(key), '--ssh-auth', auth, '--ssh-port', '2222']) + '\n_inst_tmp="$TEST_ROOT"\ninst_ssh -T "$INST_TARGET" true')
+        for auth in ('password', 'key'):
+            result = self.installer(self.args(['--interactive', '--target', 'user@host', '--ssh-key', str(key), '--ssh-auth', auth, '--ssh-port', '2222']) + '\n_inst_tmp="$TEST_ROOT"\ninst_ssh -T "$INST_TARGET" true')
             self.assert_ok(result)
             args = result.stdout.splitlines()
             self.assertIn(str(key), args)

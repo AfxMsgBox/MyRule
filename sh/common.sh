@@ -250,7 +250,7 @@ mp_copy_repo_file() {
 
 # download_file <url> <dst> [verbose=true] [min_size=8] [label] [timeout=300]
 # verbose=true 时输出目标文件名、通道、字节数与耗时；不输出远端 URL 凭据。
-# 每轮依次尝试 Core 配置派生的本机代理、外部后备代理、直连。
+# 每轮依次尝试 Core 配置派生的本机代理、直连。
 # 临时网络错误最多自动重试两轮；仍失败时，日常交互调用可手动重试。
 # --fail 让 4xx/5xx 不被当成功；mktemp + mv 原子替换
 download_file() {
@@ -279,7 +279,7 @@ download_file() {
 
     while ! mp_http_download "$_df_url" "$_df_tmp" \
         "$(mp_core_proxy_url "${_MP_DOWNLOAD_CORE_CONFIG:-$MP_CORE_DIR/config.yaml}" 2>/dev/null || :)" \
-        "$MP_PROXY" "${5:-$(basename "$_df_dst")}" "${6:-300}" "$_df_min_size"; do
+        "${5:-$(basename "$_df_dst")}" "${6:-300}" "$_df_min_size"; do
         if ! download_retry_prompt; then
             rm -f "$_df_tmp"
             return 1
@@ -324,7 +324,6 @@ mp_run_logged_command() (
         {
             line=$0
             line=hide(line,ENVIRON["MP_SUBSCRIBE_URL"])
-            line=hide(line,ENVIRON["MP_PROXY"])
             line=hide(line,ENVIRON["MP_AGH_PASSWORD"])
             if (tolower(line) ~ /authorization[[:space:]]*:/) line="<redacted authentication diagnostic>"
             gsub(/(https?|socks5h?):\/\/[^[:space:]<>]+/, "<redacted-url>", line)

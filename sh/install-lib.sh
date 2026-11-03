@@ -6,7 +6,7 @@
 
 inst_colors() {
     C_R= C_D= C_B= C_RED= C_GRN= C_YEL= C_BLU= C_CYN=
-    T_R= T_B= T_CYN=
+    T_R= T_B= T_CYN= T_RED=
     if [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != dumb ]; then
         if [ -t 1 ]; then
             C_R=$(printf '\033[0m'); C_D=$(printf '\033[2m'); C_B=$(printf '\033[1m')
@@ -14,7 +14,7 @@ inst_colors() {
             C_BLU=$(printf '\033[34m'); C_CYN=$(printf '\033[36m')
         fi
         if [ -t 3 ]; then
-            T_R=$(printf '\033[0m'); T_B=$(printf '\033[1m'); T_CYN=$(printf '\033[36m')
+            T_R=$(printf '\033[0m'); T_B=$(printf '\033[1m'); T_CYN=$(printf '\033[36m'); T_RED=$(printf '\033[31m')
         fi
     fi
     _inst_step=0
@@ -22,11 +22,12 @@ inst_colors() {
 
 say_section() {
     _inst_step=$((_inst_step + 1))
+    _inst_phase=$*
     mp_log_event "阶段 $_inst_step：$*"
     printf '\n%s[%02d] %s%s\n' "${C_B}${C_BLU}" "$_inst_step" "$*" "$C_R"
 }
 
-say_step() { mp_log_event "[执行] $*"; printf '  %s[执行]%s %s\n' "$C_CYN" "$C_R" "$*"; }
+say_step() { _inst_phase=$*; mp_log_event "[执行] $*"; printf '  %s[执行]%s %s\n' "$C_CYN" "$C_R" "$*"; }
 say_ok() { mp_log_event "[成功] $*"; printf '  %s[成功]%s %s\n' "$C_GRN" "$C_R" "$*"; }
 say_warn() { mp_log_event "[警告] $*"; printf '  %s[警告]%s %s\n' "$C_YEL" "$C_R" "$*"; }
 say_err() { mp_log_event "[失败] $*"; printf '  %s[失败]%s %s\n' "$C_RED" "$C_R" "$*"; }
@@ -35,14 +36,37 @@ say_dim() { printf '  %s%s%s\n' "$C_D" "$*" "$C_R"; }
 prompt_to() {
     _p_var=$1; _p_def=$2; _p_label=$3; shift 3
     [ "$INSTALL_MODE" = interactive ] || { eval "$_p_var=\$_p_def"; return 0; }
-    [ "$_p_var" = _ib_choice ] || _p_def=$(mp_fill_default "$_p_var" "$_p_def") || exit 1
-    printf '\n%s%s%s\n' "${T_B}${T_CYN}" "$_p_label" "$T_R" >&3
+    case "$_p_var" in _ib_choice|_is_auth_choice|*_retry) ;; *) _p_def=$(mp_fill_default "$_p_var" "$_p_def") || exit 1 ;; esac
+    _p_color=$T_CYN
+    if [ "${_inst_required:-0}" = 1 ]; then _p_color=$T_RED; _p_label="$_p_label（必填）"; fi
+    printf '\n%s%s%s\n' "${T_B}${_p_color}" "$_p_label" "$T_R" >&3
     for _p_hint in "$@"; do printf '  %s\n' "$_p_hint" >&3; done
     printf '  [%s] > ' "${_p_def:-空}" >&3
     IFS= read -r _p_val <&3 || { say_err '输入已结束，取消安装'; exit 1; }
     [ -n "$_p_val" ] || _p_val=$_p_def
     eval "$_p_var=\$_p_val"
-    [ "$_p_var" = _ib_choice ] || mp_fill_save "$_p_var" "$_p_val" || exit 1
+    case "$_p_var" in _ib_choice|_is_auth_choice|*_retry) ;; *) mp_fill_save "$_p_var" "$_p_val" || exit 1 ;; esac
+}
+
+prompt_required() {
+    while :; do
+        _inst_required=1
+        prompt_to "$@"
+        _inst_required=0
+        eval "_pr_value=\$$1"
+        [ -z "$_pr_value" ] || return 0
+        say_err '此项不能为空，请重新输入'
+        [ "$INSTALL_MODE" = interactive ] || return 1
+    done
+}
+
+inst_prompt_subscription() {
+    while :; do
+        prompt_required MP_SUBSCRIBE_URL "$MP_SUBSCRIBE_URL" '节点订阅 URL（可见输入）' || return 1
+        case "$MP_SUBSCRIBE_URL" in http://?*|https://?*) return 0 ;; esac
+        say_err '订阅 URL 必须为 http/https 地址，请重新输入'
+        [ "$INSTALL_MODE" = interactive ] || return 1
+    done
 }
 
 # === options ===
@@ -66,12 +90,10 @@ MyRule 安装器
   --target USER@HOST         通过 SSH 安装到目标机；省略则安装到本机
   --ssh-port PORT            SSH 端口；默认 22
   --ssh-key FILE             SSH 私钥文件；省略则使用默认密钥或 agent
-  --ssh-auth MODE            SSH 认证：auto / password / key；默认 auto，密码由 SSH 提示
+  --ssh-auth MODE            SSH 认证：password / key；默认 key，密码模式需 --interactive
   --install-dir DIR          目标安装目录；默认 /etc/proxy，不支持空格和中文
   --dns 'DNS1 DNS2'          直连上游 DNS；默认 '223.5.5.5 119.29.29.29'，空值使用目标机系统 DNS
-  --proxy URL                保存到目标机的外部后备代理；默认空，Core 代理优先
-  --download-proxy URL       发起端本次下载代理；不保存到目标机，本机未指定时沿用 --proxy
-  --scripts-days N           自动更新脚本的间隔（1–365 天）；省略或 n 保留已有任务
+  --scripts-days N           自动更新脚本间隔（1–365 天）；交互默认 7 天，静默省略或 n 保留旧任务
   --configs-days N           自动更新配置的间隔（1–365 天）；省略或 n 保留已有任务
   --no-start                 部署文件、暂存配置，不启用或重启服务
   --interactive              带参数时仍进入交互向导
@@ -93,14 +115,13 @@ USAGE
 
 inst_parse_args() {
     INSTALL_MODE=silent; [ "$#" -ne 0 ] || INSTALL_MODE=interactive
+    unset MP_PROXY
     _inst_help=0; _inst_seen=' '; _MP_SOURCE_DIR=; INST_LOCAL=0
     INST_FILL_FILE=
     INST_LOG_FILE=${MP_LOG_FILE:-${INST_ENTRY_DIR:-${INST_LIB:-.}}/myrule.inst.log}
     DIR_INST=/etc/proxy; MP_REPO_BRANCH=main; MP_LOCAL_DNS='223.5.5.5 119.29.29.29'
-    MP_PROXY=; MP_SUBSCRIBE_URL=; MP_AGH_USER_NAME=admin; MP_AGH_PASSWORD=; INST_NO_AUTH=0
-    INST_TARGET=; INST_SSH_PORT=22; INST_SSH_KEY=; INST_SSH_AUTH=auto
-    INST_DOWNLOAD_PROXY=${_INST_BOOT_PROXY:-}; INST_DOWNLOAD_PROXY_SET=0
-    [ "${_INST_BOOT_PROXY+x}" != x ] || INST_DOWNLOAD_PROXY_SET=1
+    MP_SUBSCRIBE_URL=; MP_AGH_USER_NAME=admin; MP_AGH_PASSWORD=; INST_NO_AUTH=0
+    INST_TARGET=; INST_SSH_PORT=22; INST_SSH_KEY=; INST_SSH_AUTH=key
     autostart=Y; cron_script_days=n; cron_config_days=n
     while [ "$#" -gt 0 ]; do
         _ipa_key=${1%%=*}
@@ -127,7 +148,6 @@ inst_parse_args() {
         case "$_ipa_key" in
             --install-dir) _ipa_var=DIR_INST ;; --branch) _ipa_var=MP_REPO_BRANCH ;;
             --source-dir) _ipa_var=_MP_SOURCE_DIR ;; --dns) _ipa_var=MP_LOCAL_DNS ;;
-            --proxy) _ipa_var=MP_PROXY ;; --download-proxy) _ipa_var=INST_DOWNLOAD_PROXY; INST_DOWNLOAD_PROXY_SET=1 ;;
             --subscribe-url) _ipa_var=MP_SUBSCRIBE_URL ;; --agh-user) _ipa_var=MP_AGH_USER_NAME ;;
             --agh-password) _ipa_var=MP_AGH_PASSWORD ;; --target) _ipa_var=INST_TARGET ;;
             --ssh-port) _ipa_var=INST_SSH_PORT ;; --ssh-key) _ipa_var=INST_SSH_KEY ;;
@@ -164,8 +184,16 @@ inst_valid_days() {
     [ "$1" -ge 1 ] 2>/dev/null && [ "$1" -le 365 ]
 }
 
-inst_valid_proxy() {
-    case "$1" in ''|http://?*|https://?*|socks5://?*|socks5h://?*) return 0 ;; *) return 1 ;; esac
+inst_validate_ssh() {
+    case "$INST_TARGET" in -*|*[!a-zA-Z0-9_.:@-]*|*@|@*) say_err '无效 SSH 目标，请填写 USER@HOST 或 SSH 别名'; return 1 ;; esac
+    case "$INST_SSH_PORT" in ''|*[!0-9]*) say_err '无效 SSH 端口'; return 1 ;; esac
+    [ "$INST_SSH_PORT" -ge 1 ] 2>/dev/null && [ "$INST_SSH_PORT" -le 65535 ] \
+        || { say_err 'SSH 端口必须为 1–65535'; return 1; }
+    case "$INST_SSH_AUTH" in password|key) ;; *) say_err 'SSH 认证须为 password/key'; return 1 ;; esac
+    [ -z "$INST_SSH_KEY" ] || [ -r "$INST_SSH_KEY" ] || { say_err 'SSH 私钥不可读'; return 1; }
+    if [ -n "$INST_TARGET" ] && [ "$INST_SSH_AUTH" = password ] && [ "$INSTALL_MODE" != interactive ]; then
+        say_err 'SSH 密码认证需要 --interactive；静默安装请使用密钥'; return 1
+    fi
 }
 
 inst_validate_basic() {
@@ -180,20 +208,13 @@ inst_validate_basic() {
         0:'$2a$'?*|0:'$2b$'?*|0:'$2y$'?*) ;;
         *) say_err '请选择有效的 bcrypt 密码哈希或 --no-auth'; return 1 ;;
     esac
-    inst_valid_proxy "$MP_PROXY" && inst_valid_proxy "$INST_DOWNLOAD_PROXY" \
-        || { say_err '不支持的代理 URL'; return 1; }
     while [ "${DIR_INST%/}" != "$DIR_INST" ]; do DIR_INST=${DIR_INST%/}; done
     case "$DIR_INST" in /*) ;; *) say_err '安装目录必须为绝对路径'; return 1 ;; esac
     case "$DIR_INST/" in *[!a-zA-Z0-9_./-]*|*'/../'*|*'/./'*|*'//'*) say_err '安装目录包含不支持的字符或路径跳转'; return 1 ;; esac
     case "$DIR_INST" in ''|/etc|/usr|/usr/local|/var|/opt|/tmp|/home|/root|/srv|/bin|/sbin|/lib|/boot|/dev|/proc|/sys|/run|/mnt|/media)
         say_err '不能将系统目录作为安装目录'; return 1 ;;
     esac
-    case "$INST_TARGET" in -*|*[!a-zA-Z0-9_.:@-]*|*@|@*) say_err '无效 SSH 目标，请填写 USER@HOST 或 SSH 别名'; return 1 ;; esac
-    case "$INST_SSH_PORT" in ''|*[!0-9]*) say_err '无效 SSH 端口'; return 1 ;; esac
-    [ "$INST_SSH_PORT" -ge 1 ] 2>/dev/null && [ "$INST_SSH_PORT" -le 65535 ] \
-        || { say_err 'SSH 端口必须为 1–65535'; return 1; }
-    case "$INST_SSH_AUTH" in auto|password|key) ;; *) say_err 'SSH 认证须为 auto/password/key'; return 1 ;; esac
-    [ -z "$INST_SSH_KEY" ] || [ -r "$INST_SSH_KEY" ] || { say_err 'SSH 私钥不可读'; return 1; }
+    inst_validate_ssh || return 1
     inst_valid_days "$cron_script_days" && inst_valid_days "$cron_config_days" \
         || { say_err '更新间隔须为 1–365 天'; return 1; }
     MP_REPO_BRANCH=${MP_REPO_BRANCH:-main}
@@ -468,7 +489,7 @@ bootstrap_download() {
     _bd_label='仓库归档'; _bd_timeout=300
     case "$_bd_url" in https://api.github.com/*) _bd_label='GitHub 分支列表'; _bd_timeout=60 ;; esac
     while ! mp_http_download "$_bd_url" "$_bd_tmp" "$(bootstrap_core_proxy 2>/dev/null || :)" \
-        "${INST_DOWNLOAD_PROXY-$MP_PROXY}" "$_bd_label" "$_bd_timeout"; do
+        "$_bd_label" "$_bd_timeout"; do
         if [ "$INSTALL_MODE" != interactive ] || [ "$_bd_retry_allowed" != 1 ]; then
             rm -f "$_bd_tmp"; return 1
         fi
@@ -510,7 +531,7 @@ inst_choose_branch() {
     _ib_branch=$(mp_fill_default MP_REPO_BRANCH main) || return 1
     _ib_default=$(awk -v branch="$_ib_branch" '$0==branch {print NR; exit}' "$_inst_tmp/branches.sorted")
     while :; do
-        prompt_to _ib_choice "${_ib_default:-1}" '选择分支编号'
+        prompt_required _ib_choice "${_ib_default:-1}" '选择分支编号'
         case "$_ib_choice" in ''|*[!0-9]*) say_warn '请输入有效编号'; continue ;; esac
         MP_REPO_BRANCH=$(awk -v n="$_ib_choice" 'NR == n { print; exit }' "$_inst_tmp/branches.sorted")
         if [ -n "$MP_REPO_BRANCH" ]; then mp_fill_save MP_REPO_BRANCH "$MP_REPO_BRANCH"; return $?; fi
@@ -675,10 +696,10 @@ install_cron_job() {
 }
 
 prompt_cron_days() {
-    _pcd_var=$1; _pcd_label=$2
+    _pcd_var=$1; _pcd_label=$2; _pcd_default=${3:-3}
     while :; do
-        prompt_to "$_pcd_var" "3" "$_pcd_label" \
-            "输入间隔天数 1-365，回车默认 3 天；输入 n 跳过设置"
+        prompt_to "$_pcd_var" "$_pcd_default" "$_pcd_label" \
+            "输入间隔天数 1-365，回车默认 $_pcd_default 天；输入 n 跳过设置"
         eval "_pcd_value=\$$_pcd_var"
         case "$_pcd_value" in
             n|N|no|NO|No) return 1 ;;
@@ -712,7 +733,7 @@ inst_apply_schedule() {
 
 # === bundle ===
 # 安装包只包含仓库快照、资源缓存和参数；绝不执行下载的目标二进制。
-INST_CONFIG_KEYS='DIR_INST MP_REPO_BRANCH MP_PROXY MP_SUBSCRIBE_URL MP_AGH_USER_NAME MP_AGH_PASSWORD MP_LOCAL_DNS autostart cron_script_days cron_config_days INST_TARGET_OS INST_TARGET_ARCH INST_NO_AUTH'
+INST_CONFIG_KEYS='DIR_INST MP_REPO_BRANCH MP_SUBSCRIBE_URL MP_AGH_USER_NAME MP_AGH_PASSWORD MP_LOCAL_DNS autostart cron_script_days cron_config_days INST_TARGET_OS INST_TARGET_ARCH INST_NO_AUTH'
 
 inst_snapshot() (
     _is_dst=$1
@@ -806,8 +827,7 @@ inst_prepare() (
     mkdir -p "$MP_INST_DIR" && cp -R "$_ip_bundle/repo/sh" "$MP_INST_DIR/sh" || exit 1
     _MP_SOURCE_DIR="$_ip_bundle/repo"; _MP_CACHE_WRITE="$_ip_bundle/resources"
     _MP_TARGET_ARCH=$INST_TARGET_ARCH; _MP_DOWNLOAD_CORE_CONFIG=$INST_CORE_CONFIG
-    MP_PROXY=$INST_DOWNLOAD_PROXY
-    export MP_INST_DIR MP_REPO_BRANCH MP_PROXY MP_LOCAL_DNS MP_SUBSCRIBE_URL MP_AGH_USER_NAME MP_AGH_PASSWORD
+    export MP_INST_DIR MP_REPO_BRANCH MP_LOCAL_DNS MP_SUBSCRIBE_URL MP_AGH_USER_NAME MP_AGH_PASSWORD
     export _MP_SOURCE_DIR _MP_CACHE_WRITE _MP_TARGET_ARCH _MP_DOWNLOAD_CORE_CONFIG
     . "$MP_INST_DIR/sh/common.sh" || exit 1
     sh "$MP_INST_DIR/sh/update-core-config.sh" &&
@@ -828,31 +848,20 @@ inst_collect_inputs() {
         _ici_default=4; [ -z "$INST_TARGET" ] || _ici_default=3
     fi
     while :; do
-        prompt_to _ici_mode "$_ici_default" '选择安装方式'
+        prompt_required _ici_mode "$_ici_default" '选择安装方式'
         case "$_ici_mode" in 1|2|3|4) break ;; *) say_warn '请输入 1–4' ;; esac
     done
     case "$_ici_mode" in
-        2|3)
-            prompt_to INST_TARGET "$INST_TARGET" 'SSH 目标（用户名@主机）'
-            prompt_to INST_SSH_PORT "$INST_SSH_PORT" 'SSH 端口'
-            prompt_to INST_SSH_AUTH "$INST_SSH_AUTH" 'SSH 认证（auto / password / key）' 'auto 使用 SSH 配置、agent 或密码提示'
-            prompt_to INST_SSH_KEY "$INST_SSH_KEY" '私钥路径（空值使用 SSH 默认密钥）' ;;
+        2|3) inst_collect_ssh || return 1 ;;
         *) INST_TARGET= ;;
     esac
     case "$_ici_mode" in
         3|4)
-            prompt_to _MP_SOURCE_DIR "${_MP_SOURCE_DIR:-${INST_ENTRY_ROOT:-}}" '本地仓库根目录（按 inst.sh 位置自动识别）'
+            prompt_required _MP_SOURCE_DIR "${_MP_SOURCE_DIR:-${INST_ENTRY_ROOT:-}}" '本地仓库根目录（按 inst.sh 位置自动识别）'
             [ -n "$_MP_SOURCE_DIR" ] || { say_err '没有找到本地仓库，请指定目录'; return 1; } ;;
         *) _MP_SOURCE_DIR= ;;
     esac
-    prompt_to DIR_INST "$DIR_INST" '目标安装目录'
-    prompt_to MP_PROXY "$MP_PROXY" '目标机外部后备代理（空值不设置；Core 仍优先）'
-    if [ -n "$INST_TARGET" ]; then
-        prompt_to INST_DOWNLOAD_PROXY "$INST_DOWNLOAD_PROXY" '发起端下载代理（仅本次使用，空值不设置）'
-    else
-        [ "$INST_DOWNLOAD_PROXY_SET" = 1 ] || INST_DOWNLOAD_PROXY=$MP_PROXY
-    fi
-    INST_DOWNLOAD_PROXY_SET=1
+    prompt_required DIR_INST "$DIR_INST" '目标安装目录'
     inst_set_download_context
     [ -z "$_MP_SOURCE_DIR" ] || say_dim '本地仓库保持原文件；所选分支用于后续 GitHub 更新'
     if [ -n "${_INST_BOOT_SELECTED:-}" ] && [ -d "${_INST_BOOT_REPO:-}/sh" ]; then
@@ -861,12 +870,12 @@ inst_collect_inputs() {
     else
         inst_choose_branch || return 1
     fi
-    prompt_to MP_SUBSCRIBE_URL "$MP_SUBSCRIBE_URL" '节点订阅 URL（可见输入）'
+    inst_prompt_subscription || return 1
     inst_choose_auth || return 1
     inst_prompt_dns
     prompt_to autostart "$autostart" '立即启用配置并启动/重启服务？(Y/n)'
     case "$autostart" in Y|y|yes|YES|Yes) autostart=Y ;; n|N|no|NO|No) autostart=n ;; *) say_err '请选择 Y 或 n'; return 1 ;; esac
-    prompt_cron_days cron_script_days '每隔几天更新脚本？' || cron_script_days=n
+    prompt_cron_days cron_script_days '每隔几天更新脚本？' 7 || cron_script_days=n
     prompt_cron_days cron_config_days '每隔几天更新配置？' || cron_config_days=n
 }
 
@@ -885,8 +894,8 @@ inst_choose_auth() {
         case "$_ica_answer" in
             y|Y|yes|YES|Yes)
                 INST_NO_AUTH=0
-                prompt_to MP_AGH_USER_NAME "${MP_AGH_USER_NAME:-admin}" 'AGH 管理员用户名'
-                prompt_to MP_AGH_PASSWORD "$MP_AGH_PASSWORD" 'AGH 密码 bcrypt 哈希（可见输入）'
+                prompt_required MP_AGH_USER_NAME "${MP_AGH_USER_NAME:-admin}" 'AGH 管理员用户名'
+                prompt_required MP_AGH_PASSWORD "$MP_AGH_PASSWORD" 'AGH 密码 bcrypt 哈希（可见输入）'
                 return 0 ;;
             n|N|no|NO|No)
                 INST_NO_AUTH=1; MP_AGH_PASSWORD=
@@ -900,6 +909,8 @@ inst_choose_auth() {
 # === apply ===
 # 内部入口：仅接受已准备的安装包路径，不联网下载项目资源。
 inst_apply() (
+    _inst_phase='校验安装包及目标环境'
+    trap '_ia_rc=$?; if [ "$_ia_rc" -ne 0 ]; then say_err "阶段：$_inst_phase；退出码：$_ia_rc"; say_err "安装可能已部分写入；请处理上方错误后重试。日志：${MP_LOG_FILE:-未设置}"; fi' EXIT
     inst_is_root || { say_err '目标安装需要 root 权限'; exit 1; }
     _ia_bundle=$(CDPATH= cd "$1" && pwd -P) || exit 1
     inst_verify_bundle "$_ia_bundle" || { say_err '安装包校验失败，未修改安装目录'; exit 1; }
@@ -916,7 +927,12 @@ inst_apply() (
     done
     reinstall=0
     if [ -e "$DIR_CORE/config.yaml" ] || [ -e "$DIR_AGH/agh.yaml" ] || [ -e "$DIR_AGH/dns.conf" ]; then reinstall=1; fi
-    mkdir -p "$DIR_SH/etc" "$DIR_CORE" "$DIR_AGH" || exit 1
+    mkdir -p "$DIR_SH" "$DIR_CORE" "$DIR_AGH" || exit 1
+    [ ! -L "$DIR_SH/.install-state" ] && [ ! -L "$DIR_SH/.install-state/apply.lock" ] \
+        || { say_err '安装状态目录或锁不能是符号链接'; exit 1; }
+    mkdir -p "$DIR_SH/.install-state" || exit 1
+    exec 6>"$DIR_SH/.install-state/apply.lock" || exit 1
+    flock -n 6 || { say_err '此目录已有安装正在执行，请等它结束后重试'; exit 1; }
     inst_enable_forward || exit 1
     _MP_SOURCE_DIR="$_ia_bundle/repo"; _MP_RESOURCE_DIR="$_ia_bundle/resources"
     _MP_NONINTERACTIVE=1; _MP_INSTALL_OUTPUT=1
@@ -925,10 +941,10 @@ inst_apply() (
     say_section "写入 env.local.conf"
     say_dim "$DIR_SH/env.local.conf"
     [ -f "$DIR_SH/env.local.conf" ] || { : > "$DIR_SH/env.local.conf" || exit 1; }
-    # 旧 URL 不再兼容；保留其它用户自定义行。
-    awk '!/^[[:space:]]*(export[[:space:]]+)?MP_REPO_RAW_URL=/' "$DIR_SH/env.local.conf" > "$DIR_SH/env.local.conf.tmp" \
+    # 移除废弃的仓库 URL 和外部后备代理；保留其它自定义行。
+    awk '!/^[[:space:]]*(export[[:space:]]+)?(MP_REPO_RAW_URL|MP_PROXY)=/' "$DIR_SH/env.local.conf" > "$DIR_SH/env.local.conf.tmp" \
         && mv "$DIR_SH/env.local.conf.tmp" "$DIR_SH/env.local.conf" || exit 1
-    kv_keys="MP_INST_DIR MP_REPO_BRANCH MP_PROXY MP_SUBSCRIBE_URL MP_AGH_USER_NAME MP_AGH_PASSWORD MP_LOCAL_DNS"
+    kv_keys="MP_INST_DIR MP_REPO_BRANCH MP_SUBSCRIBE_URL MP_AGH_USER_NAME MP_AGH_PASSWORD MP_LOCAL_DNS"
     for kv_key in $kv_keys; do
         eval "kv_val=\$$kv_key"
         case "$kv_key" in
@@ -1052,13 +1068,37 @@ inst_print_result() {
     say_dim "  二进制: sh $DIR_SH/update-bin.sh"
 }
 
+inst_install_with_retry() {
+    while :; do
+        _ii_rc=0
+        if [ -n "$INST_TARGET" ]; then
+            inst_deploy_remote "$1" || _ii_rc=$?
+        else
+            sh "$1/repo/sh/install-lib.sh" --installer-run --apply "$1" || _ii_rc=$?
+        fi
+        [ "$_ii_rc" -ne 0 ] || return 0
+        say_err "安装失败，退出码 $_ii_rc；日志：${MP_LOG_FILE:-未设置}"
+        say_warn '安装可能已部分完成。重试会重新校验安装包、检查目标状态并覆盖安装，不会重新下载资源。'
+        [ "$INSTALL_MODE" = interactive ] || return "$_ii_rc"
+        if [ "$_ii_rc" -eq 255 ]; then
+            say_warn 'SSH 已断开，远端安装可能仍在运行；确认远端已结束后再重试，避免并发安装。'
+        fi
+        prompt_to _ii_retry n '处理上方错误后，是否重试安装？(y/N)'
+        case "$_ii_retry" in y|Y|yes|YES|Yes) ;; *) return "$_ii_rc" ;; esac
+        if [ -n "$INST_TARGET" ]; then
+            inst_clear_remote_attempt
+            inst_close_ssh
+            inst_collect_ssh || return 1
+        fi
+    done
+}
+
 # === 主流程 ===
 inst_set_download_context() {
     if [ -n "$INST_TARGET" ]; then
         INST_CORE_CONFIG=/etc/proxy/core/config.yaml
     else
         INST_CORE_CONFIG=$DIR_INST/core/config.yaml
-        [ "$INST_DOWNLOAD_PROXY_SET" = 1 ] || INST_DOWNLOAD_PROXY=$MP_PROXY
     fi
 }
 
@@ -1100,7 +1140,7 @@ inst_main() {
     inst_validate || return 1
     inst_set_download_context
     if [ -n "$INST_TARGET" ]; then
-        inst_require_tools launcher && inst_probe_target || return 1
+        [ "${INST_SSH_READY:-0}" = 1 ] || { inst_require_tools launcher && inst_probe_target; } || return 1
     else
         inst_is_root || { say_err '本机安装需要 root；请使用 sudo sh inst.sh'; return 1; }
         inst_detect_os && mp_require_tun || return 1
@@ -1111,11 +1151,7 @@ inst_main() {
     printf '  目标：%s\n  平台：%s / %s\n  目录：%s\n  分支：%s\n' "${INST_TARGET:-本机}" "$INST_TARGET_OS" "$INST_TARGET_ARCH" "$DIR_INST" "$MP_REPO_BRANCH"
     say_dim "仓库来源：${_MP_SOURCE_DIR:-GitHub}"
     inst_prepare "$_inst_tmp/bundle" || { say_err '准备失败，未修改目标安装文件'; return 1; }
-    if [ -n "$INST_TARGET" ]; then
-        inst_deploy_remote "$_inst_tmp/bundle"
-    else
-        sh "$_inst_tmp/bundle/repo/sh/install-lib.sh" --installer-run --apply "$_inst_tmp/bundle"
-    fi
+    inst_install_with_retry "$_inst_tmp/bundle"
 }
 
 if [ "${1:-}" = --installer-run ]; then

@@ -131,7 +131,7 @@ class CommandLogTests(unittest.TestCase):
             self.assertEqual(logged[logged.index('--noproxy')+1], actual[actual.index('--noproxy')+1])
             self.assertIn(url, actual)
             self.assertIn('--silent', logged)
-        self.assertEqual(calls[1][calls[1].index('--proxy')+1], proxy)
+        self.assertEqual(calls[1][calls[1].index('--proxy')+1], '')
         self.assertNotIn('secret', result.stdout + result.stderr)
         self.assertIn('下载完成', result.stderr)
 

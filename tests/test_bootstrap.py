@@ -22,6 +22,7 @@ class BootstrapTests(unittest.TestCase):
         # Real wizard; only stop before applying anything to the machine.
         library = 'shift\n' + test_installer.PREFIX + r'''
 inst_parse_args "$@" || exit 1
+MP_SUBSCRIBE_URL=https://example.invalid/sub
 exec 3<>/dev/tty
 prompt_to() { eval "$1=\$2"; }
 inst_choose_branch() { echo duplicate-branch-prompt >&2; return 1; }
@@ -50,7 +51,7 @@ esac
             os.chdir(self.root)
             os.execvpe("sh", ["sh", str(entry), *args], self.env | {"TERM": "dumb"})
         output = b""
-        prompts = [("发起端下载代理".encode(), b"\n"), ("选择分支编号".encode(), choice)]
+        prompts = [("选择分支编号".encode(), choice)]
         deadline = time.monotonic() + 10
         finished = False
         try:
@@ -120,7 +121,7 @@ esac
         log=(self.root/'myrule.inst.log').read_text()
         self.assertIn('执行下载命令（完整参数）',log)
         self.assertIn('独立入口退出码：0',log)
-        self.assertIn("'http://user:private@proxy.invalid:8080'",log)
+        self.assertNotIn("'http://user:private@proxy.invalid:8080'",log)
         self.assertNotIn("'curl' '--disable'",output)
 
     def test_fill_custom_path_and_explicit_log_path(self):

@@ -5,11 +5,41 @@ inst_ssh() {
     set -- "$_iss_tty" -S "$_inst_tmp/ssh" -o ControlMaster=auto -o ControlPersist=600 \
         -o ConnectTimeout=15 -o LogLevel=ERROR -p "$INST_SSH_PORT" "$@"
     [ -z "$INST_SSH_KEY" ] || set -- -i "$INST_SSH_KEY" -o IdentitiesOnly=yes "$@"
+    [ "$INSTALL_MODE" = interactive ] || set -- -o BatchMode=yes "$@"
     case "$INST_SSH_AUTH" in
-        password) set -- -o PubkeyAuthentication=no -o PreferredAuthentications=keyboard-interactive,password "$@" ;;
+        password) set -- -o NumberOfPasswordPrompts=1 -o PubkeyAuthentication=no -o KbdInteractiveAuthentication=no -o PreferredAuthentications=password "$@" ;;
         key) set -- -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no "$@" ;;
     esac
     ssh "$@"
+}
+
+inst_collect_ssh() {
+    while :; do
+        prompt_required INST_TARGET "$INST_TARGET" 'SSH 目标（用户名@主机）' || return 1
+        prompt_required INST_SSH_PORT "$INST_SSH_PORT" 'SSH 端口' || return 1
+        _is_auth_default=$(mp_fill_default INST_SSH_AUTH "$INST_SSH_AUTH") || return 1
+        case "$_is_auth_default" in password|1) _is_auth_default=1 ;; *) _is_auth_default=2 ;; esac
+        while :; do
+            printf '  1) 密码\n  2) 密钥\n' >&3
+            prompt_required _is_auth_choice "$_is_auth_default" '选择 SSH 认证方式' || return 1
+            case "$_is_auth_choice" in
+                1) INST_SSH_AUTH=password; INST_SSH_KEY=; break ;;
+                2) INST_SSH_AUTH=key
+                   prompt_to INST_SSH_KEY "$INST_SSH_KEY" '私钥路径（空值使用默认密钥或 agent）'
+                   break ;;
+                *) say_err '请输入 1 或 2' ;;
+            esac
+        done
+        mp_fill_save INST_SSH_AUTH "$INST_SSH_AUTH" || return 1
+        if inst_validate_ssh && inst_require_tools launcher && inst_probe_target; then
+            INST_SSH_READY=1
+            return 0
+        fi
+        say_err 'SSH 认证或目标检查失败，请检查上方原因，修正后重新连接。'
+        prompt_to _is_retry Y '重新填写 SSH 设置并连接？(Y/n)'
+        case "$_is_retry" in n|N|no|NO|No) return 1 ;; esac
+        inst_close_ssh
+    done
 }
 
 inst_probe_target() {
@@ -36,6 +66,7 @@ inst_probe_target() {
 }
 
 inst_deploy_remote() {
+    _inst_remote_uncertain=0
     say_section '上传安装包'
     tar -czf "$_inst_tmp/bundle.tgz" -C "$1" . || return 1
     _idr_hash=$(mp_sha256 < "$_inst_tmp/bundle.tgz") || return 1
@@ -50,11 +81,14 @@ inst_colors
 MP_LOG_FILE="$1/commands.log"; export MP_LOG_FILE
 mp_init_log "$MP_LOG_FILE" || exit 1
 mp_log_event "目标机系统：$(uname -srm)"
-trap '_remote_rc=$?; mp_log_event "目标部署退出码：$_remote_rc"; cd /; rm -rf -- "$1/bundle"; rm -f -- "$1/bundle.tgz"' EXIT
+_remote_phase='目标权限、依赖和 TUN 检查'
+trap '_remote_rc=$?; mp_log_event "目标部署退出码：$_remote_rc"; if [ "$_remote_rc" -ne 0 ]; then say_err "目标阶段：$_remote_phase；退出码：$_remote_rc；日志：$MP_LOG_FILE"; fi; cd /; rm -rf -- "$1/bundle"; rm -f -- "$1/bundle.tgz"' EXIT
 inst_is_root && inst_detect_os && inst_require_tools && mp_require_tun || exit 1
+_remote_phase='安装包校验与解压'
 cd "$1" || exit 1
 [ "$(mp_sha256 < bundle.tgz)" = "$2" ] || { say_err '上传校验失败'; exit 1; }
 mkdir bundle && tar -xzf bundle.tgz -C bundle || exit 1
+_remote_phase='应用安装包（具体失败步骤见上方）'
 sh bundle/repo/sh/install-lib.sh --installer-run --apply "$1/bundle"
 PREFLIGHT
     inst_ssh -T "$INST_TARGET" "umask 077; : > '$_inst_remote_tmp/commands.log'; cat > '$_inst_remote_tmp/preflight.sh'" < "$_inst_tmp/preflight.sh" &&
@@ -63,9 +97,10 @@ PREFLIGHT
     _idr_sudo=; [ "$INST_TARGET_UID" = 0 ] || _idr_sudo=sudo
     _idr_rc=0
     inst_ssh -tt "$INST_TARGET" "$_idr_sudo sh '$_inst_remote_tmp/preflight.sh' '$_inst_remote_tmp' '$_idr_hash'" || _idr_rc=$?
+    [ "$_idr_rc" -ne 255 ] || _inst_remote_uncertain=1
     if [ -n "${MP_LOG_FILE:-}" ]; then
         mp_log_event '以下为目标机部署日志'
-        inst_ssh -T "$INST_TARGET" "cat '$_inst_remote_tmp/commands.log'" </dev/null >> "$MP_LOG_FILE" \
+        inst_ssh -T -o BatchMode=yes "$INST_TARGET" "cat '$_inst_remote_tmp/commands.log'" </dev/null >> "$MP_LOG_FILE" \
             || say_warn '无法取回目标日志；如连接已中断，请检查目标机临时安装目录'
     fi
     if [ "$_idr_rc" -eq 0 ]; then
@@ -81,12 +116,25 @@ PREFLIGHT
     fi
 }
 
-inst_cleanup() {
+inst_clear_remote_attempt() {
     if [ -n "${_inst_remote_tmp:-}" ]; then
-        inst_ssh -T "$INST_TARGET" "rm -rf -- '$_inst_remote_tmp'" </dev/null >/dev/null 2>&1 || :
+        if [ "${_inst_remote_uncertain:-0}" = 1 ]; then
+            say_warn "远端状态未确认，保留临时目录：$_inst_remote_tmp；确认安装结束后可手动清理。"
+        else
+            inst_ssh -T -o BatchMode=yes "$INST_TARGET" "rm -rf -- '$_inst_remote_tmp'" </dev/null >/dev/null 2>&1 || :
+        fi
     fi
+    _inst_remote_tmp=
+}
+
+inst_close_ssh() {
     if [ -n "${INST_TARGET:-}" ] && [ -S "${_inst_tmp:-}/ssh" ]; then
         ssh -S "$_inst_tmp/ssh" -O exit "$INST_TARGET" >/dev/null 2>&1 || :
     fi
+}
+
+inst_cleanup() {
+    inst_clear_remote_attempt
+    inst_close_ssh
     [ -z "${_inst_tmp:-}" ] || rm -rf -- "$_inst_tmp"
 }
