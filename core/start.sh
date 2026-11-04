@@ -1,5 +1,5 @@
 #!/bin/sh
-# auto-route:false 时维护完整 fake-IP 路由；/30 是 TUN 正常的接口网段。
+# auto-route:false 时维护完整 fake-IP 路由，清理被覆盖的内核 /30 路由。
 # 所有监听/修复逻辑在此；systemd/procd 只负责进程生命周期。
 case "${1:-}" in
     -h|--help)
@@ -33,6 +33,25 @@ route_config() {
     fake_ip_cidr=$(mp_core_fake_ip_cidr) || return 1
 }
 
+# 完整 fake-IP 路由就绪后，只清理同接口 main 表内被覆盖的 kernel /30。
+# 不修改接口地址及掩码，保留 Mihomo 协议栈所需的地址配置。
+route_trim_connected() {
+    small_routes=$("$route_ip_bin" -4 route show table main dev "$tun_device" proto kernel scope link) || return 1
+    covered=$(printf '%s\n' "$small_routes" | awk -v pool="$fake_ip_cidr" '
+        function num(ip, a) { split(ip,a,"."); return ((a[1]*256+a[2])*256+a[3])*256+a[4] }
+        BEGIN { split(pool,p,"/"); base=num(p[1]); size=2^(32-p[2]) }
+        $1 ~ /^[0-9.]+\/30$/ && !/ via / {
+            split($1,r,"/"); start=num(r[1])
+            if (p[2]<30 && start>=base && start+4<=base+size) print $1
+        }') || return 1
+    for small in $covered; do
+        if ! "$route_ip_bin" -4 route del "$small" dev "$tun_device" proto kernel scope link; then
+            remaining=$("$route_ip_bin" -4 route show table main exact "$small" dev "$tun_device" proto kernel scope link) || return 1
+            [ -z "$remaining" ] || { logger -t MyProxy "清理 TUN 直连路由失败：$small"; return 1; }
+        fi
+    done
+}
+
 route_apply() (
     # 与手工 --once 串行；锁文件不删除，避免锁住不同 inode。
     exec 8>"$MP_CORE_DIR/.fake-ip-route.lock" || exit 1
@@ -50,7 +69,8 @@ route_apply() (
         $1==cidr && $2=="dev" && $3==dev && !/ via / { found=1 }
         END { exit !found }'; then
         # 不认领外部预置的正确路由，也不因自己的路由事件重复写入。
-        exit 0
+        route_trim_connected
+        exit $?
     fi
     if ! "$route_ip_bin" -4 route replace "$fake_ip_cidr" dev "$tun_device"; then
         "$route_ip_bin" link show dev "$tun_device" >/dev/null 2>&1 || exit 0
@@ -66,6 +86,7 @@ route_apply() (
         exit 1
     fi
     logger -t MyProxy "fake-IP 路由已恢复：$fake_ip_cidr -> $tun_device (ifindex=$route_index)"
+    route_trim_connected
 )
 
 route_watch_cleanup() {

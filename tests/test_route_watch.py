@@ -28,7 +28,7 @@ class RouteWatchTests(unittest.TestCase):
         self.file('boot', '11111111-1111-1111-1111-111111111111\n')
         self.file('netlink', '')
         self.config()
-        self.state(up=True, address=True, route='', index=7)
+        self.state(up=True, address=True, route='', index=7, connected='198.18.0.0/30')
         self.command('logger', 'printf "%s\\n" "$*" >> "$TEST_ROOT/log"\n')
         os.mkfifo(self.root / 'input')
         mock = self.file('commands/ip', '#!' + sys.executable + '\n' + r'''
@@ -51,6 +51,14 @@ if args[:4] == ['-o', 'link', 'show', 'dev']:
     print(f'{s["index"]}: utun: <POINTOPOINT,{"UP" if s["up"] else "NOARP"}> mtu 9000')
 elif args[:5] == ['-4', '-o', 'address', 'show', 'dev']:
     if s['address']: print(f'{s["index"]}: utun    inet 198.18.0.1/30 scope global utun')
+elif args[:5] == ['-4', 'route', 'show', 'table', 'main'] and 'kernel' in args:
+    cidr = s.get('connected', '')
+    if cidr and ('exact' not in args or args[args.index('exact')+1] == cidr):
+        print(cidr+' dev utun proto kernel scope link src 198.18.0.1')
+elif args[:3] == ['-4', 'route', 'del']:
+    if s.get('delete_fail'): sys.exit(2)
+    s['connected'] = ''
+    (root/'state').write_text(json.dumps(s))
 elif args[:6] == ['-4', 'route', 'show', 'table', 'main', 'exact']:
     print(s['route'])
 elif args[:3] == ['-4', 'route', 'replace']:
@@ -112,13 +120,44 @@ else:
                       '监听已启动' in (self.root/'log').read_text())
         return proc, writer
 
-    def test_once_idempotent_preserves_30_and_records_ownership(self):
+    def test_once_idempotent_removes_covered_30_and_records_ownership(self):
         self.assert_ok(self.once())
         record = (self.root/'core/.fake-ip-route').read_text()
         self.assertTrue(record.startswith('198.18.0.0/16 utun 7 '))
         self.assert_ok(self.once('--once'))
         self.assertEqual(len(self.replacements()), 1)
+        deletes = [x for x in self.calls() if 'del' in x]
+        self.assertEqual(len(deletes), 1)
+        self.assertIn('198.18.0.0/30', deletes[0])
+        self.assertLess(self.calls().index(self.replacements()[0]), self.calls().index(deletes[0]))
+
+    def test_uncovered_or_equal_prefix_is_preserved(self):
+        for pool, connected in [('198.18.0.1/16', '192.0.2.0/30'), ('198.18.0.1/30', '198.18.0.0/30')]:
+            self.config(pool)
+            self.state(route='', connected=connected)
+            self.assert_ok(self.once())
+            self.assertEqual(json.loads((self.root/'state').read_text())['connected'], connected)
         self.assertFalse(any('del' in x for x in self.calls()))
+
+    def test_failed_covering_route_does_not_delete_30(self):
+        self.state(fail=True)
+        self.assertNotEqual(self.once().returncode, 0)
+        self.assertFalse(any('del' in x for x in self.calls()))
+
+    def test_delete_failure_is_reported_and_retried(self):
+        self.state(delete_fail=True)
+        self.assertNotEqual(self.once().returncode, 0)
+        self.state(delete_fail=False)
+        self.assert_ok(self.once())
+        self.assertEqual(json.loads((self.root/'state').read_text())['connected'], '')
+
+    def test_watch_removes_recreated_connected_route(self):
+        proc, writer = self.watch()
+        self.wait_for(lambda: json.loads((self.root/'state').read_text())['connected'] == '')
+        self.state(connected='198.18.0.0/30')
+        os.write(writer, b'198.18.0.0/30 dev utun proto kernel scope link\n')
+        self.wait_for(lambda: json.loads((self.root/'state').read_text())['connected'] == '')
+        self.assertIsNone(proc.poll())
 
     def test_missing_down_or_unaddressed_interface_is_not_modified(self):
         for changes in ({'absent': True}, {'absent': False, 'up': False},

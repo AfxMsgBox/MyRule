@@ -169,7 +169,7 @@ TCP 成功仅表示端口可达，需“代理 HTTPS”也成功；不同 DNS �
 
 ### TUN `/30` 备忘
 
-`/30` 是 Mihomo 有意设置的接口网段，**不是 fake-IP 池大小**，`/16` 虽覆盖 `/30`，但二者同指 TUN，无需删除内核直连路由。本项目关闭 `auto-route`，因此由 `core/start.sh` 监听内核事件，补齐完整 `/16` 路由，覆盖网页端重启。安装随 Core 自动启动监听；旧安装无需重装：执行 `sh /etc/proxy/sh/update-scripts.sh`，会补齐依赖、生成服务文件、清理旧 route 服务/hotplug/脚本，并自动重启原本运行的服务。
+`/30` 是 Mihomo 有意设置的接口网段，**不是 fake-IP 池大小**，完整 fake-IP 路由就绪后，脚本删除同接口 main 表中被其覆盖的内核 `/30` 路由；`ip addr` 中的接口地址及 `/30` 掩码保留。本项目关闭 `auto-route`，因此由 `core/start.sh` 监听内核事件，补齐完整 `/16` 路由，覆盖网页端重启。安装随 Core 自动启动监听；旧安装无需重装：执行 `sh /etc/proxy/sh/update-scripts.sh`，会补齐依赖、生成服务文件、清理旧 route 服务/hotplug/脚本，并自动重启原本运行的服务。
 
 源码备忘：[/30 于 2022 年作为修复引入](https://github.com/MetaCubeX/mihomo/commit/90688b238ad28aa8661372690778227b8655dd65)，同时把 fake-IP 分配起点改为 `.4`。v1.19.33 的 [config/config.go → parseTun](https://github.com/MetaCubeX/mihomo/blob/v1.19.33/config/config.go#L1692) 用 `netip.PrefixFrom(tunAddressPrefix.Addr(), 30)` 固定接口掩码。自编译时删除该行可沿用 fake-IP 掩码，但会改变栈的地址范围语义，需另行验证；本项目保留官方内核，用事件补路由。
 

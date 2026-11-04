@@ -518,13 +518,13 @@ README 的接入示例限定为上述 IPv4 拓扑；跨网段、容器 NAT 或�
 - `dns.fake-ip-range`：规范化为网络 CIDR。
 - `tun.device`：TUN 接口名。
 
-`/30` 是 Mihomo `parseTun` 显式设置的接口前缀，不是 fake-IP 池，也不是需要删除的错误路由。v1.19.33 与本次检查的 Meta 分支均使用 `netip.PrefixFrom(tunAddressPrefix.Addr(), 30)`；`sing-tun` 的 system/mixed 栈使用接口地址及其下一个地址做内部 TCP 转换。本项目关闭 `auto-route`，因此自己维护 main 表中的完整 fake-IP 路由。上游源码与自编译修改位置见 README 的“TUN /30 备忘”。blame 定位到 2022-10-09 的提交 `90688b238ad28aa8661372690778227b8655dd65`（fix: try let fakeip mode get real destination ip）：同时把接口前缀设为 `/30`，并把 fake-IP 分配起点从 `.3` 改成 `.4`。这是有意加入的修复；从变更推断，它将 TUN 小网段与分配地址分开，但提交未详细解释底层原因，不把推断写成维护者结论。`/16` 覆盖 `/30`，二者在本项目中同指 TUN；保留后者不是转发所必需，只是避免无益地删除内核自动路由。
+`/30` 是 Mihomo `parseTun` 显式设置的接口前缀，不是 fake-IP 池，也不是需要删除的错误路由。v1.19.33 与本次检查的 Meta 分支均使用 `netip.PrefixFrom(tunAddressPrefix.Addr(), 30)`；`sing-tun` 的 system/mixed 栈使用接口地址及其下一个地址做内部 TCP 转换。本项目关闭 `auto-route`，因此自己维护 main 表中的完整 fake-IP 路由。上游源码与自编译修改位置见 README 的“TUN /30 备忘”。blame 定位到 2022-10-09 的提交 `90688b238ad28aa8661372690778227b8655dd65`（fix: try let fakeip mode get real destination ip）：同时把接口前缀设为 `/30`，并把 fake-IP 分配起点从 `.3` 改成 `.4`。这是有意加入的修复；从变更推断，它将 TUN 小网段与分配地址分开，但提交未详细解释底层原因，不把推断写成维护者结论。`/16` 覆盖 `/30`，二者在本项目中同指 TUN。现按需求在完整路由就绪后删除冗余 main 表直连路由；接口地址/掩码和 local 表保持不变。
 
 `core/start.sh --once` 只做单次修复；`--watch` 前台运行 `ip -o -4 monitor link address route`，通过 RTNETLINK 接收事件。逻辑全部位于此脚本：
 
 - 先订阅，等待 `/proc/net/netlink` 中 monitor 的 RTNETLINK port ID/组就绪，再检查初始状态，消除启动漏事件窗口；此有限等待仅在启动时发生，每秒检查、最多约 5 秒，使用整数 sleep 兼容 OpenWrt；稳定运行阻塞读取 FIFO，无定时路由轮询。
 - 不给 monitor 传 `dev`，避免订阅锁定旧 ifindex；按事件中的设备名/网段筛选。每个事件重读磁盘 Core 配置，不承诺支持只修改 API 内存而不落盘的设备名/网段。
-- 仅在接口 UP 且已配置 IPv4 地址时修复；设备 add 早于地址配置时等待后续事件。已正确的路由不修改、不刷日志；保留内核生成的 `/30`，忽略其它接口、网段和路由表。
+- 仅在接口 UP 且已配置 IPv4 地址时修复；设备 add 早于地址配置时等待后续事件。已正确的完整路由不修改、不刷日志；随后清理同接口 main 表中 proto kernel、scope link 且完全被 fake-IP 网段覆盖的 `/30`。fake-IP 前缀必须短于 /30；等长、池外、其它接口及其它表均不删除。删除失败复查，已消失视为成功，仍存在则报错。监听同时处理内核重新生成的路由，删除产生的事件只核对状态、不循环写入。
 - `flock` 独占监听锁避免重复进程，修复锁串行化手动调用和监听。锁文件位于 core，不删除锁 inode；FIFO 使用私有临时目录。正常停止回收 monitor/FIFO；EOF、缓冲丢事件或修复失败返回非零，由服务管理器重启并重新核对。
 - 只记录实际写入的路由，不认领外部预置路由。成功后原子写入 `core/.fake-ip-route`（CIDR、TUN 名称、ifindex、boot_id），保留卸载归属检查；接口在操作中消失时等下一次创建事件。
 
