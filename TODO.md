@@ -1,5 +1,10 @@
 # 待办与验证记录
 
+## OpenWrt sleep 兼容
+
+- [x] 下载进度和路由监听启动等待统一使用整数秒，路由订阅等待上限保持约 5 秒。
+- [ ] 在仅支持整数 sleep 的 OpenWrt 上实测下载与 Core 启动。
+
 ## 独立 WireGuard 服务端修复（2026-11-03）
 
 - [x] 精简 setup-wg-server.sh：自动检测、开启 IPv4 转发、添加 NAT，复用 sysctl/nftables 持久化，不新增服务。

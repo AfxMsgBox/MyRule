@@ -91,12 +91,13 @@ route_watch() {
     # 仅启动时等待订阅完成，再做快照，消除“快照与订阅之间”的漏事件窗口。
     # iproute2 的 RTNETLINK port ID 为进程 ID；无事件期间只阻塞 read。
     ready=0; attempts=0
-    while [ "$attempts" -lt 100 ]; do
+    while [ "$attempts" -le 5 ]; do
         if awk -v pid="$monitor_pid" '$2==0 && $3==pid && $4!="00000000" {ok=1}
             END {exit !ok}' /proc/net/netlink; then ready=1; break; fi
         kill -0 "$monitor_pid" 2>/dev/null || break
+        [ "$attempts" -lt 5 ] || break
         attempts=$((attempts + 1))
-        sleep 0.05
+        sleep 1
     done
     [ "$ready" -eq 1 ] || { logger -t MyProxy '无法订阅 Netlink，请检查 iproute2/ip-full'; return 1; }
     route_apply || return 1

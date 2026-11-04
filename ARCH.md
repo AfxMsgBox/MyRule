@@ -191,7 +191,7 @@ curl 的首个参数为 `--disable`，避免读取用户配置。代理通道使
 
 独立入口导出真实 `INST_ENTRY_DIR`，模块和子脚本继承同一 `MP_LOG_FILE`。默认路径为入口脚本同目录 `myrule.inst.log`，`--log-file PATH` 覆盖；日常更新未继承该变量时默认写入安装目录 `sh/myrule.inst.log`。`mp_init_log` 要求父目录存在、目标为普通文件且不是符号链接，以 umask 077 创建、chmod 600，默认追加；安装入口显式传入 `reset` 时在安全路径检查及权限设置后清空旧日志。独立入口通过 `_INST_BOOT_LOG` 将本次日志的规范路径传给模块，路径一致时模块继续追加；本地模块入口开启新日志，prepare/apply、下载和服务封装不清空日志。帮助及参数结构错误不创建或修改日志。`mp_log_event` 记录时间戳；阶段函数、`echo_log` 和传输函数记录系统/工具、物理路径、进度、HTTP/curl 状态、重试及退出码。日志初始化失败停止下载；不使用全局 `set -x` 或原始 stdout/stderr 全量转储，避免额外记录无关的输入值和认证信息；下载命令按调试需求显式保留凭据，日志权限仍为 0600。
 
-HTTP 传输统一由 `portable.sh` 的 `mp_http_download` 实现；独立 `inst.sh` 嵌入同一传输及进度函数，单元测试强制两份一致。curl 在后台以 silent 模式下载，前台定期读取目标临时文件大小，以 `mp_download_progress` 显示大小、平均速度和耗时；TTY 每秒原地刷新，非 TTY 在开始、首次收到数据、之后每 5 秒及完成时输出行。每 0.2 秒检查下载进程，避免小文件额外等待整秒；终止时回收 curl 并清理私有元数据目录。
+HTTP 传输统一由 `portable.sh` 的 `mp_http_download` 实现；独立 `inst.sh` 嵌入同一传输及进度函数，单元测试强制两份一致。curl 在后台以 silent 模式下载，前台定期读取目标临时文件大小，以 `mp_download_progress` 显示大小、平均速度和耗时；TTY 每秒原地刷新，非 TTY 在开始、首次收到数据、之后每 5 秒及完成时输出行。每 1 秒检查下载进程，兼容仅支持整数 sleep 的 OpenWrt；小文件完成提示最多额外等待约 1 秒；终止时回收 curl 并清理私有元数据目录。
 
 HTTP 状态及响应头只保存在私有临时目录。进度只提取最后一个成功响应的数值 Content-Length，重定向的新状态行清除前一个响应长度；兼容 HTTP/2 状态行及 CRLF。总大小未知时显示字节数，不猜测百分比。终端不会显示原始响应头、URL 凭据或 curl 错误；不再依赖管道转发 curl 进度，避免 awk 输入缓冲和 `tee` 导致进度消失。本地复制及 SSH 缓存读取仍显示对应来源，不伪装成网络下载。
 
@@ -520,7 +520,7 @@ README 的接入示例限定为上述 IPv4 拓扑；跨网段、容器 NAT 或�
 
 `core/start.sh --once` 只做单次修复；`--watch` 前台运行 `ip -o -4 monitor link address route`，通过 RTNETLINK 接收事件。逻辑全部位于此脚本：
 
-- 先订阅，等待 `/proc/net/netlink` 中 monitor 的 RTNETLINK port ID/组就绪，再检查初始状态，消除启动漏事件窗口；此有限等待仅在启动时发生，稳定运行阻塞读取 FIFO，无定时路由轮询。
+- 先订阅，等待 `/proc/net/netlink` 中 monitor 的 RTNETLINK port ID/组就绪，再检查初始状态，消除启动漏事件窗口；此有限等待仅在启动时发生，每秒检查、最多约 5 秒，使用整数 sleep 兼容 OpenWrt；稳定运行阻塞读取 FIFO，无定时路由轮询。
 - 不给 monitor 传 `dev`，避免订阅锁定旧 ifindex；按事件中的设备名/网段筛选。每个事件重读磁盘 Core 配置，不承诺支持只修改 API 内存而不落盘的设备名/网段。
 - 仅在接口 UP 且已配置 IPv4 地址时修复；设备 add 早于地址配置时等待后续事件。已正确的路由不修改、不刷日志；保留内核生成的 `/30`，忽略其它接口、网段和路由表。
 - `flock` 独占监听锁避免重复进程，修复锁串行化手动调用和监听。锁文件位于 core，不删除锁 inode；FIFO 使用私有临时目录。正常停止回收 monitor/FIFO；EOF、缓冲丢事件或修复失败返回非零，由服务管理器重启并重新核对。

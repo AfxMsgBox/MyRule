@@ -259,7 +259,7 @@ mp_http_download() (
                     [ -t 2 ] || printf '\n' >&2
                     _hd_last=$_hd_elapsed; _hd_previous=$_hd_bytes
                 fi
-                sleep 0.2
+                sleep 1
             done
             _hd_rc=0; wait "$_hd_pid" || _hd_rc=$?; _hd_pid=
             _hd_bytes=$(wc -c < "$_hd_dst"); _hd_elapsed=$(($(date +%s) - _hd_start))
