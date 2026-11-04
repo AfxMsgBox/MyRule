@@ -132,6 +132,7 @@ TCP 成功仅表示端口可达，需“代理 HTTPS”也成功；不同 DNS �
 | `install-remote.sh` | SSH 探测、上传和远程部署 |
 | `uninstall.sh` | 卸载服务、系统集成及可选数据清理 |
 | `agh-password.py` | 独立生成 AGH bcrypt 密码哈希，仅需 Python 3.6+ |
+| `setup-wg-server.sh` | 开启 WireGuard 服务端 IPv4 转发、添加 NAT 并持久化（Debian/Ubuntu） |
 | `test-proxy.py` | 调用临时 Mihomo，比较 DNS、逐 IP 连接和完整代理请求 |
 | `update-scripts.sh` | 更新全部脚本及已有服务文件 |
 | `update-bin.sh` | 更新 Mihomo、AGH、面板 |
@@ -232,6 +233,16 @@ ip -4 rule add priority 100 from 198.18.0.0/16 lookup 100
 | anti-AD | [filter_21.txt](https://adguardteam.github.io/HostlistsRegistry/assets/filter_21.txt) | `agh/data/filters/1733109085.txt` |
 | 非中国顶级域名 | [tld-not-cn.txt](https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/tld-not-cn.txt) | `agh/download/notcn.txt`，生成上游规则 |
 | GFW 域名 | [gfw.txt](https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/gfw.txt) | `agh/download/gfwlist.txt`，生成上游规则 |
+
+### WireGuard 服务端修复
+
+将 `sh/setup-wg-server.sh` 复制到 Debian/Ubuntu 服务端，以 root 执行：
+
+```sh
+sh setup-wg-server.sh
+```
+
+自动识别运行中的 WG 接口、IPv4 网段和默认出口，开启转发、添加 NAT 并持久化。需已有 `wireguard-tools`、`nftables`、`iproute2`，且接口、网段和出口各唯一。不修改密钥、不重启 WG；执行后从客户端复测。自动启用 WG 开机启动（需已有对应的 `/etc/wireguard/<接口>.conf`）；现有防火墙放行需自行配置。
 
 ## 7. 卸载
 

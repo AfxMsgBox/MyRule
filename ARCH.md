@@ -704,3 +704,13 @@ git diff --check
 `tests/test_download_health.py` 专门覆盖进度与错误脱敏、自动重试上限、永久错误保留旧文件、必需资源失败即停止、目标 TUN 预检及 API 在线但接口/路由缺失等场景。
 
 新增行为应补充相应的失败场景测试。模拟测试不等于真实 OpenWrt/systemd 部署验证；待验证事项记录在 TODO.md。
+
+## 13. 独立 WireGuard 服务端修复
+
+`sh/setup-wg-server.sh` 是 Debian/Ubuntu 上独立运行的小工具，不参与安装/卸载。自动读取唯一运行中的 WG 接口、其唯一 IPv4 内核直连网段和唯一默认出口；不提供交互参数配置，不创建密钥、peer 或新服务。
+
+- `/etc/sysctl.d/99-zz-myrule-wg.conf` 开启并持久化 IPv4 转发。
+- `/etc/nftables.d/myrule-wg.nft` 管理专用 `ip myrule_wg` NAT 表，限定入接口、出接口和源网段；只清空本表再添加规则，重复执行不累积 NAT。
+- 向 `/etc/nftables.conf` 末尾追加精确 include（已存在则跳过），追加前备份为 `.bak-myrule-wg`，启用系统原有 nftables 服务开机加载。即时只加载本工具的规则，不重载完整防火墙。
+- 预检对应 WG 配置文件及 wg-quick 服务模板，启用 `wg-quick@<接口>.service` 开机启动，不使用 --now、不重启当前接口。不调整现有过滤规则；UDP/转发放行由管理员管理。服务器需已有相应软件包；本工具只处理 IPv4。
+- 不生成用户参数文件；按用户要求不编写或执行单元测试，实际修复及重启恢复由用户验证。
