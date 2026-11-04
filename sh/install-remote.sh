@@ -82,7 +82,7 @@ MP_LOG_FILE="$1/commands.log"; export MP_LOG_FILE
 mp_init_log "$MP_LOG_FILE" || exit 1
 mp_log_event "目标机系统：$(uname -srm)"
 _remote_phase='目标权限、依赖和 TUN 检查'
-trap '_remote_rc=$?; mp_log_event "目标部署退出码：$_remote_rc"; if [ "$_remote_rc" -ne 0 ]; then say_err "目标阶段：$_remote_phase；退出码：$_remote_rc；日志：$MP_LOG_FILE"; fi; cd /; rm -rf -- "$1/bundle"; rm -f -- "$1/bundle.tgz"' EXIT
+trap '_remote_rc=$?; mp_log_event "目标部署退出码：$_remote_rc"; if [ "$_remote_rc" -ne 0 ]; then say_err "目标阶段：${_remote_phase}；退出码：${_remote_rc}；日志：$MP_LOG_FILE"; fi; cd /; rm -rf -- "$1/bundle"; rm -f -- "$1/bundle.tgz"' EXIT
 inst_is_root && inst_detect_os && inst_require_tools && mp_require_tun || exit 1
 _remote_phase='安装包校验与解压'
 cd "$1" || exit 1
@@ -104,13 +104,13 @@ PREFLIGHT
             || say_warn '无法取回目标日志；如连接已中断，请检查目标机临时安装目录'
     fi
     if [ "$_idr_rc" -eq 0 ]; then
-        say_ok "SSH 安装成功：$INST_TARGET（远程退出码 0）"
+        say_ok "SSH 安装成功：${INST_TARGET}（远程退出码 0）"
         say_dim 'SSH 会话已正常结束。上面的维护命令请在目标机执行。'
     else
         if [ "$_idr_rc" -eq 255 ]; then
             say_err 'SSH 连接异常，无法确认目标机安装结果；请检查目标机后重试'
         else
-            say_err "目标机安装失败（退出码 $_idr_rc），请查看上方错误后重试"
+            say_err "目标机安装失败（退出码 ${_idr_rc}），请查看上方错误后重试"
         fi
         return "$_idr_rc"
     fi
@@ -119,7 +119,7 @@ PREFLIGHT
 inst_clear_remote_attempt() {
     if [ -n "${_inst_remote_tmp:-}" ]; then
         if [ "${_inst_remote_uncertain:-0}" = 1 ]; then
-            say_warn "远端状态未确认，保留临时目录：$_inst_remote_tmp；确认安装结束后可手动清理。"
+            say_warn "远端状态未确认，保留临时目录：${_inst_remote_tmp}；确认安装结束后可手动清理。"
         else
             inst_ssh -T -o BatchMode=yes "$INST_TARGET" "rm -rf -- '$_inst_remote_tmp'" </dev/null >/dev/null 2>&1 || :
         fi

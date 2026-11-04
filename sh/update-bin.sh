@@ -1,5 +1,5 @@
 #!/bin/sh
-# 按 CPU 架构下载 mihomo 与 AdGuardHome 最新版到 $MP_CORE_DIR/$MP_AGH_DIR。
+# 按 CPU 架构下载 mihomo 与 AdGuardHome 最新版到 $MP_CORE_DIR/${MP_AGH_DIR}。
 # 每次执行都覆盖现有二进制，不做版本对比；inst.sh 安装时调用，也可单独跑做升级。
 # 单跑升级用法：
 #   sh /etc/proxy/sh/update-bin.sh
@@ -11,7 +11,7 @@ core_config="${1:-$MP_CORE_DIR/config.yaml}"
 mkdir -p "$MP_CORE_DIR" "$MP_AGH_DIR" || exit 1
 
 binary_arch=${_MP_TARGET_ARCH:-$(uname -m)}
-echo_log "更新内核二进制（CPU: linux-$binary_arch）"
+echo_log "更新内核二进制（CPU: linux-${binary_arch}）"
 case "$binary_arch" in
     x86_64)         mihomo_arch=amd64-compatible; agh_arch=amd64 ;;
     aarch64)        mihomo_arch=arm64;            agh_arch=arm64 ;;
@@ -25,7 +25,7 @@ case "$binary_arch" in
     mips64el)       mihomo_arch=mips64le;         agh_arch=mips64le ;;
     *) mihomo_arch=; agh_arch= ;;
 esac
-[ -z "$mihomo_arch$agh_arch" ] && { echo_log "未识别架构 $binary_arch，跳过"; exit 1; }
+[ -z "$mihomo_arch$agh_arch" ] && { echo_log "未识别架构 ${binary_arch}，跳过"; exit 1; }
 
 # 所有组件均为必需资源；失败立即结束，临时文件统一清理。
 bin_work=$(mktemp -d) || exit 1
@@ -53,7 +53,7 @@ if [ -z "${_MP_CACHE_WRITE:-}" ]; then
     bin_check_rc=0
     mp_run_logged_command "$bin_work/mihomo" -v || bin_check_rc=$?
     if [ "$bin_check_rc" -ne 0 ]; then
-        echo_log "Mihomo 无法在目标机运行（退出码 $bin_check_rc），请检查 CPU 指令集及系统兼容性；未替换现有内核"
+        echo_log "Mihomo 无法在目标机运行（退出码 ${bin_check_rc}），请检查 CPU 指令集及系统兼容性；未替换现有内核"
         exit "$bin_check_rc"
     fi
 fi

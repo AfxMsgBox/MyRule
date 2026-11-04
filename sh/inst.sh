@@ -319,7 +319,7 @@ mp_http_download() (
             _hd_http=$(cat "$_hd_meta/http")
             case "$_hd_http" in [0-9][0-9][0-9]) ;; *) _hd_http=000 ;; esac
             if [ "$_hd_rc" = 0 ] && [ "$_hd_bytes" -gt "$_hd_min" ]; then
-                mp_log_event "下载成功：$_hd_label；curl 0；HTTP $_hd_http；$_hd_bytes 字节；${_hd_elapsed}s"
+                mp_log_event "下载成功：${_hd_label}；curl 0；HTTP ${_hd_http}；$_hd_bytes 字节；${_hd_elapsed}s"
                 [ ! -t 2 ] || printf '\r\033[K' >&2
                 mp_download_progress "$_hd_bytes" "$_hd_elapsed" 1 "$_hd_meta/headers"
                 printf '\n' >&2
@@ -340,7 +340,7 @@ mp_http_download() (
                 23|26) _hd_reason='本地文件读写失败' ;;
                 *) _hd_reason='下载失败' ;;
             esac
-            mp_download_message "  $_hd_name：$_hd_reason（curl $_hd_rc，HTTP $_hd_http）"
+            mp_download_message "  ${_hd_name}：${_hd_reason}（curl ${_hd_rc}，HTTP ${_hd_http}）"
             # Retry only if the final direct attempt was transient; a final 404/403 is conclusive.
             _hd_transient=$_hd_retry
             case "$_hd_rc" in 23|26) exit 1 ;; esac
@@ -356,7 +356,7 @@ mp_http_download() (
 mp_init_log "$_inst_log_file" reset || exit 1
 _INST_BOOT_LOG=$MP_LOG_FILE; export _INST_BOOT_LOG
 printf '安装日志：%s\n' "$MP_LOG_FILE"
-mp_log_event "独立安装入口：$INST_ENTRY_DIR；系统：$(uname -srm)"
+mp_log_event "独立安装入口：${INST_ENTRY_DIR}；系统：$(uname -srm)"
 # 浏览器下载的单文件也能自举。完整依赖检查在模块中进行。
 _inst_packages=
 for _inst_tool in curl jq tar; do command -v "$_inst_tool" >/dev/null 2>&1 || _inst_packages="$_inst_packages $_inst_tool"; done

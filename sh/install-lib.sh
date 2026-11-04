@@ -23,7 +23,7 @@ inst_colors() {
 say_section() {
     _inst_step=$((_inst_step + 1))
     _inst_phase=$*
-    mp_log_event "阶段 $_inst_step：$*"
+    mp_log_event "阶段 ${_inst_step}：$*"
     printf '\n%s[%02d] %s%s\n' "${C_B}${C_BLU}" "$_inst_step" "$*" "$C_R"
 }
 
@@ -38,7 +38,7 @@ prompt_to() {
     [ "$INSTALL_MODE" = interactive ] || { eval "$_p_var=\$_p_def"; return 0; }
     case "$_p_var" in _ib_choice|_is_auth_choice|*_retry) ;; *) _p_def=$(mp_fill_default "$_p_var" "$_p_def") || exit 1 ;; esac
     _p_color=$T_CYN
-    if [ "${_inst_required:-0}" = 1 ]; then _p_color=$T_RED; _p_label="$_p_label（必填）"; fi
+    if [ "${_inst_required:-0}" = 1 ]; then _p_color=$T_RED; _p_label="${_p_label}（必填）"; fi
     printf '\n%s%s%s\n' "${T_B}${_p_color}" "$_p_label" "$T_R" >&3
     for _p_hint in "$@"; do printf '  %s\n' "$_p_hint" >&3; done
     printf '  [%s] > ' "${_p_def:-空}" >&3
@@ -154,7 +154,7 @@ inst_parse_args() {
             --ssh-auth) _ipa_var=INST_SSH_AUTH ;; --scripts-days) _ipa_var=cron_script_days ;;
             --configs-days) _ipa_var=cron_config_days ;;
             --log-file) _ipa_var=INST_LOG_FILE ;;
-            *) say_err "未知参数：$_ipa_key；请使用 --help 查看用法（交互配置参数为 --fill-from）"; return 1 ;;
+            *) say_err "未知参数：${_ipa_key}；请使用 --help 查看用法（交互配置参数为 --fill-from）"; return 1 ;;
         esac
         case "$1" in
             *=*) _ipa_value=${1#*=}; shift ;;
@@ -376,7 +376,7 @@ inst_install_packages() {
         *) say_err '没有可用的软件包管理器' ; return 1 ;;
     esac
     if [ "$_iip_rc" -ne 0 ]; then
-        say_err "软件包安装失败（退出码 $_iip_rc），请根据上方输出检查软件源、网络及磁盘空间"
+        say_err "软件包安装失败（退出码 ${_iip_rc}），请根据上方输出检查软件源、网络及磁盘空间"
         say_dim "手动处理后重新运行安装器：$_iip_manual"
         return 1
     fi
@@ -422,7 +422,7 @@ inst_require_tools() {
         inst_dependency_present "$_irt_tool" || _irt_remaining="$_irt_remaining $_irt_tool"
     done
     if [ -n "$_irt_remaining" ]; then
-        say_err "安装后仍缺少依赖：$_irt_remaining；请检查 PATH、证书文件或固件是否裁剪了相关功能"
+        say_err "安装后仍缺少依赖：${_irt_remaining}；请检查 PATH、证书文件或固件是否裁剪了相关功能"
         say_dim "手动处理后重新运行安装器：$_iip_manual"
         return 1
     fi
@@ -630,7 +630,7 @@ inst_enable_forward() {
     forward_error=$(sysctl -w net.ipv4.ip_forward=1 2>&1) || :
     [ "$(cat /proc/sys/net/ipv4/ip_forward 2>/dev/null)" = "1" ] && forward_applied=1
     if [ "$forward_applied" = "1" ] && [ "$forward_persisted" = "1" ]; then
-        say_ok "net.ipv4.ip_forward = 1（已立即生效并持久化到 $sysctl_conf）"
+        say_ok "net.ipv4.ip_forward = 1（已立即生效并持久化到 ${sysctl_conf}）"
     elif [ "$forward_applied" = "1" ]; then
         say_warn "net.ipv4.ip_forward 已立即生效，但无法写入 $sysctl_conf"
     elif [ "$forward_persisted" = "1" ]; then
@@ -866,7 +866,7 @@ inst_collect_inputs() {
     [ -z "$_MP_SOURCE_DIR" ] || say_dim '本地仓库保持原文件；所选分支用于后续 GitHub 更新'
     if [ -n "${_INST_BOOT_SELECTED:-}" ] && [ -d "${_INST_BOOT_REPO:-}/sh" ]; then
         MP_REPO_BRANCH=$_INST_BOOT_SELECTED
-        say_dim "GitHub 分支：$MP_REPO_BRANCH（已在启动时选择）"
+        say_dim "GitHub 分支：${MP_REPO_BRANCH}（已在启动时选择）"
     else
         inst_choose_branch || return 1
     fi
@@ -910,7 +910,7 @@ inst_choose_auth() {
 # 内部入口：仅接受已准备的安装包路径，不联网下载项目资源。
 inst_apply() (
     _inst_phase='校验安装包及目标环境'
-    trap '_ia_rc=$?; if [ "$_ia_rc" -ne 0 ]; then say_err "阶段：$_inst_phase；退出码：$_ia_rc"; say_err "安装可能已部分写入；请处理上方错误后重试。日志：${MP_LOG_FILE:-未设置}"; fi' EXIT
+    trap '_ia_rc=$?; if [ "$_ia_rc" -ne 0 ]; then say_err "阶段：${_inst_phase}；退出码：$_ia_rc"; say_err "安装可能已部分写入；请处理上方错误后重试。日志：${MP_LOG_FILE:-未设置}"; fi' EXIT
     inst_is_root || { say_err '目标安装需要 root 权限'; exit 1; }
     _ia_bundle=$(CDPATH= cd "$1" && pwd -P) || exit 1
     inst_verify_bundle "$_ia_bundle" || { say_err '安装包校验失败，未修改安装目录'; exit 1; }
@@ -1077,7 +1077,7 @@ inst_install_with_retry() {
             sh "$1/repo/sh/install-lib.sh" --installer-run --apply "$1" || _ii_rc=$?
         fi
         [ "$_ii_rc" -ne 0 ] || return 0
-        say_err "安装失败，退出码 $_ii_rc；日志：${MP_LOG_FILE:-未设置}"
+        say_err "安装失败，退出码 ${_ii_rc}；日志：${MP_LOG_FILE:-未设置}"
         say_warn '安装可能已部分完成。重试会重新校验安装包、检查目标状态并覆盖安装，不会重新下载资源。'
         [ "$INSTALL_MODE" = interactive ] || return "$_ii_rc"
         if [ "$_ii_rc" -eq 255 ]; then

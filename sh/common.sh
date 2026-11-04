@@ -3,7 +3,7 @@
 # 不再做"任何"自更新；需要刷新脚本本身请显式跑 update-scripts.sh。
 # 命名约定：MP_* 全局；小写本地。
 
-# 通过脚本路径反推 $MP_INST_DIR（脚本约定在 sh/ 子目录，所以根 = ../..）
+# 通过脚本路径反推 ${MP_INST_DIR}（脚本约定在 sh/ 子目录，所以根 = ../..）
 # 让 init.d/$0 不可靠的场景也能定位 env.conf 与 env.local.conf
 _path_self=$(readlink -f "$0" 2>/dev/null || echo "$0")
 MP_INST_DIR="${MP_INST_DIR:-$(dirname "$(dirname "$_path_self")")}"
@@ -233,7 +233,7 @@ mp_copy_repo_file() {
     _mcr_root=$(CDPATH= cd -- "$_MP_SOURCE_DIR" 2>/dev/null && pwd -P) \
         || { echo_log '无法解析本地仓库目录'; return 1; }
     _mcr_src=$(mp_realpath "$_mcr_root/$_mcr_rel") || return 1
-    mp_log_event "仓库读取：输入目录=$_MP_SOURCE_DIR；物理目录=$_mcr_root；文件=$_mcr_src"
+    mp_log_event "仓库读取：输入目录=${_MP_SOURCE_DIR}；物理目录=${_mcr_root}；文件=$_mcr_src"
     case "$_mcr_src" in "$_mcr_root/"*) ;; *)
         echo_log "本地仓库文件超出源目录：$_mcr_rel"; return 1 ;;
     esac
@@ -366,7 +366,7 @@ mp_service_op() {
                 ;;
             systemd-start|systemd-restart|systemd-stop) mp_run_service_command systemctl "$_op" "$_svc.service" ;;
             *) echo_log "未支持的操作 $_mso_os-$_op"; return 1 ;;
-        esac || { _mso_status=$?; echo_log "$_op $_svc 失败（退出码 $_mso_status）";
+        esac || { _mso_status=$?; echo_log "$_op $_svc 失败（退出码 ${_mso_status}）";
             [ "$_mso_rc" -ne 0 ] || _mso_rc=$_mso_status; }
     done
     return "$_mso_rc"

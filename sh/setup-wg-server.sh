@@ -12,7 +12,7 @@ esac
 [ "$(id -u)" = 0 ] || fail '请以 root 运行'
 [ -d /run/systemd/system ] || fail '仅支持 systemd Linux'
 for tool in ip wg wg-quick nft sysctl systemctl; do
-    command -v "$tool" >/dev/null || fail "缺少 $tool，请安装 wireguard-tools nftables iproute2"
+    command -v "$tool" >/dev/null || fail "缺少 ${tool}，请安装 wireguard-tools nftables iproute2"
 done
 
 wg_if=$(wg show interfaces)

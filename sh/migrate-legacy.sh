@@ -10,7 +10,7 @@ mp_migrate_legacy_routes() {
         [ -e "$_mlrh_file" ] || [ -L "$_mlrh_file" ] || continue
         # 用户指定：按保留文件名清理，不再检查历史文件内容；不跟随符号链接。
         rm -f -- "$_mlrh_file" || {
-            echo_log "无法删除旧 hotplug：$_mlrh_file；请检查权限或同名目录"; return 1;
+            echo_log "无法删除旧 hotplug：${_mlrh_file}；请检查权限或同名目录"; return 1;
         }
         echo_log "已清理旧路由 hotplug：$_mlrh_file"
     done
