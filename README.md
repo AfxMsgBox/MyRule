@@ -15,8 +15,7 @@
 在目标机或 SSH 发起端下载并运行（本机安装以 root 运行）：
 
 ```sh
-curl -fL -o inst.sh https://raw.githubusercontent.com/AfxMsgBox/MyRule/refs/heads/main/sh/inst.sh
-sh inst.sh
+curl -fL https://raw.githubusercontent.com/AfxMsgBox/MyRule/refs/heads/main/sh/inst.sh ｜ sh
 ```
 
 也可用浏览器下载。上例使用 main 分支；安装向导中可选择其它包含新版安装器的分支。
