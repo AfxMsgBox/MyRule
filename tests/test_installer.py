@@ -288,7 +288,8 @@ sys.exit(subprocess.run(["sh", "-c", command], env=os.environ | {"REMOTE_CPU": "
             ssh.chmod(0o755)
             args += ["--target", "installer@example.invalid"]
         self.file('myrule.inst.log', 'previous-install-marker\n')
-        result = subprocess.run(args, cwd=self.root, env=self.env, text=True, capture_output=True, timeout=10)
+        # 下载进度使用整数秒 sleep，完整模拟安装需允许多个资源的等待时间。
+        result = subprocess.run(args, cwd=self.root, env=self.env, text=True, capture_output=True, timeout=60)
         self.assert_ok(result)
         log = (self.root/'myrule.inst.log').read_text()
         self.assertNotIn('previous-install-marker', log)

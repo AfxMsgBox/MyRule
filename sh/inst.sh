@@ -28,6 +28,13 @@ MyRule 安装器
   --agh-user USER            AGH 用户名；默认 admin
   --agh-password HASH        AGH 密码的 bcrypt 哈希（用单引号包裹）；与 --no-auth 互斥
   --no-auth                  AGH 免登录；与 --agh-password 互斥
+  --wireguard               启用可选 WireGuard 节点；默认关闭，以下五项启用时必填
+  --no-wireguard            关闭 WireGuard；与 --wireguard 互斥
+  --wg-private-key KEY      客户端私钥，Base64 格式；无默认值
+  --wg-public-key KEY       服务端公钥，Base64 格式；无默认值
+  --wg-ip IP                客户端隧道 IPv4，不带掩码；无默认值
+  --wg-server HOST          服务端 IPv4 或域名；无默认值
+  --wg-port PORT            服务端 UDP 端口，1–65535；无默认值
   --branch NAME              安装及后续更新的 GitHub 分支；省略或空值为 main
   --local                    使用 inst.sh 所在的本地仓库；与 --source-dir 互斥
   --source-dir DIR           指定本地仓库根目录；外部程序和规则仍需联网下载
@@ -81,12 +88,12 @@ for _inst_arg do
         --source-dir) _inst_var=_inst_source ;; --target) _inst_var=_inst_target ;;
         --install-dir) _inst_var=_inst_install_dir ;;
         --log-file) _inst_var=_inst_log_file ;;
-        --subscribe-url|--agh-user|--agh-password|--ssh-port|--ssh-key|--ssh-auth|--scripts-days|--configs-days|--dns)
+        --subscribe-url|--agh-user|--agh-password|--ssh-port|--ssh-key|--ssh-auth|--scripts-days|--configs-days|--dns|--wg-private-key|--wg-public-key|--wg-ip|--wg-server|--wg-port)
             _inst_var=_inst_unused ;;
         --fill-from)
             _inst_interactive=1; INST_FILL_FILE=$_inst_dir/myrule.inst.cfg
             case "$_inst_arg" in *=*) _inst_var=INST_FILL_FILE ;; *) _inst_next=fill_optional; continue ;; esac ;;
-        --interactive|--no-start|--no-auth)
+        --interactive|--no-start|--no-auth|--wireguard|--no-wireguard)
             [ "$_inst_arg" = "$_inst_key" ] || { printf '参数不接受值：%s\n' "$_inst_key" >&2; exit 1; }
             [ "$_inst_key" != --interactive ] || _inst_interactive=1
             continue ;;

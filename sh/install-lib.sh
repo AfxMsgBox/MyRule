@@ -36,7 +36,21 @@ say_dim() { printf '  %s%s%s\n' "$C_D" "$*" "$C_R"; }
 prompt_to() {
     _p_var=$1; _p_def=$2; _p_label=$3; shift 3
     [ "$INSTALL_MODE" = interactive ] || { eval "$_p_var=\$_p_def"; return 0; }
-    case "$_p_var" in _ib_choice|_is_auth_choice|*_retry) ;; *) _p_def=$(mp_fill_default "$_p_var" "$_p_def") || exit 1 ;; esac
+    # 新增 WG 参数遵循命令行优先于保存的交互默认值。
+    _p_cli=; _p_option=
+    case "$_p_var" in
+        MP_WG_ENABLED) case "${_inst_seen:-}" in *' --wireguard '*|*' --no-wireguard '*) _p_cli=1 ;; esac ;;
+        MP_WG_PRIVATE_KEY) _p_option=--wg-private-key ;;
+        MP_WG_PUBLIC_KEY) _p_option=--wg-public-key ;;
+        MP_WG_IP) _p_option=--wg-ip ;;
+        MP_WG_SERVER_IP) _p_option=--wg-server ;;
+        MP_WG_SERVER_PORT) _p_option=--wg-port ;;
+        *) _p_option= ;;
+    esac
+    case "${_inst_seen:-}" in *" ${_p_option:-__none__} "*) _p_cli=1 ;; esac
+    case "$_p_var" in _ib_choice|_is_auth_choice|*_retry) ;; *)
+        [ "$_p_cli" = 1 ] || _p_def=$(mp_fill_default "$_p_var" "$_p_def") || exit 1 ;;
+    esac
     _p_color=$T_CYN
     if [ "${_inst_required:-0}" = 1 ]; then _p_color=$T_RED; _p_label="${_p_label}（必填）"; fi
     printf '\n%s%s%s\n' "${T_B}${_p_color}" "$_p_label" "$T_R" >&3
@@ -84,6 +98,13 @@ MyRule 安装器
   --agh-user USER            AGH 用户名；默认 admin
   --agh-password HASH        AGH 密码的 bcrypt 哈希（用单引号包裹）；与 --no-auth 互斥
   --no-auth                  AGH 免登录；与 --agh-password 互斥
+  --wireguard               启用可选 WireGuard 节点；默认关闭，以下五项启用时必填
+  --no-wireguard            关闭 WireGuard；与 --wireguard 互斥
+  --wg-private-key KEY      客户端私钥，Base64 格式；无默认值
+  --wg-public-key KEY       服务端公钥，Base64 格式；无默认值
+  --wg-ip IP                客户端隧道 IPv4，不带掩码；无默认值
+  --wg-server HOST          服务端 IPv4 或域名；无默认值
+  --wg-port PORT            服务端 UDP 端口，1–65535；无默认值
   --branch NAME              安装及后续更新的 GitHub 分支；省略或空值为 main
   --local                    使用 inst.sh 所在的本地仓库；与 --source-dir 互斥
   --source-dir DIR           指定本地仓库根目录；外部程序和规则仍需联网下载
@@ -121,6 +142,7 @@ inst_parse_args() {
     INST_LOG_FILE=${MP_LOG_FILE:-${INST_ENTRY_DIR:-${INST_LIB:-.}}/myrule.inst.log}
     DIR_INST=/etc/proxy; MP_REPO_BRANCH=main; MP_LOCAL_DNS='223.5.5.5 119.29.29.29'
     MP_SUBSCRIBE_URL=; MP_AGH_USER_NAME=admin; MP_AGH_PASSWORD=; INST_NO_AUTH=0
+    MP_WG_ENABLED=0; MP_WG_PRIVATE_KEY=; MP_WG_PUBLIC_KEY=; MP_WG_IP=; MP_WG_SERVER_IP=; MP_WG_SERVER_PORT=
     INST_TARGET=; INST_SSH_PORT=22; INST_SSH_KEY=; INST_SSH_AUTH=key
     autostart=Y; cron_script_days=n; cron_config_days=n
     while [ "$#" -gt 0 ]; do
@@ -144,6 +166,8 @@ inst_parse_args() {
             --local) INST_LOCAL=1; shift; continue ;;
             --no-start) autostart=n; shift; continue ;;
             --no-auth) INST_NO_AUTH=1; shift; continue ;;
+            --wireguard) MP_WG_ENABLED=1; shift; continue ;;
+            --no-wireguard) MP_WG_ENABLED=0; shift; continue ;;
         esac
         case "$_ipa_key" in
             --install-dir) _ipa_var=DIR_INST ;; --branch) _ipa_var=MP_REPO_BRANCH ;;
@@ -154,6 +178,11 @@ inst_parse_args() {
             --ssh-auth) _ipa_var=INST_SSH_AUTH ;; --scripts-days) _ipa_var=cron_script_days ;;
             --configs-days) _ipa_var=cron_config_days ;;
             --log-file) _ipa_var=INST_LOG_FILE ;;
+            --wg-private-key) _ipa_var=MP_WG_PRIVATE_KEY ;;
+            --wg-public-key) _ipa_var=MP_WG_PUBLIC_KEY ;;
+            --wg-ip) _ipa_var=MP_WG_IP ;;
+            --wg-server) _ipa_var=MP_WG_SERVER_IP ;;
+            --wg-port) _ipa_var=MP_WG_SERVER_PORT ;;
             *) say_err "未知参数：${_ipa_key}；请使用 --help 查看用法（交互配置参数为 --fill-from）"; return 1 ;;
         esac
         case "$1" in
@@ -173,6 +202,7 @@ inst_parse_args() {
         _MP_SOURCE_DIR=${INST_ENTRY_ROOT:-}
         [ -n "$_MP_SOURCE_DIR" ] || { say_err '无法推断本地仓库；请使用 --source-dir'; return 1; }
     fi
+    case "$_inst_seen" in *' --wireguard '*) case "$_inst_seen" in *' --no-wireguard '*) say_err '--wireguard 与 --no-wireguard 互斥'; return 1 ;; esac ;; esac
     MP_REPO_BRANCH=${MP_REPO_BRANCH:-main}
     if [ "$INST_NO_AUTH" = 1 ]; then
         case "$_inst_seen" in *' --agh-password '*) say_err '--no-auth 与 --agh-password 不能同时使用'; return 1 ;; esac
@@ -197,6 +227,7 @@ inst_validate_ssh() {
 }
 
 inst_validate_basic() {
+    mp_validate_wireguard || return 1
     _iv_missing=
     [ -n "$MP_SUBSCRIBE_URL" ] || _iv_missing="$_iv_missing --subscribe-url"
     [ -n "$MP_AGH_USER_NAME" ] || _iv_missing="$_iv_missing --agh-user"
@@ -733,7 +764,7 @@ inst_apply_schedule() {
 
 # === bundle ===
 # 安装包只包含仓库快照、资源缓存和参数；绝不执行下载的目标二进制。
-INST_CONFIG_KEYS='DIR_INST MP_REPO_BRANCH MP_SUBSCRIBE_URL MP_AGH_USER_NAME MP_AGH_PASSWORD MP_LOCAL_DNS autostart cron_script_days cron_config_days INST_TARGET_OS INST_TARGET_ARCH INST_NO_AUTH'
+INST_CONFIG_KEYS='DIR_INST MP_REPO_BRANCH MP_SUBSCRIBE_URL MP_AGH_USER_NAME MP_AGH_PASSWORD MP_LOCAL_DNS autostart cron_script_days cron_config_days INST_TARGET_OS INST_TARGET_ARCH INST_NO_AUTH MP_WG_ENABLED MP_WG_PRIVATE_KEY MP_WG_PUBLIC_KEY MP_WG_IP MP_WG_SERVER_IP MP_WG_SERVER_PORT'
 
 inst_snapshot() (
     _is_dst=$1
@@ -827,6 +858,7 @@ inst_prepare() (
     mkdir -p "$MP_INST_DIR" && cp -R "$_ip_bundle/repo/sh" "$MP_INST_DIR/sh" || exit 1
     _MP_SOURCE_DIR="$_ip_bundle/repo"; _MP_CACHE_WRITE="$_ip_bundle/resources"
     _MP_TARGET_ARCH=$INST_TARGET_ARCH; _MP_DOWNLOAD_CORE_CONFIG=$INST_CORE_CONFIG
+    export MP_WG_ENABLED MP_WG_PRIVATE_KEY MP_WG_PUBLIC_KEY MP_WG_IP MP_WG_SERVER_IP MP_WG_SERVER_PORT
     export MP_INST_DIR MP_REPO_BRANCH MP_LOCAL_DNS MP_SUBSCRIBE_URL MP_AGH_USER_NAME MP_AGH_PASSWORD
     export _MP_SOURCE_DIR _MP_CACHE_WRITE _MP_TARGET_ARCH _MP_DOWNLOAD_CORE_CONFIG
     . "$MP_INST_DIR/sh/common.sh" || exit 1
@@ -871,12 +903,34 @@ inst_collect_inputs() {
         inst_choose_branch || return 1
     fi
     inst_prompt_subscription || return 1
+    inst_choose_wireguard || return 1
     inst_choose_auth || return 1
     inst_prompt_dns
     prompt_to autostart "$autostart" '立即启用配置并启动/重启服务？(Y/n)'
     case "$autostart" in Y|y|yes|YES|Yes) autostart=Y ;; n|N|no|NO|No) autostart=n ;; *) say_err '请选择 Y 或 n'; return 1 ;; esac
     prompt_cron_days cron_script_days '每隔几天更新脚本？' 7 || cron_script_days=n
     prompt_cron_days cron_config_days '每隔几天更新配置？' || cron_config_days=n
+}
+
+inst_choose_wireguard() {
+    while :; do
+        prompt_to MP_WG_ENABLED "$MP_WG_ENABLED" '是否启用 WireGuard 代理？(yes/no，1/0)'
+        case "$MP_WG_ENABLED" in
+            y|Y|yes|YES|Yes|1) MP_WG_ENABLED=1; break ;;
+            n|N|no|NO|No|0) MP_WG_ENABLED=0; mp_fill_save MP_WG_ENABLED 0; return $? ;;
+            *) say_warn '请输入 yes 或 no' ;;
+        esac
+    done
+    mp_fill_save MP_WG_ENABLED 1 || return 1
+    while :; do
+        prompt_required MP_WG_PRIVATE_KEY "$MP_WG_PRIVATE_KEY" 'WireGuard 客户端私钥（可见输入）'
+        prompt_required MP_WG_PUBLIC_KEY "$MP_WG_PUBLIC_KEY" 'WireGuard 服务端公钥'
+        prompt_required MP_WG_IP "$MP_WG_IP" 'WireGuard 客户端隧道 IPv4（不带掩码）'
+        prompt_required MP_WG_SERVER_IP "$MP_WG_SERVER_IP" 'WireGuard 服务端 IPv4 或域名'
+        prompt_required MP_WG_SERVER_PORT "$MP_WG_SERVER_PORT" 'WireGuard 服务端 UDP 端口'
+        mp_validate_wireguard && return 0
+        say_warn 'WireGuard 参数无效，请重新输入'
+    done
 }
 
 inst_prompt_dns() {
@@ -944,7 +998,7 @@ inst_apply() (
     # 移除废弃的仓库 URL 和外部后备代理；保留其它自定义行。
     awk '!/^[[:space:]]*(export[[:space:]]+)?(MP_REPO_RAW_URL|MP_PROXY)=/' "$DIR_SH/env.local.conf" > "$DIR_SH/env.local.conf.tmp" \
         && mv "$DIR_SH/env.local.conf.tmp" "$DIR_SH/env.local.conf" || exit 1
-    kv_keys="MP_INST_DIR MP_REPO_BRANCH MP_SUBSCRIBE_URL MP_AGH_USER_NAME MP_AGH_PASSWORD MP_LOCAL_DNS"
+    kv_keys="MP_INST_DIR MP_REPO_BRANCH MP_SUBSCRIBE_URL MP_AGH_USER_NAME MP_AGH_PASSWORD MP_LOCAL_DNS MP_WG_ENABLED MP_WG_PRIVATE_KEY MP_WG_PUBLIC_KEY MP_WG_IP MP_WG_SERVER_IP MP_WG_SERVER_PORT"
     for kv_key in $kv_keys; do
         eval "kv_val=\$$kv_key"
         case "$kv_key" in

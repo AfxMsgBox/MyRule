@@ -306,3 +306,27 @@ mp_require_tun() {
     printf '%s\n' '目标机无法访问 /dev/net/tun；请加载 tun 模块，容器须由宿主机开放并挂载 TUN 设备' >&2
     return 1
 }
+
+# WireGuard 参数共用校验，安装器和日常模板更新均调用。
+# 不输出参数内容，尤其不能把私钥写进日志。
+mp_validate_wireguard() (
+    case "${MP_WG_ENABLED:-0}" in 0) exit 0 ;; 1) ;; *) echo 'MP_WG_ENABLED 必须为 0 或 1' >&2; exit 1 ;; esac
+    for key in MP_WG_PRIVATE_KEY MP_WG_PUBLIC_KEY; do
+        eval 'value=${'"$key"':-}'
+        body=${value%=}
+        case "$body" in ''|*[!A-Za-z0-9+/]*) echo "$key 必须为 32 字节的 Base64 密钥" >&2; exit 1 ;; esac
+        [ "${#value}" = 44 ] && [ "${#body}" = 43 ] || { echo "$key 必须为 32 字节的 Base64 密钥" >&2; exit 1; }
+    done
+    printf '%s\n' "${MP_WG_IP:-}" | awk '
+        NF!=1 {exit 1}
+        {if(split($0,a,".")!=4) exit 1; for(i=1;i<=4;i++) if(a[i]!~/^[0-9]+$/ || length(a[i])>3 || (length(a[i])>1 && a[i] ~ /^0/) || a[i]>255) exit 1}
+        END {if(NR!=1) exit 1}' || { echo 'MP_WG_IP 必须为不带掩码的 IPv4 地址' >&2; exit 1; }
+    printf '%s\n' "${MP_WG_SERVER_IP:-}" | awk '
+        NF!=1 || length($0)>253 || $0 !~ /^[A-Za-z0-9.-]+$/ {exit 1}
+        {n=split($0,a,"."); for(i=1;i<=n;i++) if(length(a[i])<1 || length(a[i])>63 || a[i] ~ /^-/ || a[i] ~ /-$/) exit 1
+         if($0 ~ /^[0-9.]+$/) {if(n!=4) exit 1; for(i=1;i<=4;i++) if(a[i]>255) exit 1}}
+        END {if(NR!=1) exit 1}' || { echo 'MP_WG_SERVER_IP 必须为 IPv4 地址或域名' >&2; exit 1; }
+    case "${MP_WG_SERVER_PORT:-}" in ''|0*|*[!0-9]*) echo 'WireGuard 端口必须为 1–65535' >&2; exit 1 ;; esac
+    [ "${#MP_WG_SERVER_PORT}" -le 5 ] && [ "$MP_WG_SERVER_PORT" -ge 1 ] && [ "$MP_WG_SERVER_PORT" -le 65535 ] \
+        || { echo 'WireGuard 端口必须为 1–65535' >&2; exit 1; }
+)

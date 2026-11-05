@@ -716,3 +716,13 @@ git diff --check
 - 向 `/etc/nftables.conf` 末尾追加精确 include（已存在则跳过），追加前备份为 `.bak-myrule-wg`，启用系统原有 nftables 服务开机加载。即时只加载本工具的规则，不重载完整防火墙。
 - 预检对应 WG 配置文件及 wg-quick 服务模板，启用 `wg-quick@<接口>.service` 开机启动，不使用 --now、不重启当前接口。不调整现有过滤规则；UDP/转发放行由管理员管理。服务器需已有相应软件包；本工具只处理 IPv4。
 - 不生成用户参数文件；按用户要求不编写或执行单元测试，实际修复及重启恢复由用户验证。
+
+## 14. 可选 WireGuard 出站
+
+安装器的 `MP_WG_ENABLED` 默认为 0，显式启用后校验五项 `MP_WG_*` 参数。客户端隧道地址采用纯 IPv4，服务端接受 IPv4 或 ASCII 域名，端口为 1–65535，密钥要求 32 字节 Base64 格式。安装交互沿用可见输入，私钥不会写入诊断日志；启用 --fill-from 时参数随其它输入保存到权限 600 的 JSON。
+
+模板沿用用户提供的 `#wg proxy start` / `#wg proxy end` 标记。共用 `mp_render_template` 在启用时去掉块内每行最前面的一个 #，再替换变量；关闭时整块原样保留且不替换密钥。拒绝嵌套、孤立标记、未闭合块或未注释的块内行，渲染失败保留旧目标文件。启用但模板无 WG 块时报错。AGH 模板不要求 WG 块。
+
+安装参数经过命令行解析、交互、bundle JSON、prepare 环境和目标 apply 白名单传递，落盘到 `sh/env.local.conf`，由 `env.conf` 加载供日常配置更新复用。WG 交互默认值优先使用显式 CLI，其次 --fill-from，再使用脚本默认值；实际交互输入优先。订阅仍为必填，wg-Proxy 作为额外代理选项加入 defaultProxy/gptProxy/selectProxy，启用时不自动切换代理组。
+
+模板固定 MTU 1420、节点顶层 keepalive 25 和远程 DNS。功能仅配置 Mihomo 出站，服务端 peer 和 NAT 由用户准备。测试使用虚构的服务器地址，仅验证渲染、安装、服务启动及配置更新。

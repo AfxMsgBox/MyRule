@@ -325,6 +325,7 @@ mp_run_logged_command() (
             line=$0
             line=hide(line,ENVIRON["MP_SUBSCRIBE_URL"])
             line=hide(line,ENVIRON["MP_AGH_PASSWORD"])
+            line=hide(line,ENVIRON["MP_WG_PRIVATE_KEY"])
             if (tolower(line) ~ /authorization[[:space:]]*:/) line="<redacted authentication diagnostic>"
             gsub(/(https?|socks5h?):\/\/[^[:space:]<>]+/, "<redacted-url>", line)
             print line
@@ -1002,6 +1003,8 @@ mp_prepare_agh_config() {
 # mp_render_template <src> <dst> [agh]
 # AGH users 单独生成 JSON（也是合法 YAML），避免空哈希及用户名转义问题。
 mp_render_template() {
+    mp_validate_wireguard || return 1
+    export MP_WG_ENABLED MP_WG_PRIVATE_KEY MP_WG_PUBLIC_KEY MP_WG_IP MP_WG_SERVER_IP MP_WG_SERVER_PORT
     _mrt_users=
     if [ "${3:-}" = agh ]; then
         case "$MP_AGH_PASSWORD" in
@@ -1014,7 +1017,20 @@ mp_render_template() {
     fi
     _mrt_tmp=$(mktemp "$2.tmp.XXXXXX") || return 1
     _MP_RENDER_AGH_USERS="$_mrt_users" awk '
-    BEGIN { users = ENVIRON["_MP_RENDER_AGH_USERS"] }
+    BEGIN { users = ENVIRON["_MP_RENDER_AGH_USERS"]; wg_enabled=(ENVIRON["MP_WG_ENABLED"]=="1") }
+    /^#wg proxy start[[:space:]]*$/ {
+        if(in_wg) {bad=1; exit 1}
+        in_wg=1; wg_blocks++; print; next
+    }
+    /^#wg proxy end[[:space:]]*$/ {
+        if(!in_wg) {bad=1; exit 1}
+        in_wg=0; print; next
+    }
+    in_wg {
+        if ($0 !~ /^#/) {bad=1; exit 1}
+        if (!wg_enabled) {print; next}
+        sub(/^#/, "")
+    }
     users != "" && /^users:/ {
         print "users: " users; user_blocks++; in_users=1; next
     }
@@ -1027,13 +1043,17 @@ mp_render_template() {
         while (match($0, /\{MP_[A-Za-z0-9_]+\}/)) {
             ph  = substr($0, RSTART, RLENGTH)
             key = substr(ph, 2, RLENGTH - 2)
+            if(in_wg && key ~ /^MP_WG_/ && ENVIRON[key]=="") {bad=1; exit 1}
             repl = (key in ENVIRON) ? ENVIRON[key] : ph
             out = out substr($0, 1, RSTART - 1) repl
             $0 = substr($0, RSTART + RLENGTH)
         }
         print out $0
     }
-    END { if (users != "" && user_blocks != 1) exit 1 }
+    END {
+        if (bad || in_wg || (users != "" && user_blocks != 1)) exit 1
+        if (users=="" && wg_enabled && wg_blocks==0) exit 1
+    }
     ' "$1" > "$_mrt_tmp" && mv "$_mrt_tmp" "$2" \
         || { rm -f "$_mrt_tmp"; return 1; }
 }

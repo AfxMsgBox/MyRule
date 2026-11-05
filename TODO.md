@@ -1,5 +1,13 @@
 # 待办与验证记录
 
+## 可选 WireGuard 安装
+
+- [x] 接入 WG 注释块渲染、安装交互/CLI、SSH 参数传递和 env.local.conf 持久化。
+- [x] OpenWrt SSH 安装与覆盖安装成功，Core/AGH 运行、WG API 节点识别、启用/关闭配置更新及 Mihomo 校验通过，配置权限 600。
+- [x] Debian 13 SSH 覆盖安装成功，Core/AGH 运行并启用自启动、UI HTTP 200、WG API 节点识别、启用/关闭更新及 Mihomo 校验通过，配置权限 600。
+- [x] WG 专项 9 项和相关回归 103 项通过。
+- [ ] 真实 WireGuard 服务端连通性由用户验证，本轮按要求使用虚构节点。
+
 ## TUN 冗余直连路由清理
 
 - [x] 完整 fake-IP 路由就绪后，删除同接口 main 表中被覆盖的 kernel /30，保留接口地址和 local 表。

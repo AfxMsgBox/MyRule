@@ -56,6 +56,8 @@ sh inst.sh --fill-from ./debug.cfg  # 使用指定文件
 
 命令行安装及所有参数说明见 `sh inst.sh --help`（也支持 `-h`、`help`）。
 
+安装时可选启用 WireGuard，填写客户端私钥、服务端公钥、客户端隧道 IPv4（不带掩码）、服务端 IP/域名和 UDP 端口。参数保存到权限 600 的 `sh/env.local.conf`，后续更新自动沿用。启用后在面板代理组中选择 `wg-Proxy`；节点订阅仍需填写。命令行参数见 `inst.sh --help`。
+
 ## 2. 日常维护
 
 默认管理页面：AGH `http://设备IP:180`，Mihomo `http://设备IP:3721/ui/`。
