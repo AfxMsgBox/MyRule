@@ -85,7 +85,26 @@ dns:
 #  proxy-server-nameserver:
 #    - udp://47.116.209.9:39053
 #    - udp://127.0.0.1:53
-    
+
+#Wiregaurd proxy，如果有需要，安装脚本取消这段注释，并替换占位符
+#wg proxy start
+#proxies:
+#  - name: "wg-Proxy"
+#    type: wireguard
+#    ip: {MP_WG_IP}
+#    private-key: {MP_WG_PRIVATE_KEY}
+#    peers:
+#      - server: {MP_WG_SERVER_IP}
+#        port: {MP_WG_SERVER_PORT}
+#        public-key: {MP_WG_PUBLIC_KEY}
+#        allowed-ips: ['0.0.0.0/0']
+#    udp: true
+#    mtu: 1420
+#    persistent-keepalive: 25
+#    remote-dns-resolve: true # 强制dns远程解析，默认值为false
+#    dns: [ 1.1.1.1, 8.8.8.8 ] # 仅在remote-dns-resolve为true时生效
+#wg proxy end
+
 proxy-providers:
   HongKong:
     type: http
@@ -197,6 +216,9 @@ proxy-groups:
       - fastTaiWan
       - fastUSA
       - selectProxy
+#wg proxy start
+#      - wg-Proxy
+#wg proxy end
 #-------------------------
   - name: gptProxy
     type: select
@@ -206,6 +228,9 @@ proxy-groups:
       - fastTaiWan
       - fastUSA
       - selectProxy
+#wg proxy start
+#      - wg-Proxy
+#wg proxy end
 #-------------------------
   - name: selectProxy
     type: select
@@ -215,7 +240,10 @@ proxy-groups:
       - TaiWan
       - Japan
       - Singapore
-  
+#wg proxy start
+#    proxies:
+#      - wg-Proxy
+#wg proxy end
 rule-providers:
   rule_gpt:
     behavior: domain
