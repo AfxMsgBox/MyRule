@@ -72,4 +72,22 @@ mp_migrate_legacy_proxy() {
     fi
 }
 
-mp_migrate_legacy_routes && mp_migrate_legacy_core && mp_migrate_legacy_proxy
+# Core 已改为用户配置；只移除废弃环境参数，绝不改动 Core 文件。
+mp_migrate_legacy_config() {
+    _mlcfg_file="$MP_INST_DIR/sh/env.local.conf"
+    [ -f "$_mlcfg_file" ] || return 0
+    [ ! -L "$_mlcfg_file" ] || return 1
+    _mlcfg_pattern='^[[:space:]]*(export[[:space:]]+)?(MP_SUBSCRIBE_URL|MP_WG_ENABLED|MP_WG_PRIVATE_KEY|MP_WG_PUBLIC_KEY|MP_WG_IP|MP_WG_SERVER_IP|MP_WG_SERVER_PORT)='
+    grep -Eq "$_mlcfg_pattern" "$_mlcfg_file" || return 0
+    _mlcfg_tmp=$(mktemp "$MP_INST_DIR/sh/.env-migrate.XXXXXX") || return 1
+    if awk -v pattern="$_mlcfg_pattern" '$0 !~ pattern' "$_mlcfg_file" > "$_mlcfg_tmp" &&
+        chmod 600 "$_mlcfg_tmp" && mv "$_mlcfg_tmp" "$_mlcfg_file"; then
+        echo_log '已清理旧订阅/WireGuard 环境参数；Core 配置保持不变'
+    else rm -f "$_mlcfg_tmp"; return 1; fi
+}
+
+case "${1:-}" in
+    --config-only) mp_migrate_legacy_config ;;
+    '') mp_migrate_legacy_routes && mp_migrate_legacy_core && mp_migrate_legacy_proxy && mp_migrate_legacy_config ;;
+    *) echo_log '未知迁移操作'; exit 2 ;;
+esac

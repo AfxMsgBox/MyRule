@@ -178,7 +178,7 @@ inst_apply_schedule
         # Apply preflight checks cron dependencies before mkdir or configuration writes.
         apply = test_installer.APPLY
         apply = apply[apply.index('inst_apply() ('):]
-        preflight = apply[apply.index('    inst_require_tools &&'):apply.index('    DIR_SH=')]
+        preflight = apply[apply.index('    inst_require_tools ||'):apply.index('    DIR_SH=')]
         result = self.installer('''
 cron_script_days=3; cron_config_days=n
 mp_require_tun() { :; }

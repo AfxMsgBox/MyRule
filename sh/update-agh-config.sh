@@ -43,6 +43,13 @@ else
     awk '/^nameserver/ {print $2}' /etc/resolv.conf >> "$agh_dns_staged" || dns_fail
 fi
 
+# 未启用 Core DNS 时仅保留直连上游，不能把域名导向未监听的端口。
+if ! mp_core_enabled dns "$core_config"; then
+    mv "$agh_dns_staged" "$agh_dns" || dns_fail
+    echo_log 'Core DNS 未启用，AGH 使用直连上游；跳过代理域名清单'
+    exit 0
+fi
+
 # myupstream.txt 已是 [/domain/]server 格式，整段直接 cat
 echo_log ">>> 拉取 myupstream"
 if download_file "$MP_REPO_RAW_URL/agh/myupstream.txt" "$dl_dir/myupstream.txt"; then

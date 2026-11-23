@@ -46,6 +46,7 @@ mp_core_value() {
         sub(/^[[:space:]]+/, "", v)
         sub(/[[:space:]]+$/, "", v)
         sub(/[[:space:]]+#.*/, "", v)
+        if (v ~ /^#/ || v=="null" || v=="Null" || v=="NULL" || v=="~") return ""
         if ((substr(v, 1, 1) == "\"" && substr(v, length(v), 1) == "\"") ||
             (substr(v, 1, 1) == "\047" && substr(v, length(v), 1) == "\047")) {
             v = substr(v, 2, length(v) - 2)
@@ -135,14 +136,16 @@ mp_core_api_url() {
 
 mp_core_dns_endpoint() {
     _mcde_config="${1:-$MP_CORE_DIR/config.yaml}"
-    _mcde_addr=$(mp_core_value dns listen "$_mcde_config") || return 1
+    _mcde_addr=$(mp_core_value dns listen "$_mcde_config" 2>/dev/null || :)
+    _mcde_addr=${_mcde_addr:-127.0.0.1:253}
     _mp_core_local_endpoint "$_mcde_addr"
 }
 
 # 读取 dns.fake-ip-range 并规范化为 IPv4 网络 CIDR。
 mp_core_fake_ip_cidr() {
     _mcfic_config="${1:-$MP_CORE_DIR/config.yaml}"
-    _mcfic_range=$(mp_core_value dns fake-ip-range "$_mcfic_config") || return 1
+    _mcfic_range=$(mp_core_value dns fake-ip-range "$_mcfic_config" 2>/dev/null || :)
+    _mcfic_range=${_mcfic_range:-198.18.0.1/16}
     printf '%s\n' "$_mcfic_range" | awk -F/ '
         function fail() { exit 1 }
         NF != 2 || $2 !~ /^[0-9]+$/ || $2 < 0 || $2 > 32 { fail() }
@@ -172,6 +175,181 @@ mp_core_external_ui_path() {
     case "$_mceu_rel" in ''|.|..|/*|../*|*/../*|*/..) return 1 ;; esac
     printf '%s/%s\n' "$MP_CORE_DIR" "$_mceu_rel"
 }
+
+# 空 YAML 映射仍是空配置；Mihomo 拒绝零字节文件。
+mp_core_empty() {
+    [ -f "${1:-$MP_CORE_DIR/config.yaml}" ] || return 1
+    awk '
+        /^[[:space:]]*(#|$)/ {next}
+        /^[[:space:]]*\{[[:space:]]*\}[[:space:]]*(#.*)?$/ {next}
+        {nonempty=1}
+        END {exit nonempty}
+    ' "${1:-$MP_CORE_DIR/config.yaml}"
+}
+
+# 功能开关必须显式启用；缺失不能冒充运行中的 DNS/TUN。
+mp_core_enabled() {
+    case "$(mp_core_value "$1" enable "${2:-$MP_CORE_DIR/config.yaml}" 2>/dev/null)" in
+        true|True|TRUE) return 0 ;; *) return 1 ;;
+    esac
+}
+
+mp_core_tun_device() {
+    _mct_device=$(mp_core_value tun device "${1:-$MP_CORE_DIR/config.yaml}" 2>/dev/null || :)
+    _mct_device=${_mct_device:-utun}
+    case "$_mct_device" in *[!a-zA-Z0-9_-]*) return 1 ;; esac
+    [ "${#_mct_device}" -le 15 ] || return 1
+    printf '%s\n' "$_mct_device"
+}
+
+mp_core_route_enabled() {
+    mp_core_enabled tun "${1:-$MP_CORE_DIR/config.yaml}" &&
+        mp_core_enabled dns "${1:-$MP_CORE_DIR/config.yaml}" &&
+        [ "$(mp_core_value dns enhanced-mode "${1:-$MP_CORE_DIR/config.yaml}" 2>/dev/null)" = fake-ip ]
+}
+
+# 只解析维护脚本需要的常见缩进 YAML；拒绝无法可靠预下载的复杂写法。
+# 其它节点/规则内容交给目标 Mihomo -t 校验，不打印含密钥的原始行。
+mp_core_check_layout() {
+    [ -f "$1" ] || { echo_log 'Core 配置文件不存在'; return 1; }
+    awk '
+        function fail() { bad=1; exit 1 }
+        /^[[:space:]]*(#|$)/ { next }
+        {
+            line=$0; sub(/[[:space:]]+#.*/, "", line); sub(/[[:space:]]+$/, "", line)
+            if (line ~ /\{MP_[A-Za-z0-9_]+\}/) fail()
+            if (line ~ /^---/) { docs++; if (docs>1 || seen) fail(); next }
+            if (!seen && line ~ /^[[:space:]]/) fail()
+            seen=1
+            if (line ~ /^\{[[:space:]]*\}$/) next
+            if (line ~ /^[^[:space:]]/) {
+                section=""; key=line; sub(/:.*/, "", key)
+                if (key ~ /^[\047"](tun|dns|proxy-providers|rule-providers|external-controller|external-ui|mixed-port|port|socks-port)[\047"]$/) fail()
+                if (key ~ /^(tun|dns|proxy-providers|rule-providers)$/) {
+                    if (tops[key]++) fail()
+                    if (line !~ /^[a-z-]+:[[:space:]]*(\{\})?$/) fail()
+                    if (line !~ /\{\}$/) {section=key; child_indent=0}
+                } else if (line !~ /^[^:]+:[[:space:]]*/) fail()
+                if (key ~ /^(external-controller|external-ui|mixed-port|port|socks-port)$/ && tops[key]++) fail()
+                next
+            }
+            if (section!="") {
+                if (line ~ /\t|^[[:space:]]*<</) fail()
+                match(line,/^[[:space:]]*/); indent=RLENGTH
+                if (!child_indent) child_indent=indent
+                if (section ~ /providers$/ && indent==child_indent && line !~ /:[[:space:]]*$/) fail()
+                field=line; sub(/^[[:space:]]+/, "", field); sub(/:.*/, "", field)
+                if (field ~ /^[\047"](enable|device|listen|fake-ip-range|enhanced-mode|type|url|path)[\047"]$/) fail()
+                if ((field ~ /^(enable|device|listen|fake-ip-range|enhanced-mode|type|url|path)$/) && line ~ /:[[:space:]]*[&*\[{>|]/) fail()
+            }
+        }
+        END { exit bad }
+    ' "$1" || { echo_log 'Core 配置格式不受支持：请使用单文档、常见缩进 YAML；DNS/TUN/providers 不支持锚点、合并及内联结构，不接受模板占位符'; return 1; }
+}
+
+mp_core_validate() (
+    config=${1:-$MP_CORE_DIR/config.yaml}
+    mp_core_check_layout "$config" || exit 1
+    for section in tun dns; do
+        value=$(mp_core_value "$section" enable "$config" 2>/dev/null || :)
+        case "$value" in ''|true|True|TRUE|false|False|FALSE) ;; *) echo_log "${section}.enable 必须为 true/false"; exit 1 ;; esac
+    done
+    for key in mixed-port port socks-port; do
+        value=$(mp_core_value '' "$key" "$config" 2>/dev/null || :)
+        case "$value" in ''|0) continue ;; esac
+        _mp_valid_port "$value" || { echo_log "无效 Core 端口：$key"; exit 1; }
+    done
+    for key in external-controller external-ui; do
+        value=$(mp_core_value '' "$key" "$config" 2>/dev/null || :)
+        [ -n "$value" ] || continue
+        case "$key" in
+            external-controller) mp_core_api_url "$config" >/dev/null ;;
+            external-ui) mp_core_external_ui_path "$config" >/dev/null ;;
+        esac || { echo_log "无效 Core 字段：$key"; exit 1; }
+    done
+    mp_core_tun_device "$config" >/dev/null && mp_core_dns_endpoint "$config" >/dev/null &&
+        mp_core_fake_ip_cidr "$config" >/dev/null || { echo_log '无效的 TUN 名称、DNS 端口或 fake-IP 网段'; exit 1; }
+)
+
+# 仅安装导入调用。只补已启用 section 的空/缺失项；不启用任何功能。
+mp_import_core_config() (
+    src=$1; dst=$2
+    mp_core_validate "$src" || exit 1
+    tmp=$(mktemp "$dst.tmp.XXXXXX") || exit 1
+    trap 'rm -f "$tmp"' EXIT
+    if [ ! -s "$src" ]; then
+        printf '{}\n' > "$tmp" && chmod 600 "$tmp" && mv "$tmp" "$dst"
+        exit $?
+    fi
+    tun=0; dns=0
+    mp_core_enabled tun "$src" && tun=1
+    mp_core_enabled dns "$src" && dns=1
+    awk -v tun="$tun" -v dns="$dns" '
+        function default_for(k) {
+            if (section=="tun" && tun && k=="device") return "utun"
+            if (section=="dns" && dns && k=="listen") return "127.0.0.1:253"
+            if (section=="dns" && dns && k=="fake-ip-range") return "198.18.0.1/16"
+            return ""
+        }
+        function finish( k,d) {
+            for (i=1;i<=3;i++) {
+                k=(i==1?"device":i==2?"listen":"fake-ip-range"); d=default_for(k)
+                if (d!="" && !found[k]) printf "%*s%s: %s\n", width, "", k, d
+                delete found[k]
+            }
+        }
+        /^[^[:space:]#]/ {
+            finish(); section=""; width=2; child=0
+            if ($0 ~ /^(tun|dns):[[:space:]]*($|#)/) {section=$0; sub(/:.*/, "", section)}
+        }
+        section!="" && /^[[:space:]]+[^[:space:]#]/ {
+            match($0,/^[[:space:]]*/); indent=RLENGTH
+            if (!child) {width=indent; child=1}
+            if (indent==width) {
+                key=$0; sub(/^[[:space:]]+/, "", key); sub(/:.*/, "", key)
+                d=default_for(key)
+                if (d!="") {
+                    found[key]=1; v=$0; sub(/^[^:]*:[[:space:]]*/, "", v); sub(/[[:space:]]+#.*/, "", v); sub(/[[:space:]]+$/, "", v)
+                    if (v=="" || v=="\"\"" || v=="\047\047" || v=="null" || v=="Null" || v=="NULL" || v=="~" || v ~ /^#/) {printf "%*s%s: %s\n", width, "", key, d; next}
+                }
+            }
+        }
+        {print}
+        END {finish()}
+    ' "$src" > "$tmp" && chmod 600 "$tmp" && mv "$tmp" "$dst"
+)
+
+# path 只能落在 Core home 内，且不能覆盖配置、程序、UI 或状态文件。
+mp_core_resource_path() (
+    rel=$1
+    while [ "${rel#./}" != "$rel" ]; do rel=${rel#./}; done
+    case "$rel" in ''|.|..|/*|../*|*/../*|*/..|*[!a-zA-Z0-9_./-]*|.*|*/.*|config.yaml|config.yaml.*|mihomo|start.sh|cache.db) exit 1 ;; esac
+    ui=$(mp_core_value '' external-ui "${2:-$MP_CORE_DIR/config.yaml}" 2>/dev/null || :)
+    while [ "${ui#./}" != "$ui" ]; do ui=${ui#./}; done
+    if [ -n "$ui" ]; then case "$rel" in "$ui"|"$ui"/*) exit 1 ;; esac; fi
+    dir=$MP_CORE_DIR
+    rest=$rel
+    while :; do
+        part=${rest%%/*}; dir=$dir/$part
+        [ ! -L "$dir" ] || exit 1
+        [ "$rest" != "$part" ] || break
+        rest=${rest#*/}
+    done
+    printf '%s\n' "$rel"
+)
+
+# 完整 YAML/规则校验使用目标机自身 Mihomo；失败时只输出字段级提示。
+mp_check_core_binary_config() (
+    config=${1:-$MP_CORE_DIR/config.yaml}
+    output=$(mktemp) || exit 1
+    trap 'rm -f "$output"' EXIT
+    if "$MP_CORE_DIR/mihomo" -t -d "$MP_CORE_DIR" -f "$config" > "$output" 2>&1; then
+        echo_log 'Mihomo 配置校验通过'
+    else
+        echo_log 'Mihomo 配置校验失败，未切换正式配置；请在目标机运行 mihomo -t -d <core目录> -f <配置文件> 检查。原始诊断可能包含配置凭据，不写入安装日志。'
+        exit 1
+    fi
+)
 
 # 在目标文件系统内准备可执行文件，chmod/cp 失败不会破坏现有二进制。
 mp_install_binary() {
@@ -423,10 +601,12 @@ mp_activate_configs() {
 
 # 不只检查 API：TUN 必须上线，且 fake-ip 精确网段必须直接路由至该接口。
 mp_core_network_ready() {
-    _mcn_tun=$(mp_core_value tun device) || return 1
+    mp_core_enabled tun || return 0
+    _mcn_tun=$(mp_core_tun_device) || return 1
     _mcn_cidr=$(mp_core_fake_ip_cidr) || return 1
     _mcn_reason="TUN 接口 $_mcn_tun 未上线"
     ip link show "$_mcn_tun" 2>/dev/null | grep -q '[<,]UP[,>]' || return 1
+    mp_core_route_enabled || return 0
     _mcn_reason="缺少 fake-ip 路由 $_mcn_cidr -> $_mcn_tun"
     ip -4 route show "$_mcn_cidr" 2>/dev/null | awk -v net="$_mcn_cidr" -v dev="$_mcn_tun" '
         $1 == net {
@@ -444,18 +624,20 @@ mp_core_network_ready() {
 # 最多等待指定秒数；失败保持 AGH 停止，不能把 API 在线当作透明代理就绪。
 mp_wait_core_ready() {
     _mwcr_timeout="${1:-30}"
-    _mwcr_api=$(mp_core_api_url) || return 1
+    mp_core_validate || return 1
+    _mwcr_api=$(mp_core_api_url 2>/dev/null || :)
     _mwcr_secret=$(mp_core_value "" secret 2>/dev/null || :)
     _mwcr_start=$(date +%s)
-    _mcn_reason='Core API 未响应'
+    _mcn_reason='Core 进程未运行或 API 未响应'
     while [ "$(($(date +%s) - _mwcr_start))" -lt "$_mwcr_timeout" ]; do
         set -- --silent --fail --max-time 2 --proxy '' --noproxy '*'
         [ -z "$_mwcr_secret" ] || set -- "$@" -H "Authorization: Bearer $_mwcr_secret"
-        if curl --disable "$@" "$_mwcr_api/version" >/dev/null 2>&1; then
+        if { [ -z "$_mwcr_api" ] && mp_service_running proxy_core; } ||
+            { [ -n "$_mwcr_api" ] && curl --disable "$@" "$_mwcr_api/version" >/dev/null 2>&1; }; then
             _mcn_reason='Core 配置缺少有效的 TUN 或 fake-ip 参数'
             mp_core_network_ready && return 0
         else
-            _mcn_reason='Core API 未响应'
+            _mcn_reason='Core 进程未运行或 API 未响应'
         fi
         sleep 1
     done
@@ -807,11 +989,13 @@ mp_fetch_repo_sh() {
 mp_fetch_core_providers() {
     _mfp_config="${1:-$MP_CORE_DIR/config.yaml}"
     [ -f "$_mfp_config" ] || { echo_log "未找到 Core 配置：$_mfp_config"; return 1; }
+    mp_core_check_layout "$_mfp_config" || return 1
     _mfp_list=$(mktemp) || return 1
     awk '
     function clean(v) {
         sub(/^[[:space:]]+/, "", v); sub(/[[:space:]]+$/, "", v)
         sub(/[[:space:]]+#.*/, "", v)
+        if (v ~ /^#/ || v=="null" || v=="Null" || v=="NULL" || v=="~") return ""
         if ((substr(v, 1, 1) == "\"" && substr(v, length(v), 1) == "\"") ||
             (substr(v, 1, 1) == "\047" && substr(v, length(v), 1) == "\047")) {
             v = substr(v, 2, length(v) - 2)
@@ -819,14 +1003,15 @@ mp_fetch_core_providers() {
         return v
     }
     function emit() {
-        if (name != "" && type == "http") print section "\t" name "\t" url "\t" path
+        if (name != "") print section "\034" name "\034" type "\034" url "\034" path
         name = ""; type = ""; url = ""; path = ""; field_indent = -1
+        delete fields
     }
     BEGIN { section = ""; provider_indent = -1; field_indent = -1 }
     /^[[:space:]]*#/ || /^[[:space:]]*$/ { next }
     {
         match($0, /^[[:space:]]*/); indent = RLENGTH
-        line = $0; sub(/^[[:space:]]+/, "", line)
+        line = $0; sub(/^[[:space:]]+/, "", line); sub(/[[:space:]]+#.*/, "", line); sub(/[[:space:]]+$/, "", line)
     }
     indent == 0 && line ~ /^(proxy-providers|rule-providers):[[:space:]]*$/ {
         emit(); section = line; sub(/:.*/, "", section); provider_indent = -1; next
@@ -840,40 +1025,58 @@ mp_fetch_core_providers() {
         if (name != "" && indent > provider_indent) {
             if (field_indent < 0) field_indent = indent
             if (indent == field_indent) {
+                key=line; sub(/:.*/, "", key)
+                if (fields[key]++ || key=="header") {bad=1; exit 1}
                 if (index(line, "type:") == 1) { type = clean(substr(line, 6)); next }
                 if (index(line, "url:")  == 1) { url  = clean(substr(line, 5)); next }
                 if (index(line, "path:") == 1) { path = clean(substr(line, 6)); next }
             }
         }
     }
-    END { emit() }
-    ' "$_mfp_config" > "$_mfp_list"
+    END { emit(); if (bad) exit 1 }
+    ' "$_mfp_config" > "$_mfp_list" || { rm -f "$_mfp_list"; echo_log 'provider 字段重复或包含暂不支持的 header；请使用直接可下载的 URL'; return 1; }
 
     _mfp_found=0; _mfp_failed=0
-    _mfp_tab=$(printf '\t')
-    while IFS="$_mfp_tab" read -r _mfp_kind _mfp_name _mfp_url _mfp_path; do
+    _mfp_sep=$(printf '\034')
+    while IFS="$_mfp_sep" read -r _mfp_kind _mfp_name _mfp_type _mfp_url _mfp_path; do
         [ -n "$_mfp_name" ] || continue
+        case "$_mfp_type" in
+            inline) continue ;;
+            http|file) ;;
+            *) echo_log "$_mfp_kind/$_mfp_name 缺少有效 type（http/file/inline）"; _mfp_failed=1; break ;;
+        esac
+        _mfp_path=$(mp_core_resource_path "$_mfp_path" "$_mfp_config") || {
+            echo_log "$_mfp_kind/$_mfp_name 缺少安全有效的 path"; _mfp_failed=1; break;
+        }
         _mfp_found=$((_mfp_found + 1))
+        _mfp_dst="$MP_CORE_DIR/$_mfp_path"
+        mkdir -p "$(dirname "$_mfp_dst")" || { _mfp_failed=1; break; }
+        if [ "$_mfp_type" = file ]; then
+            if [ -n "${_MP_CORE_FILES_ROOT:-}" ]; then
+                _mfp_source=$(mp_realpath "$_MP_CORE_FILES_ROOT/$_mfp_path") || { _mfp_failed=1; break; }
+                case "$_mfp_source" in "$_MP_CORE_FILES_ROOT"/*) ;; *) echo_log '文件 provider 超出配置目录'; _mfp_failed=1; break ;; esac
+                cp "$_mfp_source" "$_mfp_dst" || { _mfp_failed=1; break; }
+            elif [ "${_MP_CORE_FILES_REMOTE:-0}" = 1 ]; then
+                inst_read_target_file "$_mfp_path" "$_mfp_dst" || { _mfp_failed=1; break; }
+            fi
+            [ -s "$_mfp_dst" ] || { echo_log "文件 provider 不存在或为空：$_mfp_path"; _mfp_failed=1; break; }
+            if [ -n "${_MP_CACHE_WRITE:-}" ]; then
+                mkdir -p "$_MP_CACHE_WRITE/core-files/$(dirname "$_mfp_path")" &&
+                    cp "$_mfp_dst" "$_MP_CACHE_WRITE/core-files/$_mfp_path" || { _mfp_failed=1; break; }
+            fi
+            continue
+        fi
         case "$_mfp_url" in
-            http://*|https://*) ;;
+            http://?*|https://?*) ;;
             *) echo_log "$_mfp_kind/$_mfp_name 缺少有效 url"; _mfp_failed=1; break ;;
         esac
-        while [ "${_mfp_path#./}" != "$_mfp_path" ]; do _mfp_path=${_mfp_path#./}; done
-        case "$_mfp_path" in
-            ''|.|..|/*|../*|*/../*|*/..)
-                echo_log "$_mfp_kind/$_mfp_name 缺少安全有效的 path"
-                _mfp_failed=1; break
-                ;;
-        esac
-        _mfp_dst="$MP_CORE_DIR/$_mfp_path"
-        mkdir -p "$(dirname "$_mfp_dst")"
         echo_log ">>> 预下载 $_mfp_kind/$_mfp_name"
         download_file "$_mfp_url" "$_mfp_dst" || { _mfp_failed=1; break; }
     done < "$_mfp_list"
     rm -f "$_mfp_list"
 
-    [ "$_mfp_found" -gt 0 ] || { echo_log "Core 配置中没有需要预下载的 HTTP provider"; return 0; }
     [ "$_mfp_failed" -eq 0 ] || return 1
+    [ "$_mfp_found" -gt 0 ] || { echo_log "Core 配置中没有需要预下载的 provider"; return 0; }
     echo_log "Core providers 预下载完成：$_mfp_found 个"
 }
 
@@ -882,7 +1085,7 @@ mp_sync_agh_http_proxy() {
     _msap_core_config="${1:-$MP_CORE_DIR/config.yaml}"
     _msap_agh_config="${2:-$MP_AGH_DIR/agh.yaml}"
     [ -f "$_msap_agh_config" ] || return 0
-    _msap_proxy=$(mp_core_proxy_url "$_msap_core_config" agh) || return 1
+    _msap_proxy=$(mp_core_proxy_url "$_msap_core_config" agh 2>/dev/null || :)
     _msap_tmp=$(mktemp "$_msap_agh_config.tmp.XXXXXX") || return 1
     awk -v proxy="$_msap_proxy" '
         /^http_proxy:[[:space:]]*/ { print "http_proxy: \"" proxy "\""; found = 1; next }
@@ -1003,8 +1206,6 @@ mp_prepare_agh_config() {
 # mp_render_template <src> <dst> [agh]
 # AGH users 单独生成 JSON（也是合法 YAML），避免空哈希及用户名转义问题。
 mp_render_template() {
-    mp_validate_wireguard || return 1
-    export MP_WG_ENABLED MP_WG_PRIVATE_KEY MP_WG_PUBLIC_KEY MP_WG_IP MP_WG_SERVER_IP MP_WG_SERVER_PORT
     _mrt_users=
     if [ "${3:-}" = agh ]; then
         case "$MP_AGH_PASSWORD" in
@@ -1017,20 +1218,7 @@ mp_render_template() {
     fi
     _mrt_tmp=$(mktemp "$2.tmp.XXXXXX") || return 1
     _MP_RENDER_AGH_USERS="$_mrt_users" awk '
-    BEGIN { users = ENVIRON["_MP_RENDER_AGH_USERS"]; wg_enabled=(ENVIRON["MP_WG_ENABLED"]=="1") }
-    /^#wg proxy start[[:space:]]*$/ {
-        if(in_wg) {bad=1; exit 1}
-        in_wg=1; wg_blocks++; print; next
-    }
-    /^#wg proxy end[[:space:]]*$/ {
-        if(!in_wg) {bad=1; exit 1}
-        in_wg=0; print; next
-    }
-    in_wg {
-        if ($0 !~ /^#/) {bad=1; exit 1}
-        if (!wg_enabled) {print; next}
-        sub(/^#/, "")
-    }
+    BEGIN { users = ENVIRON["_MP_RENDER_AGH_USERS"] }
     users != "" && /^users:/ {
         print "users: " users; user_blocks++; in_users=1; next
     }
@@ -1043,7 +1231,6 @@ mp_render_template() {
         while (match($0, /\{MP_[A-Za-z0-9_]+\}/)) {
             ph  = substr($0, RSTART, RLENGTH)
             key = substr(ph, 2, RLENGTH - 2)
-            if(in_wg && key ~ /^MP_WG_/ && ENVIRON[key]=="") {bad=1; exit 1}
             repl = (key in ENVIRON) ? ENVIRON[key] : ph
             out = out substr($0, 1, RSTART - 1) repl
             $0 = substr($0, RSTART + RLENGTH)
@@ -1051,8 +1238,7 @@ mp_render_template() {
         print out $0
     }
     END {
-        if (bad || in_wg || (users != "" && user_blocks != 1)) exit 1
-        if (users=="" && wg_enabled && wg_blocks==0) exit 1
+        if (users != "" && user_blocks != 1) exit 1
     }
     ' "$1" > "$_mrt_tmp" && mv "$_mrt_tmp" "$2" \
         || { rm -f "$_mrt_tmp"; return 1; }

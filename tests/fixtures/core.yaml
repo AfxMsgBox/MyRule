@@ -1,0 +1,24 @@
+# Public test fixture, independent of the legacy repository template.
+mixed-port: 7890
+external-controller: 127.0.0.1:3721
+external-ui: ui
+tun:
+  enable: true
+  device: utun
+  auto-route: false
+dns:
+  enable: true
+  listen: 127.0.0.1:253
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+proxy-providers:
+  test:
+    type: http
+    url: https://example.invalid/sub
+    path: proxy/test.yaml
+rule-providers:
+  gpt:
+    type: http
+    behavior: domain
+    url: https://raw.githubusercontent.com/AfxMsgBox/MyRule/refs/heads/main/domain/gpt.txt
+    path: ruleset/gpt.yaml

@@ -4,9 +4,9 @@
 
 ## 1. 安装
 
-目标机支持 **OpenWrt、使用 systemd 的 Linux**，需有 root/sudo 权限、可用软件源和 `/dev/net/tun`。发起端支持 Linux、macOS、OpenWrt；macOS 仅用于 SSH 部署。缺失工具会提示并补装，Mac 缺工具时需先有 Homebrew。
+目标机支持 **OpenWrt、使用 systemd 的 Linux**，需有 root/sudo 权限和可用软件源；启用 TUN 时还需 `/dev/net/tun`。发起端支持 Linux、macOS、OpenWrt；macOS 仅用于 SSH 部署。缺失工具会提示并补装，Mac 缺工具时需先有 Homebrew。
 
-准备订阅 URL；首次下载需要代理时，按向导填写代理地址。AGH 用户名默认 `admin`，可选择免登录；设置密码需填写 bcrypt 哈希（可用 `htpasswd -nB -C 10 admin` 生成，取 `admin:` 后的部分）。
+准备完整的 Mihomo `config.yaml`（本地文件或 HTTP/HTTPS 地址），来源只用于本次安装。可以留空：新装生成空配置（`{}`），覆盖安装保留原配置。空配置仅启动服务，尚不能代理。AGH 用户名默认 `admin`，可选择免登录；设置密码需填写 bcrypt 哈希（可用 `htpasswd -nB -C 10 admin` 生成，取 `admin:` 后的部分）。
 
 只有 Python 时：运行 `python3 sh/agh-password.py`，隐藏输入两次密码并确认，输出哈希；也可用 `python3 sh/agh-password.py '密码'` 直接生成。脚本可单独复制使用，无需安装依赖；纯 Python 生成较慢。
 
@@ -15,7 +15,8 @@
 在目标机或 SSH 发起端下载并运行（本机安装以 root 运行）：
 
 ```sh
-curl -fL https://raw.githubusercontent.com/AfxMsgBox/MyRule/refs/heads/main/sh/inst.sh ｜ sh
+curl -fL https://raw.githubusercontent.com/AfxMsgBox/MyRule/refs/heads/main/sh/inst.sh -o inst.sh
+sh inst.sh
 ```
 
 也可用浏览器下载。上例使用 main 分支；安装向导中可选择其它包含新版安装器的分支。
@@ -41,7 +42,7 @@ sh sh/inst.sh
 | SSH 安装（使用本地仓库） | 开发机的仓库目录 | 本地代码＋在线外部资源，再通过 SSH 上传安装 |
 | 本机安装（使用本地仓库） | 目标机的仓库目录 | 本地代码＋在线外部资源，安装到本机 |
 
-SSH 支持用户名、密码和密钥；目标机只需能访问软件源补齐依赖。**本地仓库安装仍需联网**获取程序、订阅和外部规则。所有方式均选择后续更新分支；重装会覆盖项目管理的文件，保留运行数据。以后更新直接从 GitHub 获取，不再依赖发起端或原仓库目录。
+SSH 支持用户名、密码和密钥；目标机只需能访问软件源补齐依赖。**本地仓库安装仍需联网**获取程序、订阅和外部规则。所有方式均选择后续更新分支；重装覆盖程序和脚本；Core 配置仅在明确提供新来源时替换，保留运行数据。SSH 模式的配置本地路径属于发起端。以后更新直接从 GitHub 获取，不再依赖发起端或原仓库目录。
 
 向导中可设置每隔几天更新脚本和配置。输入均可见，回车采用默认值；SSH/sudo 密码除外。
 
@@ -52,22 +53,25 @@ sh inst.sh --fill-from              # 使用脚本同目录 myrule.inst.cfg
 sh inst.sh --fill-from ./debug.cfg  # 使用指定文件
 ```
 
-已有值作为默认值，每次输入立即保存；缺项使用脚本默认值。不带此参数则不读写配置文件。文件含订阅等私密信息，SSH 密码不保存。
+已有值作为默认值，每次输入立即保存；缺项使用脚本默认值。不带此参数则不读写配置文件。文件可能含私密信息；Core 配置来源和 SSH 密码不保存。
 
 命令行安装及所有参数说明见 `sh inst.sh --help`（也支持 `-h`、`help`）。
 
-安装时可选启用 WireGuard，填写客户端私钥、服务端公钥、客户端隧道 IPv4（不带掩码）、服务端 IP/域名和 UDP 端口。参数保存到权限 600 的 `sh/env.local.conf`，后续更新自动沿用。启用后在面板代理组中选择 `wg-Proxy`；节点订阅仍需填写。命令行参数见 `inst.sh --help`。
+Core 配置由你维护，订阅、节点和 WireGuard 直接写入配置。私有配置可放仓库外，或已忽略的仓库根目录 `config.yaml`。安装预下载其中的 providers；HTTP providers 使用明确的 `url` 和安全相对 `path`，文件型 providers 随本地配置目录提供。使用常见缩进 YAML，DNS/TUN/providers 的复杂锚点、合并及内联定义暂不支持。
+
+仅导入时为已启用的功能补缺省值：TUN 名称 `utun`，Core DNS `127.0.0.1:253`，fake-IP `198.18.0.1/16`。已有值不覆盖；未设置 `external-ui` 不下载面板。配置来源不保存，更新不会重新获取它。
 
 ## 2. 日常维护
 
-默认管理页面：AGH `http://设备IP:180`，Mihomo `http://设备IP:3721/ui/`。
+AGH 管理页面：`http://设备IP:180`。Mihomo API 和面板地址由自己的配置决定；空配置不提供面板。
 
 在**安装设备**上执行：
 
 | 操作 | 命令 |
 |---|---|
+| 查看已安装的项目脚本版本 | `cat /etc/proxy/sh/VERSION` |
 | 更新所有脚本 | `sh /etc/proxy/sh/update-scripts.sh` |
-| 更新配置、订阅、规则并重启 | `sh /etc/proxy/sh/update-all-configs-restart-services.sh` |
+| 更新订阅、规则及 AGH 配置并重启 | `sh /etc/proxy/sh/update-all-configs-restart-services.sh` |
 | 更新 Mihomo、AGH、面板 | `sh /etc/proxy/sh/update-bin.sh` |
 | 诊断节点 DNS、TCP、代理 HTTPS | `python3 /etc/proxy/sh/test-proxy.py` |
 | 查看自动更新任务 | `crontab -l` |
@@ -94,7 +98,7 @@ python3 /etc/proxy/sh/test-proxy.py --source '订阅URL' --node '节点名称'
 
 TCP 成功仅表示端口可达，需“代理 HTTPS”也成功；不同 DNS 结果可能轮换，固定 IP 行用于确认具体地址是否可用。保存的 `test-proxy.conf` 含订阅凭据，权限为 600。
 
-安装时：SSH 用数字选择密码或密钥，立即连接验证；密码隐藏输入。订阅必填，必填提示标红。脚本更新默认 7 天，配置更新默认 3 天。交互安装失败可查看原因、修复后重试，复用已下载资源；静默安装失败返回非零。
+安装时：SSH 用数字选择密码或密钥，立即连接验证；密码隐藏输入。必填提示标红；Core 配置来源可留空。脚本更新默认 7 天，配置更新默认 3 天。交互安装失败可查看原因、修复后重试，复用已下载资源；静默安装失败返回非零。
 
 ## 3. env.local.conf
 
@@ -102,27 +106,26 @@ TCP 成功仅表示端口可达，需“代理 HTTPS”也成功；不同 DNS �
 
 | 变量 | 用途 |
 |---|---|
-| `MP_SUBSCRIBE_URL` | 节点订阅 URL |
 | `MP_REPO_BRANCH` | 更新分支，空值为 `main` |
 | `MP_LOCAL_DNS` | 直连上游 DNS，空格分隔；空值使用系统 DNS |
 | `MP_AGH_USER_NAME` | AGH 用户名，默认 `admin` |
 | `MP_AGH_PASSWORD` | bcrypt 密码哈希；空值免登录 |
 | `MP_INST_DIR` | 安装路径；不要通过修改此值迁移安装 |
 
-修改后运行“更新配置、订阅、规则并重启”命令。长期分流规则改仓库 `domain/`；其它配置改仓库模板。**完整配置更新会覆盖 AGH 页面中的配置修改。**
+修改后运行“更新订阅、规则及 AGH 配置并重启”命令。Mihomo 配置直接修改设备上的 `core/config.yaml`，所有更新命令均保留它；AGH 分流规则改仓库 `domain/`。**完整配置更新会覆盖 AGH 页面中的配置修改。**
 
 ## 4. 目录与脚本
 
 | 目录 | 作用 |
 |---|---|
 | `sh/` | 安装、更新、卸载脚本及本机参数 |
-| `core/` | 仓库中为 Mihomo 模板；安装后含程序、配置、订阅、面板 |
+| `core/` | 启动器及暂留的旧模板；安装后含程序、用户配置、订阅、面板 |
 | `agh/` | 仓库中为 AGH 模板及自定义上游；安装后含程序、过滤规则和运行数据 |
 | `domain/` | 仓库中的自定义分流域名 |
 | `tests/` | 开发用回归测试 |
 | `sh/.install-state/`、`sh/.schedule/` | 安装后生成的卸载恢复记录、自动更新状态 |
 
-`core/start.sh` 统一启动 Core 和 Netlink 路由监听，Debian/OpenWrt 共用。服务文件由安装和更新脚本动态生成，仓库不保存模板。
+`core/start.sh` 启动 Core；启用 fake-IP TUN 时同时监听路由，Debian/OpenWrt 共用。服务文件由安装和更新脚本动态生成，仓库不保存模板。
 
 以下脚本均在 `sh/`，一般只需使用上面的维护命令：
 
@@ -137,9 +140,9 @@ TCP 成功仅表示端口可达，需“代理 HTTPS”也成功；不同 DNS �
 | `test-proxy.py` | 调用临时 Mihomo，比较 DNS、逐 IP 连接和完整代理请求 |
 | `update-scripts.sh` | 更新全部脚本及已有服务文件 |
 | `update-bin.sh` | 更新 Mihomo、AGH、面板 |
-| `update-all-configs-restart-services.sh` | 更新全部配置并切换、重启服务 |
-| `update-all-configs.sh` | 下载配置和规则，暂存 AGH 配置；不重启 |
-| `update-core-config.sh` | 生成 Core 配置，预下载订阅及规则 |
+| `update-all-configs-restart-services.sh` | 更新 providers、AGH 配置并切换、重启服务 |
+| `update-all-configs.sh` | 更新 providers 和 AGH 资源；不改 Core 配置、不重启 |
+| `update-core-config.sh` | 兼容入口，仅下载现有配置的 providers |
 | `update-agh-config.sh` | 生成 AGH 域名上游 `dns.conf` |
 | `update-proxy-rule.sh` | 通过 Core API 刷新订阅和规则 |
 | `migrate-legacy.sh` | 升级时清理旧服务、hotplug 和脚本；临时兼容入口 |
@@ -152,6 +155,8 @@ TCP 成功仅表示端口可达，需“代理 HTTPS”也成功；不同 DNS �
 ## 5. 路由器设置
 
 ### 数据面：DNS → fake-ip → TUN
+
+以下需自行在 Core 配置启用 DNS、fake-IP 和 TUN；空配置未启用这些功能。
 
 ```text
 客户端 DNS → AGH :53
@@ -223,10 +228,10 @@ ip -4 rule add priority 100 from 198.18.0.0/16 lookup 100
 | 内容 | 来源 / 文件 | 安装位置或用途 |
 |---|---|---|
 | 缺失系统依赖 | 各设备软件源；工具、CA 证书及按需定时任务工具 | 包管理器安装；依赖齐全时跳过 |
-| 节点订阅 | 用户订阅地址，分别请求香港、日本、新加坡、台湾、美国 | `core/proxy/` 下 5 份 YAML |
+| 节点订阅、规则 providers | 用户 Core 配置中的 HTTP 地址 | `core/` 下配置指定的相对 `path`；无 providers 时跳过 |
 | Mihomo 版本信息 | [GitHub Release API](https://api.github.com/repos/MetaCubeX/mihomo/releases/latest) | 临时 JSON，确定最新版 |
 | Mihomo 程序 | [Mihomo Releases](https://github.com/MetaCubeX/mihomo/releases)，`mihomo-linux-<架构>-<版本>.gz` | `core/mihomo`；x86_64 用 `amd64-compatible` |
-| metacubexd 面板 | [compressed-dist.tgz](https://github.com/MetaCubeX/metacubexd/releases/latest/download/compressed-dist.tgz) | `core/ui/` |
+| metacubexd 面板 | [compressed-dist.tgz](https://github.com/MetaCubeX/metacubexd/releases/latest/download/compressed-dist.tgz) | `core/<external-ui>/`；未配置时跳过 |
 | AGH 程序 | [AGH Releases](https://github.com/AdguardTeam/AdGuardHome/releases)，`AdGuardHome_linux_<架构>.tar.gz` | `agh/AdGuardHome` |
 | AdAway | [filter_2.txt](https://adguardteam.github.io/HostlistsRegistry/assets/filter_2.txt) | `agh/data/filters/1733109081.txt` |
 | AdGuard DNS filter | [filter_1.txt](https://adguardteam.github.io/HostlistsRegistry/assets/filter_1.txt) | `agh/data/filters/1733109082.txt` |

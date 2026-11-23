@@ -73,7 +73,7 @@ else:
         mock.chmod(0o755)
 
     def config(self, cidr='198.18.0.1/16'):
-        self.file('core/config.yaml', f'tun:\n  device: utun\ndns:\n  fake-ip-range: {cidr}\n')
+        self.file('core/config.yaml', f'tun:\n  enable: true\n  device: utun\ndns:\n  enable: true\n  enhanced-mode: fake-ip\n  fake-ip-range: {cidr}\n')
 
     def state(self, **changes):
         p = self.root / 'state'

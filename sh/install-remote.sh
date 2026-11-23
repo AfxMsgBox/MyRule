@@ -60,8 +60,6 @@ inst_probe_target() {
         inst_ssh -T "$INST_TARGET" 'command -v sudo >/dev/null' \
             || { say_err '非 root SSH 用户需要 sudo'; return 1; }
     fi
-    inst_ssh -T "$INST_TARGET" '[ -c /dev/net/tun ]' \
-        || { say_err '目标机缺少可访问的 /dev/net/tun；请在宿主机开放 TUN 后重试'; return 1; }
     say_ok "目标：$INST_TARGET_OS / $INST_TARGET_ARCH"
 }
 
@@ -81,9 +79,9 @@ inst_colors
 MP_LOG_FILE="$1/commands.log"; export MP_LOG_FILE
 mp_init_log "$MP_LOG_FILE" || exit 1
 mp_log_event "目标机系统：$(uname -srm)"
-_remote_phase='目标权限、依赖和 TUN 检查'
+_remote_phase='目标权限和依赖检查'
 trap '_remote_rc=$?; mp_log_event "目标部署退出码：$_remote_rc"; if [ "$_remote_rc" -ne 0 ]; then say_err "目标阶段：${_remote_phase}；退出码：${_remote_rc}；日志：$MP_LOG_FILE"; fi; cd /; rm -rf -- "$1/bundle"; rm -f -- "$1/bundle.tgz"' EXIT
-inst_is_root && inst_detect_os && inst_require_tools && mp_require_tun || exit 1
+inst_is_root && inst_detect_os && inst_require_tools || exit 1
 _remote_phase='安装包校验与解压'
 cd "$1" || exit 1
 [ "$(mp_sha256 < bundle.tgz)" = "$2" ] || { say_err '上传校验失败'; exit 1; }

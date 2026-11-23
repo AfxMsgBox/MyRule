@@ -146,19 +146,18 @@ printf '%s/%s' "$cron_script_days" "$cron_config_days"
         self.assertEqual(p.read_text(),"CUSTOM='keep'\n")
         self.assertEqual(p.stat().st_mode&0o777,0o600)
 
-    def test_required_subscription_color_blank_and_invalid_retry(self):
-        self.file('answers','\nnot-a-url\nhttps://example.invalid/sub\n')
+    def test_required_field_color_and_blank_retry(self):
+        self.file('answers','\n/root/proxy\n')
         source=test_installer.PREFIX.replace('read -r _p_val <&3','read -r _p_val <&4')
         result=self.run_shell(source+'''
 inst_colors
 inst_parse_args --interactive
 T_RED=$(printf '\\033[31m'); T_R=$(printf '\\033[0m')
 exec 3>"$TEST_ROOT/prompts"; exec 4<"$TEST_ROOT/answers"
-inst_prompt_subscription || exit 1
-printf '%s' "$MP_SUBSCRIBE_URL"
+prompt_required DIR_INST '' '目标安装目录' || exit 1
+printf '%s' "$DIR_INST"
 ''',source=False)
         self.assert_ok(result)
         self.assertIn('此项不能为空',result.stdout)
-        self.assertIn('必须为 http/https',result.stdout)
-        self.assertIn('\x1b[31m节点订阅', (self.root/'prompts').read_text())
-        self.assertTrue(result.stdout.endswith('https://example.invalid/sub'))
+        self.assertIn('\x1b[31m目标安装目录', (self.root/'prompts').read_text())
+        self.assertTrue(result.stdout.endswith('/root/proxy'))

@@ -24,3 +24,7 @@ core/.fake-ip-route
 
 # Python 单元测试缓存
 __pycache__/
+
+# 用户自备 Core 配置；仓库旧模板 core/config.yaml 暂留。
+/config.yaml
+/core/config.local.yaml

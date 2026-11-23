@@ -24,7 +24,7 @@ class PreferencesTests(unittest.TestCase):
         cases = [(['--fill-file'], '未知参数'), (['--from-file'], '未知参数'),
                  (['--unknown=private-token'], '未知参数'),
                  (['--branch'], '参数缺少值'),
-                 (['--subscribe-url', '--no-auth'], '参数缺少值'),
+                 (['--core-config', '--no-auth'], '参数缺少值'),
                  (['--ssh-key', '-h'], '参数缺少值'),
                  (['--branch=a', '--branch=b'], '重复参数'),
                  (['--no-auth=yes'], '参数')]
@@ -101,7 +101,7 @@ mp_log_event done
     def test_fill_flag_optional_path_and_log_option(self):
         entry = self.root / 'entry'
         entry.mkdir()
-        cases = [([], '', 'interactive'), (['--subscribe-url', 'https://example.invalid'], '', 'silent'),
+        cases = [([], '', 'interactive'), (['--core-config', 'https://example.invalid'], '', 'silent'),
                  (['--fill-from'], str(entry/'myrule.inst.cfg'), 'interactive'),
                  (['--fill-from', 'custom.cfg'], 'custom.cfg', 'interactive'),
                  (['--fill-from=custom.cfg'], 'custom.cfg', 'interactive'),
@@ -145,9 +145,9 @@ prompt_to UNUSED original unused </dev/null
 
     def test_input_is_saved_as_data_without_execution_or_logging_secret(self):
         value="https://example.invalid/$(touch PWNED)?a='secret'"
-        result=self.prompts({}, value+'\n', 'prompt_to MP_SUBSCRIBE_URL empty sub')
+        result=self.prompts({}, value+'\n', 'prompt_to MP_AGH_USER_NAME empty sub')
         self.assert_ok(result)
-        self.assertEqual(json.loads((self.root/'myrule.inst.cfg').read_text())['MP_SUBSCRIBE_URL'],value)
+        self.assertEqual(json.loads((self.root/'myrule.inst.cfg').read_text())['MP_AGH_USER_NAME'],value)
         self.assertFalse((self.root/'PWNED').exists())
         log=self.root/'myrule.inst.log'
         self.assertNotIn('secret',log.read_text() if log.exists() else '')

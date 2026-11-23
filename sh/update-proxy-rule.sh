@@ -4,8 +4,9 @@
 
 config_yaml="$MP_CORE_DIR/config.yaml"
 [ -f "$config_yaml" ] || { echo_log "未找到 ${config_yaml}，跳过"; exit 0; }
+mp_core_validate "$config_yaml" || exit 1
 core_api=$(mp_core_api_url "$config_yaml") \
-    || { echo_log "无法从 Core 配置读取有效的 external-controller"; exit 1; }
+    || { echo_log "未配置 Core API，跳过 API 刷新；可运行 update-core-config.sh 下载 providers"; exit 0; }
 core_secret=$(mp_core_value "" secret "$config_yaml" 2>/dev/null || :)
 
 # put_provider <kind> <name>：HTTP 204/200 视为成功

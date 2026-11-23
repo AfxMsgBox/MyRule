@@ -8,6 +8,7 @@
 
 # 安装时传入 pending Core 配置，仅用于确定 UI 路径；下载仍使用正式配置的代理。
 core_config="${1:-$MP_CORE_DIR/config.yaml}"
+mp_core_validate "$core_config" || exit 1
 mkdir -p "$MP_CORE_DIR" "$MP_AGH_DIR" || exit 1
 
 binary_arch=${_MP_TARGET_ARCH:-$(uname -m)}
@@ -62,16 +63,19 @@ mp_install_binary "$bin_work/mihomo" "$MP_CORE_DIR/mihomo" \
 echo_log "mihomo $ver / linux-$mihomo_arch 已就位：$MP_CORE_DIR/mihomo"
 
 core_ui_dir=$(mp_core_external_ui_path "$core_config" 2>/dev/null || :)
-[ -n "$core_ui_dir" ] || { echo_log 'Core 配置缺少安全有效的 external-ui'; exit 1; }
-ui_url='https://github.com/MetaCubeX/metacubexd/releases/latest/download/compressed-dist.tgz'
-if ! mkdir "$bin_work/ui" \
-    || ! download_file "$ui_url" "$bin_work/ui.tgz" true 8 'metacubexd 面板' \
-    || ! tar -xzf "$bin_work/ui.tgz" -C "$bin_work/ui" 2>/dev/null \
-    || [ ! -f "$bin_work/ui/index.html" ] \
-    || ! mp_install_ui "$bin_work/ui" "$core_ui_dir"; then
-    echo_log 'metacubexd UI 下载、解压或安装失败'; exit 1
+if [ -n "$core_ui_dir" ]; then
+    ui_url='https://github.com/MetaCubeX/metacubexd/releases/latest/download/compressed-dist.tgz'
+    if ! mkdir "$bin_work/ui" \
+        || ! download_file "$ui_url" "$bin_work/ui.tgz" true 8 'metacubexd 面板' \
+        || ! tar -xzf "$bin_work/ui.tgz" -C "$bin_work/ui" 2>/dev/null \
+        || [ ! -f "$bin_work/ui/index.html" ] \
+        || ! mp_install_ui "$bin_work/ui" "$core_ui_dir"; then
+        echo_log 'metacubexd UI 下载、解压或安装失败'; exit 1
+    fi
+    echo_log "metacubexd UI 已就位：$core_ui_dir"
+else
+    echo_log '未配置 external-ui，跳过面板下载'
 fi
-echo_log "metacubexd UI 已就位：$core_ui_dir"
 
 url="https://github.com/AdguardTeam/AdGuardHome/releases/latest/download/AdGuardHome_linux_${agh_arch}.tar.gz"
 if ! download_file "$url" "$bin_work/agh.tar.gz" true 8 "AdGuardHome / linux-$agh_arch" \

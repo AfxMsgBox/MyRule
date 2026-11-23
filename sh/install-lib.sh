@@ -36,20 +36,9 @@ say_dim() { printf '  %s%s%s\n' "$C_D" "$*" "$C_R"; }
 prompt_to() {
     _p_var=$1; _p_def=$2; _p_label=$3; shift 3
     [ "$INSTALL_MODE" = interactive ] || { eval "$_p_var=\$_p_def"; return 0; }
-    # 新增 WG 参数遵循命令行优先于保存的交互默认值。
-    _p_cli=; _p_option=
-    case "$_p_var" in
-        MP_WG_ENABLED) case "${_inst_seen:-}" in *' --wireguard '*|*' --no-wireguard '*) _p_cli=1 ;; esac ;;
-        MP_WG_PRIVATE_KEY) _p_option=--wg-private-key ;;
-        MP_WG_PUBLIC_KEY) _p_option=--wg-public-key ;;
-        MP_WG_IP) _p_option=--wg-ip ;;
-        MP_WG_SERVER_IP) _p_option=--wg-server ;;
-        MP_WG_SERVER_PORT) _p_option=--wg-port ;;
-        *) _p_option= ;;
-    esac
-    case "${_inst_seen:-}" in *" ${_p_option:-__none__} "*) _p_cli=1 ;; esac
-    case "$_p_var" in _ib_choice|_is_auth_choice|*_retry) ;; *)
-        [ "$_p_cli" = 1 ] || _p_def=$(mp_fill_default "$_p_var" "$_p_def") || exit 1 ;;
+    # 来源只用于本次导入，不读写安装偏好。
+    case "$_p_var" in _ib_choice|_is_auth_choice|*_retry|INST_CORE_SOURCE) ;; *)
+        _p_def=$(mp_fill_default "$_p_var" "$_p_def") || exit 1 ;;
     esac
     _p_color=$T_CYN
     if [ "${_inst_required:-0}" = 1 ]; then _p_color=$T_RED; _p_label="${_p_label}（必填）"; fi
@@ -59,7 +48,7 @@ prompt_to() {
     IFS= read -r _p_val <&3 || { say_err '输入已结束，取消安装'; exit 1; }
     [ -n "$_p_val" ] || _p_val=$_p_def
     eval "$_p_var=\$_p_val"
-    case "$_p_var" in _ib_choice|_is_auth_choice|*_retry) ;; *) mp_fill_save "$_p_var" "$_p_val" || exit 1 ;; esac
+    case "$_p_var" in _ib_choice|_is_auth_choice|*_retry|INST_CORE_SOURCE) ;; *) mp_fill_save "$_p_var" "$_p_val" || exit 1 ;; esac
 }
 
 prompt_required() {
@@ -74,15 +63,6 @@ prompt_required() {
     done
 }
 
-inst_prompt_subscription() {
-    while :; do
-        prompt_required MP_SUBSCRIBE_URL "$MP_SUBSCRIBE_URL" '节点订阅 URL（可见输入）' || return 1
-        case "$MP_SUBSCRIBE_URL" in http://?*|https://?*) return 0 ;; esac
-        say_err '订阅 URL 必须为 http/https 地址，请重新输入'
-        [ "$INSTALL_MODE" = interactive ] || return 1
-    done
-}
-
 # === options ===
 # 业务参数解析；独立入口同步校验选项结构。值赋给固定变量，不 eval 用户文本。
 # BEGIN shared installer help
@@ -92,19 +72,12 @@ MyRule 安装器
 用法：sh inst.sh [选项]
 无参数进入向导；有参数默认静默安装，可用 --interactive 或 --fill-from 进入向导。
 目标：OpenWrt / systemd Linux；macOS 仅作为 SSH 发起端。
-静默模式必须提供订阅，并在 --agh-password 与 --no-auth 中二选一。
+静默模式在 --agh-password 与 --no-auth 中二选一；Core 配置来源可省略。
 
-  --subscribe-url URL        节点订阅 HTTP/HTTPS 地址；静默安装必填
+  --core-config SOURCE       完整 Core 配置的本地路径或 HTTP/HTTPS URL；省略保留旧配置，新装生成空文件
   --agh-user USER            AGH 用户名；默认 admin
   --agh-password HASH        AGH 密码的 bcrypt 哈希（用单引号包裹）；与 --no-auth 互斥
   --no-auth                  AGH 免登录；与 --agh-password 互斥
-  --wireguard               启用可选 WireGuard 节点；默认关闭，以下五项启用时必填
-  --no-wireguard            关闭 WireGuard；与 --wireguard 互斥
-  --wg-private-key KEY      客户端私钥，Base64 格式；无默认值
-  --wg-public-key KEY       服务端公钥，Base64 格式；无默认值
-  --wg-ip IP                客户端隧道 IPv4，不带掩码；无默认值
-  --wg-server HOST          服务端 IPv4 或域名；无默认值
-  --wg-port PORT            服务端 UDP 端口，1–65535；无默认值
   --branch NAME              安装及后续更新的 GitHub 分支；省略或空值为 main
   --local                    使用 inst.sh 所在的本地仓库；与 --source-dir 互斥
   --source-dir DIR           指定本地仓库根目录；外部程序和规则仍需联网下载
@@ -115,7 +88,7 @@ MyRule 安装器
   --install-dir DIR          目标安装目录；默认 /etc/proxy，不支持空格和中文
   --dns 'DNS1 DNS2'          直连上游 DNS；默认 '223.5.5.5 119.29.29.29'，空值使用目标机系统 DNS
   --scripts-days N           自动更新脚本间隔（1–365 天）；交互默认 7 天，静默省略或 n 保留旧任务
-  --configs-days N           自动更新配置的间隔（1–365 天）；省略或 n 保留已有任务
+  --configs-days N           更新订阅、规则及 AGH 配置的间隔（1–365 天）；省略或 n 保留已有任务
   --no-start                 部署文件、暂存配置，不启用或重启服务
   --interactive              带参数时仍进入交互向导
   --fill-from [PATH]         交互读取并保存输入默认值；省略路径用脚本同目录 myrule.inst.cfg
@@ -128,7 +101,7 @@ MyRule 安装器
 SSH 支持 root 或可使用 sudo 的用户；本机安装需 root。
 示例：
   sh inst.sh --fill-from
-  sh inst.sh --subscribe-url 'https://example.com/sub' --no-auth
+  sh inst.sh --core-config ./config.yaml --no-auth
   sh inst.sh --target root@192.168.1.2 --interactive
 USAGE
 }
@@ -141,8 +114,7 @@ inst_parse_args() {
     INST_FILL_FILE=
     INST_LOG_FILE=${MP_LOG_FILE:-${INST_ENTRY_DIR:-${INST_LIB:-.}}/myrule.inst.log}
     DIR_INST=/etc/proxy; MP_REPO_BRANCH=main; MP_LOCAL_DNS='223.5.5.5 119.29.29.29'
-    MP_SUBSCRIBE_URL=; MP_AGH_USER_NAME=admin; MP_AGH_PASSWORD=; INST_NO_AUTH=0
-    MP_WG_ENABLED=0; MP_WG_PRIVATE_KEY=; MP_WG_PUBLIC_KEY=; MP_WG_IP=; MP_WG_SERVER_IP=; MP_WG_SERVER_PORT=
+    INST_CORE_SOURCE=; INST_CORE_ACTION=empty; INST_CORE_SHA=; MP_AGH_USER_NAME=admin; MP_AGH_PASSWORD=; INST_NO_AUTH=0
     INST_TARGET=; INST_SSH_PORT=22; INST_SSH_KEY=; INST_SSH_AUTH=key
     autostart=Y; cron_script_days=n; cron_config_days=n
     while [ "$#" -gt 0 ]; do
@@ -166,23 +138,16 @@ inst_parse_args() {
             --local) INST_LOCAL=1; shift; continue ;;
             --no-start) autostart=n; shift; continue ;;
             --no-auth) INST_NO_AUTH=1; shift; continue ;;
-            --wireguard) MP_WG_ENABLED=1; shift; continue ;;
-            --no-wireguard) MP_WG_ENABLED=0; shift; continue ;;
         esac
         case "$_ipa_key" in
             --install-dir) _ipa_var=DIR_INST ;; --branch) _ipa_var=MP_REPO_BRANCH ;;
             --source-dir) _ipa_var=_MP_SOURCE_DIR ;; --dns) _ipa_var=MP_LOCAL_DNS ;;
-            --subscribe-url) _ipa_var=MP_SUBSCRIBE_URL ;; --agh-user) _ipa_var=MP_AGH_USER_NAME ;;
+            --core-config) _ipa_var=INST_CORE_SOURCE ;; --agh-user) _ipa_var=MP_AGH_USER_NAME ;;
             --agh-password) _ipa_var=MP_AGH_PASSWORD ;; --target) _ipa_var=INST_TARGET ;;
             --ssh-port) _ipa_var=INST_SSH_PORT ;; --ssh-key) _ipa_var=INST_SSH_KEY ;;
             --ssh-auth) _ipa_var=INST_SSH_AUTH ;; --scripts-days) _ipa_var=cron_script_days ;;
             --configs-days) _ipa_var=cron_config_days ;;
             --log-file) _ipa_var=INST_LOG_FILE ;;
-            --wg-private-key) _ipa_var=MP_WG_PRIVATE_KEY ;;
-            --wg-public-key) _ipa_var=MP_WG_PUBLIC_KEY ;;
-            --wg-ip) _ipa_var=MP_WG_IP ;;
-            --wg-server) _ipa_var=MP_WG_SERVER_IP ;;
-            --wg-port) _ipa_var=MP_WG_SERVER_PORT ;;
             *) say_err "未知参数：${_ipa_key}；请使用 --help 查看用法（交互配置参数为 --fill-from）"; return 1 ;;
         esac
         case "$1" in
@@ -202,7 +167,6 @@ inst_parse_args() {
         _MP_SOURCE_DIR=${INST_ENTRY_ROOT:-}
         [ -n "$_MP_SOURCE_DIR" ] || { say_err '无法推断本地仓库；请使用 --source-dir'; return 1; }
     fi
-    case "$_inst_seen" in *' --wireguard '*) case "$_inst_seen" in *' --no-wireguard '*) say_err '--wireguard 与 --no-wireguard 互斥'; return 1 ;; esac ;; esac
     MP_REPO_BRANCH=${MP_REPO_BRANCH:-main}
     if [ "$INST_NO_AUTH" = 1 ]; then
         case "$_inst_seen" in *' --agh-password '*) say_err '--no-auth 与 --agh-password 不能同时使用'; return 1 ;; esac
@@ -227,13 +191,10 @@ inst_validate_ssh() {
 }
 
 inst_validate_basic() {
-    mp_validate_wireguard || return 1
     _iv_missing=
-    [ -n "$MP_SUBSCRIBE_URL" ] || _iv_missing="$_iv_missing --subscribe-url"
     [ -n "$MP_AGH_USER_NAME" ] || _iv_missing="$_iv_missing --agh-user"
     [ "$INST_NO_AUTH" = 1 ] || [ -n "$MP_AGH_PASSWORD" ] || _iv_missing="$_iv_missing --agh-password（或 --no-auth）"
     [ -z "$_iv_missing" ] || { say_err "缺少必填参数：$_iv_missing"; return 1; }
-    case "$MP_SUBSCRIBE_URL" in http://?*|https://?*) ;; *) say_err '订阅 URL 必须为 http/https 地址'; return 1 ;; esac
     case "$INST_NO_AUTH:$MP_AGH_PASSWORD" in
         1:) ;;
         0:'$2a$'?*|0:'$2b$'?*|0:'$2y$'?*) ;;
@@ -471,7 +432,7 @@ inst_validate_source() {
         sh/update-core-config.sh sh/update-agh-config.sh sh/update-bin.sh \
         sh/update-all-configs.sh sh/update-all-configs-restart-services.sh \
         sh/update-proxy-rule.sh sh/keeplive.sh sh/run-scheduled-update.sh \
-        core/start.sh core/config.yaml agh/agh.yaml agh/myupstream.txt domain/gpt.txt domain/myproxylist.txt; do
+        core/start.sh agh/agh.yaml agh/myupstream.txt domain/gpt.txt domain/myproxylist.txt; do
         [ -f "$_MP_SOURCE_DIR/$_ivs_rel" ] && [ -r "$_MP_SOURCE_DIR/$_ivs_rel" ] \
             || { say_err "本地仓库缺少可读文件：$_ivs_rel"; return 1; }
     done
@@ -764,7 +725,7 @@ inst_apply_schedule() {
 
 # === bundle ===
 # 安装包只包含仓库快照、资源缓存和参数；绝不执行下载的目标二进制。
-INST_CONFIG_KEYS='DIR_INST MP_REPO_BRANCH MP_SUBSCRIBE_URL MP_AGH_USER_NAME MP_AGH_PASSWORD MP_LOCAL_DNS autostart cron_script_days cron_config_days INST_TARGET_OS INST_TARGET_ARCH INST_NO_AUTH MP_WG_ENABLED MP_WG_PRIVATE_KEY MP_WG_PUBLIC_KEY MP_WG_IP MP_WG_SERVER_IP MP_WG_SERVER_PORT'
+INST_CONFIG_KEYS='DIR_INST MP_REPO_BRANCH MP_AGH_USER_NAME MP_AGH_PASSWORD MP_LOCAL_DNS autostart cron_script_days cron_config_days INST_TARGET_OS INST_TARGET_ARCH INST_NO_AUTH INST_CORE_ACTION INST_CORE_SHA'
 
 inst_snapshot() (
     _is_dst=$1
@@ -787,7 +748,7 @@ inst_snapshot() (
         || { say_err '无法解析仓库源目录'; exit 1; }
     mkdir -p "$_is_dst" || exit 1
     (cd "$_is_src" && find sh domain -type f -print) > "$_inst_tmp/source-files" || exit 1
-    printf '%s\n' core/start.sh core/config.yaml agh/agh.yaml agh/myupstream.txt >> "$_inst_tmp/source-files"
+    printf '%s\n' core/start.sh agh/agh.yaml agh/myupstream.txt >> "$_inst_tmp/source-files"
     while IFS= read -r _is_rel; do
         case "$_is_rel" in sh/env.local.conf|sh/test-proxy.conf|sh/.install-state/*|sh/.schedule/*|*/myrule.inst.cfg|*/myrule.inst.log) continue ;; esac
         case "$_is_rel" in *[!a-zA-Z0-9_./-]*|*/../*|*/./*|*//*|/*) echo '仓库路径不受支持' >&2; exit 1 ;; esac
@@ -846,23 +807,132 @@ inst_load_config() {
     done
 }
 
+# 只读目标 Core 文件。3 表示不存在；权限/连接错误不能当成新安装。
+inst_read_target_file() {
+    _irt_rel=$1; _irt_dst=$2
+    case "$_irt_rel" in ''|/*|.*|*/.*|*[!a-zA-Z0-9_./-]*) return 1 ;; esac
+    if [ -z "$INST_TARGET" ]; then
+        _irt_file=$DIR_INST/core/$_irt_rel
+        [ -e "$_irt_file" ] || [ -L "$_irt_file" ] || return 3
+        _irt_real=$(mp_realpath "$_irt_file") || return 1
+        case "$_irt_real" in "$DIR_INST/core/"*) ;; *) return 1 ;; esac
+        [ -f "$_irt_file" ] && [ ! -L "$_irt_file" ] && cp "$_irt_file" "$_irt_dst"
+    else
+        _irt_sudo=; [ "${INST_TARGET_UID:-0}" = 0 ] || _irt_sudo='sudo -n '
+        inst_ssh -T "$INST_TARGET" "${_irt_sudo}sh -s -- '$DIR_INST/core' '$_irt_rel'" > "$_irt_dst" <<'READ_CORE'
+file=$1/$2
+[ -e "$file" ] || [ -L "$file" ] || exit 3
+[ -f "$file" ] && [ ! -L "$file" ] || exit 1
+real=$(readlink -f "$file") || exit 1
+case "$real" in "$1/"*) ;; *) exit 1 ;; esac
+cat "$file"
+READ_CORE
+    fi
+}
+
+inst_prepare_core() {
+    mkdir -p "$MP_CORE_DIR" || return 1
+    _ipc_raw="$_inst_tmp/core-input.yaml"
+    _MP_CORE_FILES_ROOT=; _MP_CORE_FILES_REMOTE=0
+    if [ -n "$INST_CORE_SOURCE" ]; then
+        INST_CORE_ACTION=import
+        case "$INST_CORE_SOURCE" in
+            http://?*|https://?*)
+                # 来源与代码仓库独立，即使 URL 位于本仓库也按明确来源读取。
+                (_MP_SOURCE_DIR=; download_file "$INST_CORE_SOURCE" "$_ipc_raw" true 0 '用户 Core 配置') || return 1 ;;
+            *://*) say_err '配置来源只支持本地路径、HTTP 或 HTTPS'; return 1 ;;
+            *)
+                _ipc_file=$(mp_realpath "$INST_CORE_SOURCE") || { say_err '配置来源不存在'; return 1; }
+                [ -f "$_ipc_file" ] && cp "$_ipc_file" "$_ipc_raw" || { say_err '无法读取配置来源'; return 1; }
+                _MP_CORE_FILES_ROOT=$(dirname "$_ipc_file") ;;
+        esac
+        mp_import_core_config "$_ipc_raw" "$MP_CORE_DIR/config.yaml" || return 1
+    else
+        _ipc_rc=0
+        inst_read_target_file config.yaml "$_ipc_raw" || _ipc_rc=$?
+        case "$_ipc_rc" in
+            0)
+                INST_CORE_ACTION=keep
+                INST_CORE_SHA=$(mp_sha256 < "$_ipc_raw") || return 1
+                cp "$_ipc_raw" "$MP_CORE_DIR/config.yaml" || return 1
+                if [ -n "$INST_TARGET" ]; then _MP_CORE_FILES_REMOTE=1
+                else _MP_CORE_FILES_ROOT=$DIR_INST/core; fi
+                say_dim '保留目标机已有 Core 配置，不补写字段' ;;
+            3)
+                INST_CORE_ACTION=empty
+                printf '{}\n' > "$MP_CORE_DIR/config.yaml" || return 1
+                say_warn '未提供配置，创建空 config.yaml；安装后需自行配置代理' ;;
+            *) say_err '读取目标机 Core 配置失败；请检查 SSH/sudo 读取权限，不会用空配置替代'; return 1 ;;
+        esac
+    fi
+    mp_core_validate "$MP_CORE_DIR/config.yaml" &&
+        chmod 600 "$MP_CORE_DIR/config.yaml" &&
+        cp "$MP_CORE_DIR/config.yaml" "$_ip_bundle/resources/core-config.yaml" || return 1
+    # 在下载大文件之前按配置检查目标 TUN；不启用时无需该设备。
+    if mp_core_enabled tun "$MP_CORE_DIR/config.yaml"; then
+        if [ -n "$INST_TARGET" ]; then
+            inst_ssh -T "$INST_TARGET" '[ -c /dev/net/tun ]' || { say_err '目标机缺少 /dev/net/tun'; return 1; }
+        else mp_require_tun || return 1; fi
+    fi
+    mp_fetch_core_providers "$MP_CORE_DIR/config.yaml"
+}
+
+# prepare 与 apply 之间可能被网页或用户修改，保留模式必须核对原快照。
+inst_check_core_snapshot() {
+    case "$INST_CORE_ACTION" in
+        keep)
+            [ -f "$DIR_INST/core/config.yaml" ] && [ ! -L "$DIR_INST/core/config.yaml" ] &&
+                [ "$(mp_sha256 < "$DIR_INST/core/config.yaml")" = "$INST_CORE_SHA" ] || {
+                    say_err '目标 Core 配置已变化或不可读，请重新运行安装器获取最新配置'; return 1;
+                } ;;
+        empty)
+            if [ -e "$DIR_INST/core/config.yaml" ] || [ -L "$DIR_INST/core/config.yaml" ]; then
+                # 上次 apply 已提交空配置、后续服务步骤失败时，重试只保留它。
+                [ -f "$DIR_INST/core/config.yaml" ] && [ ! -L "$DIR_INST/core/config.yaml" ] &&
+                    [ "$(mp_sha256 < "$DIR_INST/core/config.yaml")" = "$(printf '{}\n' | mp_sha256)" ] || {
+                        say_err '准备后目标出现了 Core 配置；拒绝用空文件覆盖，请重新运行安装器'; return 1;
+                    }
+                INST_CORE_ACTION=keep
+                INST_CORE_SHA=$(mp_sha256 < "$DIR_INST/core/config.yaml") || return 1
+            fi ;;
+        import) [ ! -L "$DIR_INST/core/config.yaml" ] || { say_err 'Core 配置不能是符号链接'; return 1; } ;;
+        *) say_err '无效的 Core 配置安装动作'; return 1 ;;
+    esac
+}
+
+# 安装包中只有 type:file 所需文件进入此目录，逐一检查目标路径再复制。
+inst_apply_core_files() (
+    source=$1/core-files
+    [ -d "$source" ] || exit 0
+    list=$(mktemp) || exit 1
+    trap 'rm -f "$list"' EXIT
+    find "$source" -type f -print > "$list" || exit 1
+    while IFS= read -r file; do
+        rel=${file#"$source/"}
+        rel=$(mp_core_resource_path "$rel" "$core_install_config") || exit 1
+        dst=$MP_CORE_DIR/$rel
+        mkdir -p "$(dirname "$dst")" || exit 1
+        stage=$(mktemp "$dst.tmp.XXXXXX") || exit 1
+        cp "$file" "$stage" && chmod 600 "$stage" && mv "$stage" "$dst" || { rm -f "$stage"; exit 1; }
+    done < "$list"
+)
+
 inst_prepare() (
     _ip_bundle=$1
     umask 077
     mkdir -p "$_ip_bundle/resources" || exit 1
     say_section '准备仓库快照'
     inst_snapshot "$_ip_bundle/repo" || exit 1
-    inst_save_config "$_ip_bundle/config.json" || exit 1
     say_section '下载目标机所需资源'
     MP_INST_DIR="$_inst_tmp/prepare"
     mkdir -p "$MP_INST_DIR" && cp -R "$_ip_bundle/repo/sh" "$MP_INST_DIR/sh" || exit 1
     _MP_SOURCE_DIR="$_ip_bundle/repo"; _MP_CACHE_WRITE="$_ip_bundle/resources"
     _MP_TARGET_ARCH=$INST_TARGET_ARCH; _MP_DOWNLOAD_CORE_CONFIG=$INST_CORE_CONFIG
-    export MP_WG_ENABLED MP_WG_PRIVATE_KEY MP_WG_PUBLIC_KEY MP_WG_IP MP_WG_SERVER_IP MP_WG_SERVER_PORT
-    export MP_INST_DIR MP_REPO_BRANCH MP_LOCAL_DNS MP_SUBSCRIBE_URL MP_AGH_USER_NAME MP_AGH_PASSWORD
+    export MP_INST_DIR MP_REPO_BRANCH MP_LOCAL_DNS MP_AGH_USER_NAME MP_AGH_PASSWORD
     export _MP_SOURCE_DIR _MP_CACHE_WRITE _MP_TARGET_ARCH _MP_DOWNLOAD_CORE_CONFIG
     . "$MP_INST_DIR/sh/common.sh" || exit 1
-    sh "$MP_INST_DIR/sh/update-core-config.sh" &&
+    inst_prepare_core &&
+        inst_save_config "$_ip_bundle/config.json" &&
         sh "$MP_INST_DIR/sh/update-bin.sh" &&
         mp_prepare_agh_config "$MP_AGH_DIR/agh.yaml.pending" &&
         sh "$MP_INST_DIR/sh/update-agh-config.sh" || exit 1
@@ -902,35 +972,14 @@ inst_collect_inputs() {
     else
         inst_choose_branch || return 1
     fi
-    inst_prompt_subscription || return 1
-    inst_choose_wireguard || return 1
+    prompt_to INST_CORE_SOURCE "$INST_CORE_SOURCE" 'Core 配置来源（本地路径或 HTTP/HTTPS URL；空值保留旧配置，新装生成空文件）'
+    [ "$INST_CORE_SOURCE" != - ] || INST_CORE_SOURCE=
     inst_choose_auth || return 1
     inst_prompt_dns
     prompt_to autostart "$autostart" '立即启用配置并启动/重启服务？(Y/n)'
     case "$autostart" in Y|y|yes|YES|Yes) autostart=Y ;; n|N|no|NO|No) autostart=n ;; *) say_err '请选择 Y 或 n'; return 1 ;; esac
     prompt_cron_days cron_script_days '每隔几天更新脚本？' 7 || cron_script_days=n
-    prompt_cron_days cron_config_days '每隔几天更新配置？' || cron_config_days=n
-}
-
-inst_choose_wireguard() {
-    while :; do
-        prompt_to MP_WG_ENABLED "$MP_WG_ENABLED" '是否启用 WireGuard 代理？(yes/no，1/0)'
-        case "$MP_WG_ENABLED" in
-            y|Y|yes|YES|Yes|1) MP_WG_ENABLED=1; break ;;
-            n|N|no|NO|No|0) MP_WG_ENABLED=0; mp_fill_save MP_WG_ENABLED 0; return $? ;;
-            *) say_warn '请输入 yes 或 no' ;;
-        esac
-    done
-    mp_fill_save MP_WG_ENABLED 1 || return 1
-    while :; do
-        prompt_required MP_WG_PRIVATE_KEY "$MP_WG_PRIVATE_KEY" 'WireGuard 客户端私钥（可见输入）'
-        prompt_required MP_WG_PUBLIC_KEY "$MP_WG_PUBLIC_KEY" 'WireGuard 服务端公钥'
-        prompt_required MP_WG_IP "$MP_WG_IP" 'WireGuard 客户端隧道 IPv4（不带掩码）'
-        prompt_required MP_WG_SERVER_IP "$MP_WG_SERVER_IP" 'WireGuard 服务端 IPv4 或域名'
-        prompt_required MP_WG_SERVER_PORT "$MP_WG_SERVER_PORT" 'WireGuard 服务端 UDP 端口'
-        mp_validate_wireguard && return 0
-        say_warn 'WireGuard 参数无效，请重新输入'
-    done
+    prompt_cron_days cron_config_days '每隔几天更新订阅、规则和 AGH 配置？' || cron_config_days=n
 }
 
 inst_prompt_dns() {
@@ -973,7 +1022,8 @@ inst_apply() (
     inst_detect_os || exit 1
     [ "$os_type" = "$INST_TARGET_OS" ] && [ "$(uname -m)" = "$INST_TARGET_ARCH" ] \
         || { say_err '安装包与目标系统或架构不一致'; exit 1; }
-    inst_require_tools && mp_require_tun || exit 1
+    inst_check_core_snapshot || exit 1
+    inst_require_tools || exit 1
     if [ "$cron_script_days" != n ] || [ "$cron_config_days" != n ]; then inst_require_tools cron || exit 1; fi
     DIR_SH="$DIR_INST/sh"; DIR_CORE="$DIR_INST/core"; DIR_AGH="$DIR_INST/agh"
     for _ia_dir in "$DIR_INST" "$DIR_SH" "$DIR_CORE" "$DIR_AGH"; do
@@ -998,7 +1048,7 @@ inst_apply() (
     # 移除废弃的仓库 URL 和外部后备代理；保留其它自定义行。
     awk '!/^[[:space:]]*(export[[:space:]]+)?(MP_REPO_RAW_URL|MP_PROXY)=/' "$DIR_SH/env.local.conf" > "$DIR_SH/env.local.conf.tmp" \
         && mv "$DIR_SH/env.local.conf.tmp" "$DIR_SH/env.local.conf" || exit 1
-    kv_keys="MP_INST_DIR MP_REPO_BRANCH MP_SUBSCRIBE_URL MP_AGH_USER_NAME MP_AGH_PASSWORD MP_LOCAL_DNS MP_WG_ENABLED MP_WG_PRIVATE_KEY MP_WG_PUBLIC_KEY MP_WG_IP MP_WG_SERVER_IP MP_WG_SERVER_PORT"
+    kv_keys="MP_INST_DIR MP_REPO_BRANCH MP_AGH_USER_NAME MP_AGH_PASSWORD MP_LOCAL_DNS"
     for kv_key in $kv_keys; do
         eval "kv_val=\$$kv_key"
         case "$kv_key" in
@@ -1024,35 +1074,50 @@ inst_apply() (
     say_step "同步仓库 sh/ 整树"
     mp_fetch_repo_sh "$DIR_SH" || { say_err "同步仓库脚本失败"; exit 1; }
 
+    sh "$DIR_SH/migrate-legacy.sh" --config-only || exit 1
+
     say_step "同步 Core 启动器"
     mp_sync_core_start || { say_err '同步 Core 启动器失败'; exit 1; }
 
-    # === 三份配置先暂存，重装下载期间保留原正式配置和本机代理 ===
-    core_pending="$MP_CORE_DIR/config.yaml.pending"
+    # === 三份配置先暂存；保留模式不生成或替换 Core pending ===
+    core_pending=; core_install_config="$MP_CORE_DIR/config.yaml"
     agh_pending="$MP_AGH_DIR/agh.yaml.pending"
     dns_pending="$MP_AGH_DIR/dns.conf.pending"
-    rm -f "$core_pending" "$agh_pending" "$dns_pending" || exit 1
-    say_section "生成 Core 配置"
-    sh "$DIR_SH/update-core-config.sh" "$core_pending" \
-        || { say_err "Core 配置或 provider 下载失败，停止安装"; exit 1; }
+    rm -f "$agh_pending" "$dns_pending" || exit 1
+    say_section "准备 Core 配置和 providers"
+    if [ "$INST_CORE_ACTION" != keep ]; then
+        core_pending="$MP_CORE_DIR/config.yaml.pending"
+        _ia_core_stage=$(mktemp "$MP_CORE_DIR/.import.XXXXXX") || exit 1
+        if [ -d "$core_pending" ] || ! cp "$_ia_bundle/resources/core-config.yaml" "$_ia_core_stage" ||
+            ! chmod 600 "$_ia_core_stage" || ! mv "$_ia_core_stage" "$core_pending"; then
+            rm -f "$_ia_core_stage"; say_err '暂存 Core 配置失败，正式配置保持不变'; exit 1
+        fi
+        core_install_config=$core_pending
+    fi
+    mp_core_validate "$core_install_config" || exit 1
+    if mp_core_enabled tun "$core_install_config"; then mp_require_tun || exit 1; fi
+    inst_apply_core_files "$_ia_bundle/resources" && mp_fetch_core_providers "$core_install_config" \
+        || { say_err 'Core provider 安装失败，正式配置保持不变'; exit 1; }
 
     # === 下载内核二进制（mihomo / AdGuardHome）===
     # metacubexd 目录从 pending 配置读取，下载代理仍从旧正式配置读取。
     say_section "下载内核二进制"
-    sh "$DIR_SH/update-bin.sh" "$core_pending" \
+    sh "$DIR_SH/update-bin.sh" "$core_install_config" \
         || { say_err "二进制或 UI 下载失败，停止安装"; exit 1; }
+
+    mp_check_core_binary_config "$core_install_config" || exit 1
 
     # === 下载并渲染 agh.yaml，同时预下载其中的 filters ===
     say_section "渲染 AGH 配置"
     say_dim "$agh_pending"
     say_step "下载模板并预下载 AGH filters"
-    mp_prepare_agh_config "$agh_pending" "$core_pending" \
+    mp_prepare_agh_config "$agh_pending" "$core_install_config" \
         || { say_err "AGH 配置或 filter 下载失败，停止安装"; exit 1; }
     say_ok "agh.yaml 已暂存"
 
     # === 生成 AGH dns.conf；Core DNS 地址从 config.yaml 读取 ===
     say_section "生成 AGH dns.conf"
-    sh "$DIR_SH/update-agh-config.sh" "$core_pending" "$dns_pending" \
+    sh "$DIR_SH/update-agh-config.sh" "$core_install_config" "$dns_pending" \
         || { say_err "AGH dns.conf 生成失败，停止安装"; exit 1; }
 
     # === [7/9] 自启动询问 ===
@@ -1063,11 +1128,12 @@ inst_apply() (
         n|N|no|NO|No)
             say_section "已跳过自启动"
             if [ "$reinstall" -eq 1 ]; then
-                say_ok "原正式配置保持不变；新配置保留在 config.yaml.pending、agh.yaml.pending、dns.conf.pending"
+                say_ok "原正式配置保持不变；AGH 配置已暂存"
+                [ -z "$core_pending" ] || say_dim "导入的 Core 配置已暂存：$core_pending"
                 say_dim "重跑 inst.sh 并选 Y 可重新下载并切换；应用本次已下载配置可执行："
                 say_dim "  export MP_INST_DIR='$DIR_INST'"
                 say_dim '  . "$MP_INST_DIR/sh/common.sh"'
-                say_dim '  mp_sync_etc_files always && mp_activate_configs enable_restart "$MP_CORE_DIR/config.yaml.pending" "$MP_AGH_DIR/dns.conf.pending"'
+                say_dim "  mp_sync_etc_files always && mp_activate_configs enable_restart '$core_pending' '$dns_pending'"
             else
                 mp_commit_pending_configs "$core_pending" "$dns_pending" \
                     || { say_err "首次安装配置写入失败"; exit 1; }
@@ -1104,7 +1170,9 @@ inst_print_result() {
             ;;
         *)
             say_ok '安装成功：Core 和 AGH 已启动'
-            say_dim 'Core API、TUN 接口和 fake-ip 路由检查通过。'
+            if mp_core_empty; then
+                say_warn '当前为空配置，尚未提供代理功能，请自行配置。'
+            else say_dim '已按配置检查服务及启用的 API/TUN/fake-IP 功能；未测试代理节点连通性。'; fi
             ;;
     esac
     printf '%s  %s\n' "${C_B}安装目录${C_R}" "$DIR_INST"
@@ -1118,7 +1186,7 @@ inst_print_result() {
     esac
     printf '\n%s\n' "${C_B}日常维护命令（在安装设备上执行）${C_R}"
     say_dim "  脚本:   sh $DIR_SH/update-scripts.sh"
-    say_dim "  配置:   sh $DIR_SH/update-all-configs-restart-services.sh"
+    say_dim "  资源:   sh $DIR_SH/update-all-configs-restart-services.sh（不修改 Core 配置）"
     say_dim "  二进制: sh $DIR_SH/update-bin.sh"
 }
 
@@ -1197,7 +1265,7 @@ inst_main() {
         [ "${INST_SSH_READY:-0}" = 1 ] || { inst_require_tools launcher && inst_probe_target; } || return 1
     else
         inst_is_root || { say_err '本机安装需要 root；请使用 sudo sh inst.sh'; return 1; }
-        inst_detect_os && mp_require_tun || return 1
+        inst_detect_os || return 1
         INST_TARGET_OS=$os_type; INST_TARGET_ARCH=$(uname -m)
     fi
     mp_log_event "工具：$(curl --version | head -n 1)；$(jq --version)"

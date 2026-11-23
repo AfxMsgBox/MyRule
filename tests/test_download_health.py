@@ -160,7 +160,7 @@ class ReadinessTests(unittest.TestCase):
             self.assertEqual(result.returncode == 0, valid, result.stdout + result.stderr)
 
     def network(self, route, up=True):
-        self.file('core/config.yaml', 'external-controller: :3721\ntun:\n  device: utun\ndns:\n  fake-ip-range: 198.18.0.1/16\n')
+        self.file('core/config.yaml', 'external-controller: :3721\ntun:\n  enable: true\n  device: utun\ndns:\n  enable: true\n  enhanced-mode: fake-ip\n  fake-ip-range: 198.18.0.1/16\n')
         self.file('route', route)
         self.command('ip', '''
 case "$*" in
@@ -194,20 +194,21 @@ n=$((n+1)); echo "$n" > "$TEST_ROOT/clock"; echo "$n"
             self.assertEqual(result.returncode == 0, valid, result.stdout)
             self.assertIn(reason, result.stdout)
 
-    def test_target_check_stops_before_resource_preparation(self):
+    def test_empty_config_does_not_require_tun_at_target_probe(self):
         script = test_installer.PREFIX + r'''
 inst_detect_launcher() { :; }
 inst_require_tools() { :; }
 inst_is_root() { return 0; }
 inst_detect_os() { os_type=systemd; }
-mp_require_tun() { echo missing-tun >&2; return 1; }
-inst_prepare() { echo BUG-prepared; }
-inst_main --subscribe-url https://example.invalid/sub --no-auth
+mp_require_tun() { echo BUG-tun-required >&2; return 1; }
+inst_prepare() { echo prepared; }
+inst_install_with_retry() { :; }
+inst_main --no-auth
 '''
         result = self.run_shell(script, source=False)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn('missing-tun', result.stderr)
-        self.assertNotIn('BUG-prepared', result.stdout)
+        self.assert_ok(result)
+        self.assertNotIn('BUG-tun-required', result.stderr)
+        self.assertIn('prepared', result.stdout)
 
 
 class ResourceFailureTests(unittest.TestCase):
@@ -254,8 +255,7 @@ class ResourceFailureTests(unittest.TestCase):
         self.assertEqual(len((self.root / 'binary-downloads').read_text().splitlines()), 3)
 
     def test_provider_and_filter_failures_stop_their_lists(self):
-        self.file('core/config.yaml', (test_scripts.ROOT / 'core/config.yaml').read_text()
-                  .replace('{MP_SUBSCRIBE_URL}', 'https://example.invalid/sub'))
+        self.file('core/config.yaml', test_scripts.CORE_CONFIG)
         self.file('agh/agh.yaml', (test_scripts.ROOT / 'agh/agh.yaml').read_text())
         for call in ('mp_fetch_core_providers "$MP_CORE_DIR/config.yaml"',
                      'mp_fetch_agh_filters "$MP_AGH_DIR/agh.yaml"'):
@@ -265,7 +265,7 @@ class ResourceFailureTests(unittest.TestCase):
             self.assertEqual((self.root / 'requests').read_text().splitlines(), ['request'])
 
     def test_domain_list_failure_preserves_dns_and_stops_downloads(self):
-        self.file('core/config.yaml', 'dns:\n  listen: 127.0.0.1:253\n')
+        self.file('core/config.yaml', 'dns:\n  enable: true\n  listen: 127.0.0.1:253\n')
         self.file('agh/dns.conf', 'old DNS rules\n')
         self.add_common('download_file() { echo request >> "$TEST_ROOT/requests"; return 1; }')
         result = self.run_shell('sh "$MP_INST_DIR/sh/update-agh-config.sh"')

@@ -9,7 +9,7 @@ while [ -L "$_inst_entry" ]; do
 done
 _inst_dir=$(CDPATH= cd "$(dirname "$_inst_entry")" && pwd -P) || exit 1
 INST_ENTRY_ROOT=
-[ ! -f "$_inst_dir/../core/config.yaml" ] || INST_ENTRY_ROOT=$(CDPATH= cd "$_inst_dir/.." && pwd -P)
+[ ! -f "$_inst_dir/../core/start.sh" ] || INST_ENTRY_ROOT=$(CDPATH= cd "$_inst_dir/.." && pwd -P)
 INST_ENTRY_DIR=$_inst_dir
 export INST_ENTRY_ROOT INST_ENTRY_DIR
 unset _INST_BOOT_LOG
@@ -22,19 +22,12 @@ MyRule 安装器
 用法：sh inst.sh [选项]
 无参数进入向导；有参数默认静默安装，可用 --interactive 或 --fill-from 进入向导。
 目标：OpenWrt / systemd Linux；macOS 仅作为 SSH 发起端。
-静默模式必须提供订阅，并在 --agh-password 与 --no-auth 中二选一。
+静默模式在 --agh-password 与 --no-auth 中二选一；Core 配置来源可省略。
 
-  --subscribe-url URL        节点订阅 HTTP/HTTPS 地址；静默安装必填
+  --core-config SOURCE       完整 Core 配置的本地路径或 HTTP/HTTPS URL；省略保留旧配置，新装生成空文件
   --agh-user USER            AGH 用户名；默认 admin
   --agh-password HASH        AGH 密码的 bcrypt 哈希（用单引号包裹）；与 --no-auth 互斥
   --no-auth                  AGH 免登录；与 --agh-password 互斥
-  --wireguard               启用可选 WireGuard 节点；默认关闭，以下五项启用时必填
-  --no-wireguard            关闭 WireGuard；与 --wireguard 互斥
-  --wg-private-key KEY      客户端私钥，Base64 格式；无默认值
-  --wg-public-key KEY       服务端公钥，Base64 格式；无默认值
-  --wg-ip IP                客户端隧道 IPv4，不带掩码；无默认值
-  --wg-server HOST          服务端 IPv4 或域名；无默认值
-  --wg-port PORT            服务端 UDP 端口，1–65535；无默认值
   --branch NAME              安装及后续更新的 GitHub 分支；省略或空值为 main
   --local                    使用 inst.sh 所在的本地仓库；与 --source-dir 互斥
   --source-dir DIR           指定本地仓库根目录；外部程序和规则仍需联网下载
@@ -45,7 +38,7 @@ MyRule 安装器
   --install-dir DIR          目标安装目录；默认 /etc/proxy，不支持空格和中文
   --dns 'DNS1 DNS2'          直连上游 DNS；默认 '223.5.5.5 119.29.29.29'，空值使用目标机系统 DNS
   --scripts-days N           自动更新脚本间隔（1–365 天）；交互默认 7 天，静默省略或 n 保留旧任务
-  --configs-days N           自动更新配置的间隔（1–365 天）；省略或 n 保留已有任务
+  --configs-days N           更新订阅、规则及 AGH 配置的间隔（1–365 天）；省略或 n 保留已有任务
   --no-start                 部署文件、暂存配置，不启用或重启服务
   --interactive              带参数时仍进入交互向导
   --fill-from [PATH]         交互读取并保存输入默认值；省略路径用脚本同目录 myrule.inst.cfg
@@ -58,7 +51,7 @@ MyRule 安装器
 SSH 支持 root 或可使用 sudo 的用户；本机安装需 root。
 示例：
   sh inst.sh --fill-from
-  sh inst.sh --subscribe-url 'https://example.com/sub' --no-auth
+  sh inst.sh --core-config ./config.yaml --no-auth
   sh inst.sh --target root@192.168.1.2 --interactive
 USAGE
 }
@@ -88,12 +81,12 @@ for _inst_arg do
         --source-dir) _inst_var=_inst_source ;; --target) _inst_var=_inst_target ;;
         --install-dir) _inst_var=_inst_install_dir ;;
         --log-file) _inst_var=_inst_log_file ;;
-        --subscribe-url|--agh-user|--agh-password|--ssh-port|--ssh-key|--ssh-auth|--scripts-days|--configs-days|--dns|--wg-private-key|--wg-public-key|--wg-ip|--wg-server|--wg-port)
+        --core-config|--agh-user|--agh-password|--ssh-port|--ssh-key|--ssh-auth|--scripts-days|--configs-days|--dns)
             _inst_var=_inst_unused ;;
         --fill-from)
             _inst_interactive=1; INST_FILL_FILE=$_inst_dir/myrule.inst.cfg
             case "$_inst_arg" in *=*) _inst_var=INST_FILL_FILE ;; *) _inst_next=fill_optional; continue ;; esac ;;
-        --interactive|--no-start|--no-auth|--wireguard|--no-wireguard)
+        --interactive|--no-start|--no-auth)
             [ "$_inst_arg" = "$_inst_key" ] || { printf '参数不接受值：%s\n' "$_inst_key" >&2; exit 1; }
             [ "$_inst_key" != --interactive ] || _inst_interactive=1
             continue ;;

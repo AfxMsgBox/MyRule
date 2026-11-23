@@ -28,7 +28,7 @@ route_ip_bin=$(
 ) || { printf '%s\n' '缺少 iproute2/ip-full' >&2; exit 1; }
 
 route_config() {
-    tun_device=$(mp_core_value tun device "$MP_CORE_DIR/config.yaml") || return 1
+    tun_device=$(mp_core_tun_device) || return 1
     case "$tun_device" in ''|*[!a-zA-Z0-9_-]*) return 1 ;; esac
     fake_ip_cidr=$(mp_core_fake_ip_cidr) || return 1
 }
@@ -53,6 +53,7 @@ route_trim_connected() {
 }
 
 route_apply() (
+    mp_core_route_enabled || exit 0
     # 与手工 --once 串行；锁文件不删除，避免锁住不同 inode。
     exec 8>"$MP_CORE_DIR/.fake-ip-route.lock" || exit 1
     flock -x 8 || exit 1
@@ -99,6 +100,7 @@ route_watch_cleanup() {
 }
 
 route_watch() {
+    mp_core_route_enabled || return 0
     exec 9>"$MP_CORE_DIR/.fake-ip-watch.lock" || return 1
     flock -n 9 || { logger -t MyProxy 'fake-IP 事件监听已运行'; return 1; }
     watch_dir=$(mktemp -d) || return 1
@@ -165,6 +167,10 @@ core_start() {
     [ -x "$MP_CORE_DIR/mihomo" ] || { logger -t MyProxy 'Core 不存在或不可执行'; return 1; }
     exec 5>"$MP_CORE_DIR/.start.lock" || return 1
     flock -n 5 || { logger -t MyProxy 'Core 启动器已运行'; return 1; }
+    # 没有启用 fake-IP TUN 时直接交给服务管理器管理 Mihomo。
+    if ! mp_core_route_enabled; then
+        exec "$MP_CORE_DIR/mihomo" -d "$MP_CORE_DIR"
+    fi
     trap core_cleanup EXIT
     trap 'exit 0' HUP INT TERM
     (exec 5>&-; exec "$MP_CORE_DIR/mihomo" -d "$MP_CORE_DIR") &

@@ -13,6 +13,7 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+CORE_CONFIG = (ROOT / "tests/fixtures/core.yaml").read_text()
 
 
 def function_source(path, name):
@@ -89,7 +90,8 @@ echo unexpected-command >&2; exit 99
             stream.write("\n" + script + "\n")
 
     def configure_downloads(self):
-        self.file("fixtures/core.yaml", (ROOT / "core/config.yaml").read_text())
+        self.file("fixtures/core.yaml", CORE_CONFIG)
+        self.file("core/config.yaml", CORE_CONFIG)
         self.file("fixtures/agh.yaml", (ROOT / "agh/agh.yaml").read_text())
         self.file("fixtures/payload", "payload:\n  - '+.example.org'\n  - '+.bj'\n")
         self.add_common(r'''
@@ -123,12 +125,15 @@ mp_sync_etc_files() { printf 'sync %s\n' "$1" >> "$TEST_ROOT/events"; }
 
     def test_script_sync_sets_modes_before_replacing_files(self):
         source = self.root / "source"
-        files = {"route.sh": 0o755, "env.conf": 0o644,
+        files = {"route.sh": 0o755, "env.conf": 0o644, "VERSION": 0o644,
                  "etc/init.d/proxy_core": 0o755,
                  "etc/hotplug.d/net/route": 0o755,
                  "etc/systemd/system/proxy_core.service": 0o644}
         for name in files:
             self.file("source/sh/" + name, "payload\n").chmod(0o600)
+        version = (ROOT / "sh/VERSION").read_text()
+        (source / "sh/VERSION").write_text(version)
+        installed_version = self.file("sh/VERSION", "v0.1.0-rc.3\n")
         private = self.file("sh/env.local.conf", "# private\n")
         private.chmod(0o600)
         diagnostic_conf = self.file("sh/test-proxy.conf", "private diagnostic config\n")
@@ -138,6 +143,7 @@ mp_sync_etc_files() { printf 'sync %s\n' "$1" >> "$TEST_ROOT/events"; }
         self.assert_ok(result)
         for name, mode in files.items():
             self.assertEqual((self.root / "sh" / name).stat().st_mode & 0o777, mode, name)
+        self.assertEqual(installed_version.read_text(), version)
         self.assertEqual(private.stat().st_mode & 0o777, 0o600)
         self.assertEqual(diagnostic_conf.read_text(), "private diagnostic config\n")
 
@@ -308,9 +314,10 @@ printf '%s' "$TEST_VALUE"
                                 extra={"MP_REPO_BRANCH": "feature/dev"})
         self.assert_ok(result)
         rendered = (self.root / "core/config.yaml").read_text()
-        self.assertIn('url: "https://raw.githubusercontent.com/AfxMsgBox/MyRule/refs/heads/feature/dev/domain/gpt.txt"', rendered)
+        self.assertEqual(rendered, CORE_CONFIG)
         self.assertEqual((self.root / "downloads").read_text().count(
-            "https://raw.githubusercontent.com/AfxMsgBox/MyRule/refs/heads/feature/dev/domain/gpt.txt"), 2)
+            "https://raw.githubusercontent.com/AfxMsgBox/MyRule/refs/heads/feature/dev/domain/gpt.txt"), 1)
+        self.assertNotIn('/core/config.yaml', (self.root / "downloads").read_text())
 
     def prepare_pending(self):
         self.file("core/config.yaml", "old-core")
@@ -411,7 +418,7 @@ printf '%s' "$TEST_VALUE"
 
     def test_dns_final_move_failure_propagates(self):
         self.configure_downloads()
-        self.file("core/config.yaml", (ROOT / "core/config.yaml").read_text())
+        self.file("core/config.yaml", CORE_CONFIG)
         self.file("agh/dns.conf", "old-dns")
         self.command("mv", 'case "$2" in */dns.conf) exit 1;; esac\nexec /bin/mv "$@"\n')
         result = self.run_shell('sh "$MP_INST_DIR/sh/update-agh-config.sh"')
@@ -419,20 +426,27 @@ printf '%s' "$TEST_VALUE"
         self.assertEqual((self.root / "agh/dns.conf").read_text(), "old-dns")
         self.assertNotIn("生成完成", result.stdout)
 
-    def run_install_flow(self, *, reinstall, answer="Y", fail_download=False):
+    def run_install_flow(self, *, reinstall, answer="Y", fail_download=False, pending_symlink=False):
         self.configure_downloads()
         self.configure_services()
         if reinstall:
             self.file("core/config.yaml", "old-core")
             self.file("agh/agh.yaml", "old-agh")
             self.file("agh/dns.conf", "old-dns")
+        if pending_symlink:
+            (self.root/'core/config.yaml.pending').symlink_to(self.root/'core/config.yaml')
         # Binary deployment is covered separately; verify the installer supplies pending config.
         self.file("sh/update-bin.sh", 'test "$1" = "$MP_INST_DIR/core/config.yaml.pending"\n')
         if fail_download:
             self.add_common('download_file() { return 1; }')
         source = (ROOT / "sh/install-lib.sh").read_text()
         flow = source[source.index('# === 三份配置'):source.index('    inst_apply_schedule')]
+        self.file("bundle/resources/core-config.yaml", CORE_CONFIG)
         setup = r'''
+INST_CORE_ACTION=import; _ia_bundle="$TEST_ROOT/bundle"
+inst_apply_core_files() { :; }
+mp_require_tun() { :; }
+mp_check_core_binary_config() { :; }
 DIR_INST="$MP_INST_DIR"; DIR_SH="$MP_INST_DIR/sh"
 os_type=systemd; etc_rels='systemd/system/agh.service'
 say_section() { :; }; say_step() { :; }; say_dim() { :; }
@@ -442,6 +456,12 @@ reinstall="$TEST_REINSTALL"
 '''
         return self.run_shell(setup + flow, extra={"TEST_AUTOSTART": answer,
                                                   "TEST_REINSTALL": str(int(reinstall))})
+
+    def test_import_pending_symlink_does_not_overwrite_formal_config(self):
+        self.assert_ok(self.run_install_flow(reinstall=True, answer="n", pending_symlink=True))
+        self.assertEqual((self.root/'core/config.yaml').read_text(), 'old-core')
+        self.assertFalse((self.root/'core/config.yaml.pending').is_symlink())
+        self.assertEqual((self.root/'core/config.yaml.pending').read_text(), CORE_CONFIG)
 
     def test_reinstall_decline_keeps_three_formal_configs(self):
         self.assert_ok(self.run_install_flow(reinstall=True, answer="n"))
@@ -481,11 +501,11 @@ reinstall="$TEST_REINSTALL"
     def test_download_only_update_has_documented_commit_boundary(self):
         self.configure_downloads()
         self.configure_services()
-        self.file("core/config.yaml", "old-core")
+        self.file("core/config.yaml", CORE_CONFIG)
         self.file("agh/agh.yaml", "old-agh")
         self.file("agh/dns.conf", "old-dns")
         self.assert_ok(self.run_shell('sh "$MP_INST_DIR/sh/update-all-configs.sh"'))
-        self.assertIn("mixed-port: 7890", (self.root / "core/config.yaml").read_text())
+        self.assertEqual((self.root / "core/config.yaml").read_text(), CORE_CONFIG)
         self.assertNotEqual((self.root / "agh/dns.conf").read_text(), "old-dns")
         self.assertEqual((self.root / "agh/agh.yaml").read_text(), "old-agh")
         self.assertTrue((self.root / "agh/agh.yaml.pending").is_file())

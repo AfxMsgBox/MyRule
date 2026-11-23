@@ -97,13 +97,13 @@ _INST_BOOT_BRANCH=main; _INST_BOOT_REPO="$TEST_ALIAS/local repo"
 inst_snapshot "$TEST_ROOT/snapshot"
 ''', {'TEST_ALIAS': str(alias)})
         self.assert_ok(result)
-        self.assertEqual((self.root / 'snapshot/core/config.yaml').read_bytes(),
-                         (source / 'core/config.yaml').read_bytes())
+        self.assertEqual((self.root / 'snapshot/core/start.sh').read_bytes(),
+                         (source / 'core/start.sh').read_bytes())
 
     def test_snapshot_still_rejects_file_escaping_physical_source(self):
         source = self.local_source()
         outside = self.file('outside.yaml', 'outside configuration')
-        config = source / 'core/config.yaml'
+        config = source / 'core/start.sh'
         config.unlink()
         config.symlink_to(outside)
         result = self.installer(self.args(['--source-dir', str(source), '--target', 'user@host']) + r'''
@@ -111,18 +111,18 @@ _inst_tmp="$TEST_ROOT"
 inst_snapshot "$TEST_ROOT/snapshot"
 ''')
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn('仓库文件超出源目录：core/config.yaml', result.stdout)
-        self.assertFalse((self.root / 'snapshot/core/config.yaml').exists())
+        self.assertIn('仓库文件超出源目录：core/start.sh', result.stdout)
+        self.assertFalse((self.root / 'snapshot/core/start.sh').exists())
 
     def test_bundle_parameters_round_trip_without_evaluating_text(self):
         value = "https://example.invalid/$(touch PWNED)?a='b'\\test"
         result = self.installer(self.args() + r'''
-MP_SUBSCRIBE_URL=$TEST_VALUE
+MP_AGH_USER_NAME=$TEST_VALUE
 INST_TARGET_OS=systemd; INST_TARGET_ARCH=x86_64
 inst_save_config "$TEST_ROOT/config.json" || exit 1
-MP_SUBSCRIBE_URL=
+MP_AGH_USER_NAME=
 inst_load_config "$TEST_ROOT/config.json" || exit 1
-printf '%s' "$MP_SUBSCRIBE_URL"
+printf '%s' "$MP_AGH_USER_NAME"
 ''', {'TEST_VALUE': value})
         self.assert_ok(result)
         self.assertEqual(result.stdout, value)

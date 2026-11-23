@@ -24,8 +24,7 @@ APPLY = LIBRARY.read_text()
 PREFIX = APPLY.split('if [ "${1:-}" = --installer-run ]; then', 1)[0]
 PREFIX += "\n" + (LIB / "install-remote.sh").read_text()
 PREFIX += "\n" + (LIB / "portable.sh").read_text() + "\n"
-REQUIRED = ["--subscribe-url", "https://example.invalid/sub?token=private",
-            "--agh-user", "admin", "--agh-password", "$2b$10$private"]
+REQUIRED = ["--agh-user", "admin", "--agh-password", "$2b$10$private"]
 
 
 class InstallerTests(unittest.TestCase):
@@ -69,7 +68,7 @@ prompt_to() {
         _ici_mode) _ici_mode=4 ;;
         _MP_SOURCE_DIR) _MP_SOURCE_DIR="$TEST_SOURCE" ;;
         _ica_answer) _ica_answer=n ;;
-        MP_SUBSCRIBE_URL) MP_SUBSCRIBE_URL=https://example.invalid/sub ;;
+        INST_CORE_SOURCE) INST_CORE_SOURCE=https://example.invalid/sub ;;
         *) : ;;
     esac
 }
@@ -172,7 +171,7 @@ test "$_MP_SOURCE_DIR" = "$TEST_SOURCE" && test "$MP_REPO_BRANCH" = feature/loca
                  (["--agh-password", "$2b$10$test", "--no-auth"], False)]
         for options, valid in cases:
             with self.subTest(options=options):
-                args = ["--subscribe-url", "https://example.invalid/sub", *options]
+                args = ["--branch", "main", *options]
                 result = self.installer("inst_parse_args " + shlex.join(args)
                                         + ' && inst_validate_basic && test "$MP_AGH_USER_NAME" = admin')
                 self.assertEqual(result.returncode == 0, valid, result.stdout + result.stderr)
@@ -197,7 +196,13 @@ printf 'auth=%s user=%s hash=%s' "$INST_NO_AUTH" "$MP_AGH_USER_NAME" "$MP_AGH_PA
             self.assertIn(expected, result.stdout)
             self.assertNotIn("$2b$10$old", result.stdout)
 
-    def exercise_install(self, remote=False, online=False, no_auth=False, linked_tmp=False):
+    def test_remote_empty_config_install_without_template_or_tun(self):
+        self.exercise_install(remote=True, online=True, no_auth=True, config_case='empty')
+
+    def test_remote_reinstall_preserves_existing_config_and_migrates_env(self):
+        self.exercise_install(remote=True, no_auth=True, config_case='keep')
+
+    def exercise_install(self, remote=False, online=False, no_auth=False, linked_tmp=False, config_case="import"):
         if linked_tmp:
             physical = self.root / 'physical-tmp'
             physical.mkdir()
@@ -210,6 +215,7 @@ if [ "$*" = '-d /tmp/myrule.XXXXXXXX' ] && [ -z "${REMOTE_CPU:-}" ]; then
 else exec ''' + shlex.quote(real_mktemp) + ''' "$@"; fi
 ''')
         source = self.local_source()
+        (source / 'core/config.yaml').unlink()  # New installer cannot depend on the legacy template.
         # Browser/ZIP copies may have no execute bits, including the route helper.
         for path in (source / "sh").glob("*.sh"):
             path.chmod(0o644)
@@ -228,7 +234,7 @@ mp_wait_core_ready() { printf 'ready\n' >> "$TEST_ROOT/events"; }
 ''')
         self.file("fixtures/release.json", '{"tag_name":"test-version"}')
         self.file("fixtures/payload", "payload:\n  - '+.example.org'\n")
-        (self.root / "fixtures/mihomo.gz").write_bytes(gzip.compress(b'#!/bin/sh\n[ "$1" = -v ] || exit 9\necho test-mihomo\n'))
+        (self.root / "fixtures/mihomo.gz").write_bytes(gzip.compress(b'#!/bin/sh\ncase "$1" in -v|-t) ;; *) exit 9 ;; esac\necho test-mihomo\n'))
         for archive, name in [("ui.tgz", "index.html"), ("agh.tgz", "AdGuardHome/AdGuardHome")]:
             with tarfile.open(self.root / "fixtures" / archive, "w:gz") as tar:
                 info = tarfile.TarInfo(name)
@@ -260,9 +266,19 @@ esac
 cp "$TEST_ROOT/fixtures/$fixture" "$out"
 ''')
         target = self.root / "installed"
-        auth_args = REQUIRED[:2] + ["--no-auth"] if no_auth else REQUIRED
-        args = ["sh", str(script), *auth_args, "--source-dir", str(source), "--install-dir", str(target),
+        config_source = self.file('input/config.yaml', test_scripts.CORE_CONFIG.replace('/heads/main/', '/heads/feature/local/'))
+        original = config_source.read_bytes()
+        if config_case == 'keep':
+            old = self.file('installed/core/config.yaml', config_source.read_text() + '# preserved byte for byte\n')
+            original = old.read_bytes()
+            old_inode = old.stat().st_ino
+            self.file('installed/sh/env.local.conf', "MP_WG_ENABLED=1\nMP_WG_PRIVATE_KEY='legacy-test'\nMP_SUBSCRIBE_URL='old'\nCUSTOM='keep'\n")
+        auth_args = ["--no-auth"] if no_auth else REQUIRED
+        args = ["sh", str(script), *auth_args, "--core-config", str(config_source), "--source-dir", str(source), "--install-dir", str(target),
                 "--branch", "feature/local"]
+        if config_case != 'import':
+            i = args.index('--core-config')
+            del args[i:i+2]
         if online:
             with tarfile.open(self.root / "fixtures/repo.tgz", "w:gz") as tar:
                 tar.add(source, arcname="MyRule-test")
@@ -300,8 +316,9 @@ sys.exit(subprocess.run(["sh", "-c", command], env=os.environ | {"REMOTE_CPU": "
             self.assertIn('安装器仓库归档', log)
         self.assertTrue((target / "core/mihomo").exists())
         self.assertEqual((target / "core/start.sh").stat().st_mode & 0o777, 0o755)
-        self.assertTrue((target / "core/ui/index.html").exists())
+        self.assertEqual((target / "core/ui/index.html").exists(), config_case != "empty")
         self.assertTrue((target / "agh/AdGuardHome").exists())
+        self.assertEqual((target / "sh/VERSION").read_bytes(), (source / "sh/VERSION").read_bytes())
         for path in (target / "sh").glob("*.sh"):
             self.assertEqual(path.stat().st_mode & 0o777, 0o755, str(path))
         users = next(line[7:] for line in (target / "agh/agh.yaml").read_text().splitlines()
@@ -311,17 +328,30 @@ sys.exit(subprocess.run(["sh", "-c", command], env=os.environ | {"REMOTE_CPU": "
             conf = (target / "sh/env.local.conf").read_text()
             self.assertIn("MP_AGH_PASSWORD=''", conf)
             self.assertIn("MP_AGH_USER_NAME='admin'", conf)
-        self.assertIn("feature/local/domain/gpt.txt", (target / "core/config.yaml").read_text())
-        self.assertEqual((target / "core/ruleset/gpt.yaml").read_bytes(), (source / "domain/gpt.txt").read_bytes())
+        if config_case == 'empty':
+            self.assertEqual((target/'core/config.yaml').read_bytes(), b'{}\n')
+            self.assertNotIn(':253', (target/'agh/dns.conf').read_text())
+            self.assertIn('当前为空配置', result.stdout)
+        else:
+            self.assertEqual((target/'core/config.yaml').read_bytes(), original)
+            self.assertIn("feature/local/domain/gpt.txt", (target / "core/config.yaml").read_text())
+            self.assertEqual((target / "core/ruleset/gpt.yaml").read_bytes(), (source / "domain/gpt.txt").read_bytes())
+        if config_case == 'keep':
+            self.assertEqual((target/'core/config.yaml').stat().st_ino, old_inode)
+            saved = (target/'sh/env.local.conf').read_text()
+            self.assertNotIn('MP_WG_', saved)
+            self.assertNotIn('MP_SUBSCRIBE_URL', saved)
+            self.assertIn("CUSTOM='keep'", saved)
         self.assertNotIn("_MP_SOURCE_DIR", (target / "sh/env.local.conf").read_text())
         self.assertIn("MP_REPO_BRANCH='feature/local'", (target / "sh/env.local.conf").read_text())
         downloads = (self.root / "downloads").read_text().splitlines()
-        self.assertTrue(any("/gfw.txt" in line for line in downloads))
-        self.assertTrue(any("example.invalid/sub" in line for line in downloads))
+        self.assertEqual(any("/gfw.txt" in line for line in downloads), config_case != "empty")
+        self.assertEqual(any("example.invalid/sub" in line for line in downloads), config_case != "empty")
         self.assertTrue(all(line.startswith(" ") for line in downloads))
         self.assertEqual(sum("codeload.github.com" in line for line in downloads), int(online))
         self.assertEqual((self.root / "events").read_text().splitlines(),
-                         ["sync always", "enable_start proxy_core", "ready", "enable_start agh"])
+                         (["sync always", "stop agh", "enable_restart proxy_core", "ready", "enable_start agh"] if config_case == 'keep'
+                          else ["sync always", "enable_start proxy_core", "ready", "enable_start agh"]))
         if remote:
             self.assertTrue(any("mihomo-linux-arm64-" in line for line in downloads))
             self.assertTrue(any("AdGuardHome_linux_arm64" in line for line in downloads))
@@ -377,18 +407,18 @@ exec 3<&0
 inst_colors
 INSTALL_MODE=interactive
 inst_parse_args --interactive
-MP_SUBSCRIBE_URL=$TEST_SUB; MP_AGH_USER_NAME=$TEST_USER
+INST_CORE_SOURCE=$TEST_SUB; MP_AGH_USER_NAME=$TEST_USER
 MP_AGH_PASSWORD=$TEST_HASH; MP_LOCAL_DNS=$TEST_DNS
 inst_choose_branch() { return 0; }
 # Exercise the real wizard; only unrelated choices accept their defaults automatically.
 PROMPT_REAL
 prompt_to() {
-    case "$1" in _ica_answer) _ica_answer=y ;; MP_SUBSCRIBE_URL|MP_AGH_USER_NAME|MP_AGH_PASSWORD|MP_LOCAL_DNS) prompt_visible "$@" ;;
+    case "$1" in _ica_answer) _ica_answer=y ;; INST_CORE_SOURCE|MP_AGH_USER_NAME|MP_AGH_PASSWORD|MP_LOCAL_DNS) prompt_visible "$@" ;;
         *) eval "$1=\$2" ;;
     esac
 }
 inst_collect_inputs || exit 1
-printf '%s\n' "$MP_SUBSCRIBE_URL" "$MP_AGH_USER_NAME" "$MP_AGH_PASSWORD" "$MP_LOCAL_DNS" > "$TEST_ROOT/inputs"
+printf '%s\n' "$INST_CORE_SOURCE" "$MP_AGH_USER_NAME" "$MP_AGH_PASSWORD" "$MP_LOCAL_DNS" > "$TEST_ROOT/inputs"
 '''.replace('PROMPT_REAL', test_scripts.function_source(LIBRARY, 'prompt_to').replace('prompt_to()', 'prompt_visible()', 1))
         for retain_defaults in (False, True):
             with self.subTest(retain_defaults=retain_defaults):
@@ -466,12 +496,12 @@ printf '%s\n' "$MP_SUBSCRIBE_URL" "$MP_AGH_USER_NAME" "$MP_AGH_PASSWORD" "$MP_LO
                 self.assertNotIn("private", result.stdout + result.stderr)
 
     def test_required_values_cannot_be_filled_by_environment(self):
-        for missing in (0, 4):
+        for missing in (2,):
             args = REQUIRED[:missing] + REQUIRED[missing + 2:]
             result = self.installer("inst_parse_args " + shlex.join(args) + "\ninst_validate")
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(REQUIRED[missing], result.stdout)
-        for option in ("--subscribe-url", "--agh-user", "--agh-password"):
+        for option in ("--agh-user", "--agh-password"):
             args = REQUIRED.copy()
             args[args.index(option) + 1] = ""
             result = self.installer("inst_parse_args " + shlex.join(args) + "\ninst_validate")
