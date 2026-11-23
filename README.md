@@ -12,14 +12,13 @@
 
 ### 在线安装：只需一个 inst.sh
 
-在目标机或 SSH 发起端下载并运行（本机安装以 root 运行）：
+在目标机或 SSH 发起端的终端运行（本机安装以 root 运行）：
 
 ```sh
-curl -fL https://raw.githubusercontent.com/AfxMsgBox/MyRule/refs/heads/main/sh/inst.sh -o inst.sh
-sh inst.sh
+curl -fL https://raw.githubusercontent.com/AfxMsgBox/MyRule/refs/heads/main/sh/inst.sh | sh
 ```
 
-也可用浏览器下载。上例使用 main 分支；安装向导中可选择其它包含新版安装器的分支。
+也可用浏览器下载后执行 `sh inst.sh`。上例使用 main 分支；安装向导中可选择其它包含新版安装器的分支。
 
 ### 本地仓库安装：使用 ZIP 或开发目录
 

@@ -386,7 +386,7 @@ OpenWrt 优先选择可用的 apk，否则 opkg；Debian/Ubuntu（含通过 `ID_
 
 `env.local.conf` 不在仓库 tarball 中，不会被覆盖。
 
-`sh/VERSION` 随 `sh/` 同步，记录该批脚本的项目版本。维护者按 `AGENTS.md` 在每轮代码修改时递增它。
+`sh/VERSION` 随 `sh/` 同步，记录该批脚本的项目版本，格式为 `build-NNNN_YYYYMMDDTHHMMSS`。维护者按 `AGENTS.md` 在每轮代码修改时递增构建号并更新时间。
 
 ### 6.2 资源与 AGH 配置更新
 
