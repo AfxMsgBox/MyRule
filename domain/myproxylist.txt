@@ -4,7 +4,6 @@ payload:
   - '+.cncbinternational.com'
   - '+.cpubenchmark.net'
   - '+.clerksystems.com'
-  - '+.doata.net'
   - '+.docker.io'
   - '+.docker.com'
   - '+.docusign.com'
